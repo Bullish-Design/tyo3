@@ -11,7 +11,11 @@ __pycache__/
 devenv.lock
 uv.lock
 .devenv.flake.nix
-
+.agents/**
+.pi/**
+.loci/**
+secretspec.toml
+devenv.local.yaml
 
 
 
@@ -217,3 +221,14 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml

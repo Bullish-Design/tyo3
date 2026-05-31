@@ -1,0 +1,8 @@
+-- allium: 3
+-- index.allium — Entrypoint for TyO3 specification suite
+
+use "./tyo3-core.allium" as core
+use "./tyo3-analysis.allium" as analysis
+use "./tyo3-symbols.allium" as symbols
+use "./tyo3-navigation.allium" as navigation
+use "./tyo3-advanced.allium" as advanced

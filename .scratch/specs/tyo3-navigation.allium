@@ -1,0 +1,323 @@
+-- allium: 3
+-- tyo3-navigation.allium
+
+-- Scope: Code navigation, reference discovery, and hover information
+-- Includes:
+--   - goto_definition, goto_declaration, goto_type_definition
+--   - find_references with kind discrimination
+--   - Structured hover content (type, signature, docstring, typed-dict-key)
+-- Excludes:
+--   - Symbol queries (see tyo3-symbols.allium)
+--   - Semantic tokens (see tyo3-advanced.allium)
+--   - Call hierarchy (deferred: not confirmed in ty_ide 0.0.40)
+
+use "./tyo3-core.allium" as core
+use "./tyo3-analysis.allium" as analysis
+use "./tyo3-symbols.allium" as symbols
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum ReferenceKind { read | write | other }
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity DefinitionTarget {
+    project: core/TyProject
+    path: core/Path
+    range: analysis/Range
+    selection_range: analysis/Range?
+    symbol: symbols/Symbol?
+    module_name: String?
+}
+
+entity Reference {
+    project: core/TyProject
+    path: core/Path
+    range: analysis/Range
+    kind: ReferenceKind
+}
+
+------------------------------------------------------------
+-- Black box helpers
+------------------------------------------------------------
+
+-- resolve_definition(project, file, line, column) -> List<DefinitionTarget>:
+--   resolves to the definition location(s) of the symbol at the given
+--   position, using ty_ide::goto_definition; returns empty when no
+--   definition exists
+-- resolve_declaration(project, file, line, column) -> List<DefinitionTarget>:
+--   using ty_ide::goto_declaration
+-- resolve_type_definition(project, file, line, column) -> List<DefinitionTarget>:
+--   using ty_ide::goto_type_definition
+-- resolve_references(project, file, line, column, include_declaration) -> List<Reference>:
+--   using ty_ide::find_references; declaration inclusion controlled by
+--   parameter, not by inventing a "declaration" reference kind
+-- resolve_hover(project, file, line, column):
+--   using ty_ide::hover; returns structured content preserving ty's
+--   content kinds (type, signature, docstring, typed_dict_key);
+--   returns null when no hover content exists
+
+------------------------------------------------------------
+-- Goto Definition
+------------------------------------------------------------
+
+rule GotoDefinition {
+    when: UserGotoDefinition(project, file, line, column)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+
+    let targets = resolve_definition(project, file, line, column)
+
+    ensures:
+        for t in targets:
+            DefinitionTarget.created(
+                project: project,
+                path: t.path,
+                range: t.range,
+                selection_range: t.selection_range,
+                symbol: t.symbol,
+                module_name: t.module_name
+            )
+    ensures: DefinitionTargetsReturned(count: targets.count)
+}
+
+rule GotoDefinitionNoTarget {
+    when: UserGotoDefinition(project, file, line, column)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+    requires: resolve_definition(project, file, line, column).count = 0
+
+    ensures: DefinitionTargetsReturned(count: 0)
+}
+
+rule GotoDefinitionInvalidPosition {
+    when: UserGotoDefinition(project, file, line, column)
+
+    requires: line < 1 or column < 1
+
+    ensures: PositionError(reason: invalid_position, line: line, column: column)
+}
+
+------------------------------------------------------------
+-- Goto Declaration
+------------------------------------------------------------
+
+rule GotoDeclaration {
+    when: UserGotoDeclaration(project, file, line, column)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+
+    let targets = resolve_declaration(project, file, line, column)
+
+    ensures:
+        for t in targets:
+            DefinitionTarget.created(
+                project: project,
+                path: t.path,
+                range: t.range,
+                selection_range: t.selection_range,
+                symbol: t.symbol,
+                module_name: t.module_name
+            )
+    ensures: DeclarationTargetsReturned(count: targets.count)
+}
+
+rule GotoDeclarationNoTarget {
+    when: UserGotoDeclaration(project, file, line, column)
+
+    requires: resolve_declaration(project, file, line, column).count = 0
+
+    ensures: DeclarationTargetsReturned(count: 0)
+}
+
+rule GotoDeclarationInvalidPosition {
+    when: UserGotoDeclaration(project, file, line, column)
+
+    requires: line < 1 or column < 1
+
+    ensures: PositionError(reason: invalid_position, line: line, column: column)
+}
+
+------------------------------------------------------------
+-- Goto Type Definition
+------------------------------------------------------------
+
+rule GotoTypeDefinition {
+    when: UserGotoTypeDefinition(project, file, line, column)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+
+    let targets = resolve_type_definition(project, file, line, column)
+
+    ensures:
+        for t in targets:
+            DefinitionTarget.created(
+                project: project,
+                path: t.path,
+                range: t.range,
+                selection_range: t.selection_range,
+                symbol: t.symbol,
+                module_name: t.module_name
+            )
+    ensures: TypeDefinitionTargetsReturned(count: targets.count)
+}
+
+rule GotoTypeDefinitionNoTarget {
+    when: UserGotoTypeDefinition(project, file, line, column)
+
+    requires: resolve_type_definition(project, file, line, column).count = 0
+
+    ensures: TypeDefinitionTargetsReturned(count: 0)
+}
+
+rule GotoTypeDefinitionInvalidPosition {
+    when: UserGotoTypeDefinition(project, file, line, column)
+
+    requires: line < 1 or column < 1
+
+    ensures: PositionError(reason: invalid_position, line: line, column: column)
+}
+
+------------------------------------------------------------
+-- Find References
+------------------------------------------------------------
+
+rule FindReferences {
+    when: UserFindReferences(project, file, line, column, include_declaration)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+
+    let refs = resolve_references(project, file, line, column, include_declaration)
+
+    ensures:
+        for r in refs:
+            Reference.created(
+                project: project,
+                path: r.path,
+                range: r.range,
+                kind: r.kind
+            )
+    ensures: ReferencesReturned(
+        total_count: refs.count,
+        include_declaration: include_declaration
+    )
+}
+
+rule FindReferencesNoTarget {
+    when: UserFindReferences(project, file, line, column, include_declaration)
+
+    requires: resolve_references(project, file, line, column, include_declaration).count = 0
+
+    ensures: ReferencesReturned(total_count: 0, include_declaration: include_declaration)
+}
+
+rule FindReferencesInvalidPosition {
+    when: UserFindReferences(project, file, line, column, include_declaration)
+
+    requires: line < 1 or column < 1
+
+    ensures: PositionError(reason: invalid_position, line: line, column: column)
+}
+
+------------------------------------------------------------
+-- Hover
+------------------------------------------------------------
+
+rule GetHover {
+    when: UserRequestsHover(project, file, line, column)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+
+    let result = resolve_hover(project, file, line, column)
+
+    requires: exists result
+
+    ensures: HoverReturned(
+        location: result.location,
+        contents: result.contents
+    )
+}
+
+rule GetHoverNoContent {
+    when: UserRequestsHover(project, file, line, column)
+
+    requires: resolve_hover(project, file, line, column) = null
+
+    ensures: HoverReturned(location: null, contents_count: 0)
+}
+
+rule GetHoverInvalidPosition {
+    when: UserRequestsHover(project, file, line, column)
+
+    requires: line < 1 or column < 1
+
+    ensures: PositionError(reason: invalid_position, line: line, column: column)
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant DefinitionTargetInProject {
+    for t in DefinitionTarget:
+        t.project.status = open
+}
+
+invariant ReferenceInProjectFiles {
+    for r in Reference:
+        r.project.status = open
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface CodeNavigation {
+    facing _: User
+
+    context project: core/TyProject
+
+    provides:
+        UserGotoDefinition(project, file, line, column)
+            when project.is_open and file.project = project
+        UserGotoDeclaration(project, file, line, column)
+            when project.is_open and file.project = project
+        UserGotoTypeDefinition(project, file, line, column)
+            when project.is_open and file.project = project
+        UserFindReferences(project, file, line, column, include_declaration)
+            when project.is_open and file.project = project
+        UserRequestsHover(project, file, line, column)
+            when project.is_open and file.project = project
+
+    @guarantee StableNavigationModel
+        -- All navigation targets return structured Pydantic models.
+        -- DefinitionTarget maps NavigationTarget.full_range to .range
+        -- and NavigationTarget.focus_range to .selection_range.
+
+    @guidance
+        -- Positions are 1-based line and 1-based column (Unicode codepoints).
+        -- Returns empty list (not null) when no navigation target exists.
+        -- Declaration inclusion in references is controlled by parameter,
+        -- not by a distinct "declaration" ReferenceKind.
+        -- Structured hover preserves ty's content kinds.
+}

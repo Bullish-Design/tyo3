@@ -1,0 +1,222 @@
+-- allium: 3
+-- tyo3-analysis.allium
+
+-- Scope: Type checking, diagnostic reporting
+-- Includes:
+--   - Project-level type checking (check)
+--   - Diagnostic model (severity, code, message, location)
+--   - Diagnostics filtered by file, severity, or code
+-- Excludes:
+--   - Project lifecycle (see tyo3-core.allium)
+--   - Symbol queries (see tyo3-symbols.allium)
+
+use "./tyo3-core.allium" as core
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value Position {
+    line: Integer       -- 1-based
+    column: Integer     -- 1-based, Unicode codepoints
+}
+
+value Range {
+    start: Position
+    end: Position
+}
+
+value FileRange {
+    path: core/Path
+    range: Range
+}
+
+value CheckResult {
+    diagnostics: List<Diagnostic>
+    files_checked: Integer?
+    elapsed_ms: Integer?
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum DiagnosticSeverity { fatal | error | warning | information | hint }
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity Diagnostic {
+    project: core/TyProject
+    file: core/ProjectFile?
+    range: Range?
+    severity: DiagnosticSeverity
+    code: String?
+    message: String
+    details: Set<String>
+}
+
+------------------------------------------------------------
+-- Black box helpers
+------------------------------------------------------------
+
+-- run_ty_check(project) -> CheckResult:
+--   runs ty's type checker on the project, returns diagnostics
+--   and timing information
+-- check_duration(): returns elapsed wall-clock milliseconds
+
+------------------------------------------------------------
+-- Type Checking
+------------------------------------------------------------
+
+rule CheckProject {
+    when: UserChecksProject(project)
+
+    requires: project.is_open
+
+    let result = run_ty_check(project)
+
+    ensures: CheckResult(
+        diagnostics: result.diagnostics,
+        files_checked: result.files_checked,
+        elapsed_ms: result.elapsed_ms
+    )
+    ensures:
+        for d in result.diagnostics:
+            Diagnostic.created(
+                project: project,
+                file: d.file,
+                range: d.range,
+                severity: d.severity,
+                code: d.code,
+                message: d.message,
+                details: d.details
+            )
+}
+
+rule CheckProjectNotOpen {
+    when: UserChecksProject(project)
+
+    requires: not project.is_open
+
+    ensures: AnalysisError(reason: project_not_open, project: project)
+}
+
+------------------------------------------------------------
+-- Filtered Diagnostics
+------------------------------------------------------------
+
+rule CheckFile {
+    when: UserChecksFile(project, file)
+
+    requires: project.is_open
+    requires: file.project = project
+
+    let all_results = run_ty_check(project)
+    let file_diagnostics =
+        for d in all_results.diagnostics where d.file = file:
+            d
+
+    ensures: CheckResult(
+        diagnostics: file_diagnostics,
+        files_checked: 1,
+        elapsed_ms: check_duration()
+    )
+}
+
+rule CheckFileNotInProject {
+    when: UserChecksFile(project, file)
+
+    requires: file.project != project
+
+    ensures: PathResolutionError(path: file.path, reason: file_not_in_project)
+}
+
+rule FilterBySeverity {
+    when: UserChecksProjectWithSeverity(project, severity)
+
+    requires: project.is_open
+
+    let existing = Diagnostic{project: project} where severity = severity
+
+    ensures: CheckResult(
+        diagnostics: existing,
+        files_checked: null,
+        elapsed_ms: null
+    )
+}
+
+rule FilterByCode {
+    when: UserChecksProjectWithCode(project, code)
+
+    requires: project.is_open
+
+    let existing = Diagnostic{project: project} where code = code
+
+    ensures: CheckResult(
+        diagnostics: existing,
+        files_checked: null,
+        elapsed_ms: null
+    )
+}
+
+------------------------------------------------------------
+-- Diagnostic Lifecycle
+------------------------------------------------------------
+
+rule ClearDiagnosticsOnReload {
+    when: UserReloadsProject(project)
+
+    requires: project.is_open
+
+    ensures:
+        for d in Diagnostic{project: project}:
+            not exists d
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant DiagnosticBelongsToOpenProject {
+    for d in Diagnostic:
+        d.project.status = open
+}
+
+invariant DiagnosticFileBelongsToProject {
+    for d in Diagnostic where d.file != null:
+        d.file.project = d.project
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface TypeChecking {
+    facing _: User
+
+    context project: core/TyProject
+
+    exposes:
+        project.files.count
+
+    provides:
+        UserChecksProject(project)
+            when project.is_open
+        UserChecksFile(project, file)
+            when project.is_open and file.project = project
+        UserChecksProjectWithSeverity(project, severity)
+            when project.is_open
+        UserChecksProjectWithCode(project, code)
+            when project.is_open
+
+    @guarantee StableDiagnosticModel
+        -- Diagnostics are returned as structured Pydantic models,
+        -- not raw ty/ruff internal types.
+        -- Severity, code, message, and location are human-readable.
+
+    @guidance
+        -- The check operation releases the GIL during Rust execution.
+        -- Coordinate mode follows the project's declared policy (default: 1-based).
+}

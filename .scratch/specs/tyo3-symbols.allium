@@ -1,0 +1,225 @@
+-- allium: 3
+-- tyo3-symbols.allium
+
+-- Scope: Symbol discovery operations across different scopes
+-- Includes:
+--   - Document-level symbol discovery (document_symbols)
+--   - Workspace-wide symbol search (workspace_symbols)
+--   - Importable symbol search across all modules (all_symbols)
+--   - Symbol model with kind, location, qualified name, deprecated status
+-- Excludes:
+--   - Code navigation (see tyo3-navigation.allium)
+--   - Type checking (see tyo3-analysis.allium)
+--   - Semantic tokens (see tyo3-advanced.allium)
+
+use "./tyo3-core.allium" as core
+use "./tyo3-analysis.allium" as analysis
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum SymbolKind {
+    module
+    class_
+    function
+    method
+    constructor
+    variable
+    constant
+    field
+    parameter
+    property
+    type_parameter
+    import_
+    unknown
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity Symbol {
+    project: core/TyProject
+    name: String
+    qualified_name: String?
+    kind: SymbolKind
+    location: analysis/FileRange
+    selection_range: analysis/Range?
+    container_name: String?
+    deprecated: Boolean
+}
+
+------------------------------------------------------------
+-- Black box helpers
+------------------------------------------------------------
+
+-- document_symbols(file) -> List<Symbol>:
+--   returns all top-level and nested symbols defined in a file,
+--   using ty's document_symbols analysis
+-- workspace_symbols(project, query) -> List<Symbol>:
+--   searches all first-party project symbols matching the query,
+--   using ty's workspace_symbols with fuzzy matching
+-- all_symbols(project, query, context_file) -> List<Symbol>:
+--   searches all importable symbols (including stdlib and third-party)
+--   matching the query, using ty's all_symbols
+-- first_project_file(project) -> ProjectFile?:
+--   returns the first indexed first-party file, or null if none exist
+
+------------------------------------------------------------
+-- Document Symbols
+------------------------------------------------------------
+
+rule GetDocumentSymbols {
+    when: UserRequestsDocumentSymbols(project, file)
+
+    requires: project.is_open
+    requires: file.project = project
+
+    let symbols = document_symbols(file)
+
+    ensures:
+        for s in symbols:
+            Symbol.created(
+                project: project,
+                name: s.name,
+                qualified_name: s.qualified_name,
+                kind: s.kind,
+                location: s.location,
+                selection_range: s.selection_range,
+                container_name: s.container_name,
+                deprecated: s.deprecated
+            )
+    ensures: DocumentSymbolsReturned(file: file, count: symbols.count)
+}
+
+rule GetDocumentSymbolsFileNotInProject {
+    when: UserRequestsDocumentSymbols(project, file)
+
+    requires: file.project != project
+
+    ensures: PathResolutionError(path: file.path, reason: file_not_in_project)
+}
+
+------------------------------------------------------------
+-- Workspace Symbols
+------------------------------------------------------------
+
+rule SearchWorkspaceSymbols {
+    when: UserRequestsWorkspaceSymbols(project, query)
+
+    requires: project.is_open
+    requires: length(query) >= 1
+
+    let matches = workspace_symbols(project, query)
+
+    ensures:
+        for s in matches:
+            Symbol.created(
+                project: project,
+                name: s.name,
+                qualified_name: s.qualified_name,
+                kind: s.kind,
+                location: s.location,
+                selection_range: s.selection_range,
+                container_name: s.container_name,
+                deprecated: s.deprecated
+            )
+    ensures: WorkspaceSymbolsReturned(query: query, total_count: matches.count)
+}
+
+rule SearchWorkspaceSymbolsEmptyQuery {
+    when: UserRequestsWorkspaceSymbols(project, query)
+
+    requires: project.is_open
+    requires: length(query) < 1
+
+    ensures: WorkspaceSymbolsReturned(query: query, total_count: 0)
+}
+
+------------------------------------------------------------
+-- All Symbols (Importable Search)
+------------------------------------------------------------
+
+rule SearchAllSymbols {
+    when: UserRequestsAllSymbols(project, query, importing_from)
+
+    requires: project.is_open
+    requires: length(query) >= 1
+
+    let context_file =
+        if importing_from != null: importing_from
+        else: first_project_file(project)
+
+    requires: exists context_file
+    requires: context_file.project = project
+
+    let matches = all_symbols(project, query, context_file)
+
+    ensures:
+        for s in matches:
+            Symbol.created(
+                project: project,
+                name: s.name,
+                qualified_name: s.qualified_name,
+                kind: s.kind,
+                location: s.location,
+                selection_range: s.selection_range,
+                container_name: s.container_name,
+                deprecated: s.deprecated
+            )
+    ensures: AllSymbolsReturned(
+        query: query,
+        importing_from: context_file,
+        total_count: matches.count
+    )
+}
+
+rule SearchAllSymbolsNoContext {
+    when: UserRequestsAllSymbols(project, query, importing_from)
+
+    requires: project.is_open
+    requires: importing_from = null
+    requires: first_project_file(project) = null
+
+    ensures: AllSymbolsReturned(query: query, total_count: 0)
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant SymbolsBelongToProject {
+    for s in Symbol:
+        s.project.status = open
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface SymbolQuery {
+    facing _: User
+
+    context project: core/TyProject
+
+    provides:
+        UserRequestsDocumentSymbols(project, file)
+            when project.is_open and file.project = project
+        UserRequestsWorkspaceSymbols(project, query)
+            when project.is_open
+        UserRequestsAllSymbols(project, query, importing_from?)
+            when project.is_open
+
+    @guarantee StableSymbolModel
+        -- Symbols are returned as structured Pydantic models with
+        -- stable fields: name, qualified_name, kind, location,
+        -- selection_range, container_name, deprecated.
+        -- SymbolKind includes import_ as a first-class kind.
+
+    @guidance
+        -- Workspace search uses ty's fuzzy matching (case-insensitive prefix).
+        -- All-symbols search depends on the import context; results may vary
+        -- depending on which file is used as the importing module.
+        -- When importing_from is omitted, TyO3 selects the first project file.
+}

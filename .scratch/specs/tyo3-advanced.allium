@@ -1,0 +1,254 @@
+-- allium: 3
+-- tyo3-advanced.allium
+
+-- Scope: Advanced semantic analysis operations (v0.2+)
+-- Includes:
+--   - Semantic token classification (semantic_tokens)
+--   - Type hierarchy exploration (type_hierarchy)
+-- Excludes:
+--   - Call hierarchy (deferred: not confirmed in ty_ide 0.0.40)
+--   - Completion, rename, code actions (future scope)
+--   - Inlay hints, folding ranges, document highlights (future scope)
+
+-- NOTE: This spec describes operations deferred to v0.2+.
+-- The ty_ide backend supports these operations as of ty 0.0.40,
+-- but they introduce additional model surface and compatibility
+-- concerns that warrant controlled introduction.
+
+use "./tyo3-core.allium" as core
+use "./tyo3-analysis.allium" as analysis
+
+deferred SemanticTokens.full    -- see: detailed/semantic-tokens.allium
+deferred TypeHierarchy.explore   -- see: detailed/type-hierarchy.allium
+
+-- NOTE: Semantic tokens and type hierarchy are deferred to v0.2+
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum SemanticTokenType {
+    namespace
+    class_
+    parameter
+    self_parameter
+    cls_parameter
+    variable
+    property
+    function
+    method
+    keyword
+    string
+    number
+    decorator
+    builtin_constant
+    type_parameter
+}
+
+enum SemanticTokenModifier { definition | readonly | async_ | documentation }
+
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity SemanticToken {
+    project: core/TyProject
+    file: core/ProjectFile
+    range: analysis/Range
+    token_type: SemanticTokenType
+    modifiers: Set<SemanticTokenModifier>
+}
+
+------------------------------------------------------------
+-- Black box helpers
+------------------------------------------------------------
+
+-- classify_tokens(project, file, range) -> List<SemanticToken>:
+--   returns typed and modifier-attributed tokens for the given file
+--   range, using ty_ide::semantic_tokens; when range is null,
+--   returns tokens for the entire file
+-- prepare_hierarchy(project, file, line, column) -> TypeHierarchyItem?:
+--   initialises a type hierarchy query at the given position, using
+--   ty_ide::prepare_type_hierarchy; returns null when the position
+--   does not resolve to a type-hierarchy candidate
+-- resolve_supertypes(project, item) -> List<TypeHierarchyItem>:
+--   traverses supertypes from a prepared hierarchy entry, using
+--   ty_ide::type_hierarchy_supertypes
+-- resolve_subtypes(project, item) -> List<TypeHierarchyItem>:
+--   traverses subtypes, using ty_ide::type_hierarchy_subtypes
+
+------------------------------------------------------------
+-- Semantic Tokens
+------------------------------------------------------------
+
+rule GetSemanticTokens {
+    when: UserRequestsSemanticTokens(project, file, range)
+
+    requires: project.is_open
+    requires: file.project = project
+
+    let tokens = classify_tokens(project, file, range)
+
+    ensures:
+        for t in tokens:
+            SemanticToken.created(
+                project: project,
+                file: file,
+                range: t.range,
+                token_type: t.token_type,
+                modifiers: t.modifiers
+            )
+    ensures: SemanticTokensReturned(file: file, count: tokens.count)
+}
+
+rule GetSemanticTokensFileNotInProject {
+    when: UserRequestsSemanticTokens(project, file, range)
+
+    requires: file.project != project
+
+    ensures: PathResolutionError(path: file.path, reason: file_not_in_project)
+}
+
+------------------------------------------------------------
+-- Type Hierarchy
+------------------------------------------------------------
+
+rule ExploreTypeHierarchy {
+    when: UserRequestsTypeHierarchy(project, file, line, column)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+
+    let prepared = prepare_hierarchy(project, file, line, column)
+
+    requires: exists prepared
+
+    let supertypes_list = resolve_supertypes(project, prepared)
+    let subtypes_list = resolve_subtypes(project, prepared)
+
+    ensures: TypeHierarchyReturned(
+        item_name: prepared.name,
+        item_detail: prepared.detail,
+        item_path: prepared.path,
+        item_full_range: prepared.full_range,
+        item_selection_range: prepared.selection_range,
+        supertype_count: supertypes_list.count,
+        subtype_count: subtypes_list.count
+    )
+}
+
+rule ExploreTypeHierarchyNoTarget {
+    when: UserRequestsTypeHierarchy(project, file, line, column)
+
+    requires: prepare_hierarchy(project, file, line, column) = null
+
+    ensures: TypeHierarchyReturned(
+        item_name: null,
+        supertype_count: 0,
+        subtype_count: 0
+    )
+}
+
+rule ExploreTypeHierarchyDirectionalSupertype {
+    when: UserRequestsTypeHierarchyDirection(project, file, line, column, direction)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+    requires: direction = supertypes
+
+    let prepared = prepare_hierarchy(project, file, line, column)
+
+    requires: exists prepared
+
+    let supertypes_list = resolve_supertypes(project, prepared)
+
+    ensures: TypeHierarchyReturned(
+        item_name: prepared.name,
+        item_detail: prepared.detail,
+        item_path: prepared.path,
+        item_full_range: prepared.full_range,
+        item_selection_range: prepared.selection_range,
+        supertype_count: supertypes_list.count,
+        subtype_count: 0
+    )
+}
+
+rule ExploreTypeHierarchyDirectionalSubtype {
+    when: UserRequestsTypeHierarchyDirection(project, file, line, column, direction)
+
+    requires: project.is_open
+    requires: file.project = project
+    requires: line >= 1 and column >= 1
+    requires: direction = subtypes
+
+    let prepared = prepare_hierarchy(project, file, line, column)
+
+    requires: exists prepared
+
+    let subtypes_list = resolve_subtypes(project, prepared)
+
+    ensures: TypeHierarchyReturned(
+        item_name: prepared.name,
+        item_detail: prepared.detail,
+        item_path: prepared.path,
+        item_full_range: prepared.full_range,
+        item_selection_range: prepared.selection_range,
+        supertype_count: 0,
+        subtype_count: subtypes_list.count
+    )
+}
+
+------------------------------------------------------------
+-- Known Limitations
+------------------------------------------------------------
+
+-- Semantic token classification (as of ty 0.0.40):
+--   - Quoted annotations are not fully handled
+--   - Properties/descriptors may be classified imprecisely
+--   - Special forms may be classified as variables
+--   - Type aliases do not have a dedicated token type
+--   - Additional modifiers may be added upstream
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant SemanticTokenInProject {
+    for t in SemanticToken:
+        t.file.project = t.project
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface AdvancedSemantics {
+    facing _: User
+
+    context project: core/TyProject
+
+    provides:
+        UserRequestsSemanticTokens(project, file, range)
+            when project.is_open and file.project = project
+        UserRequestsTypeHierarchy(project, file, line, column)
+            when project.is_open and file.project = project
+        UserRequestsTypeHierarchyDirection(project, file, line, column, direction)
+            when project.is_open and file.project = project
+
+    @guarantee ComposedHierarchy
+        -- type_hierarchy composes ty_ide's prepare/supertypes/subtypes
+        -- into a single Python-friendly result with a direction filter.
+
+    @guidance
+        -- These operations are available in ty 0.0.40 but introduce
+        -- extra model surface area. Introduce carefully in v0.2+.
+        -- Semantic token types and modifiers may change as ty upstream
+        -- evolves. Document known limitations in release notes.
+}

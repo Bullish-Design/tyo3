@@ -4,11 +4,20 @@ inputs:
     url: github:cachix/devenv-nixpkgs/rolling
   nixpkgs-python:
     url: github:cachix/nixpkgs-python
-  nix2container:
-    url: github:nlewo/nix2container
-  mk-shell-bin:
-    url: github:rrbutani/nix-mk-shell-bin
+  #nix2container:
+  #  url: github:nlewo/nix2container
+  #mk-shell-bin:
+  #  url: github:rrbutani/nix-mk-shell-bin
+  mypy-agent:
+    url: github:Bullish-Design/mypi-agent?ref=v0.3.6
+    flake: false
+  allium-env:
+    url: github:Bullish-Design/allium-env?ref=v0.3.3
+    flake: false
 
+imports:
+  - allium-env
+  - mypy-agent
 
 # If you're using non-OSS software, you can set allowUnfree to true.
 # allowUnfree: true
