@@ -1,9 +1,15 @@
 # TyO3 Rust Backend Wiring Guide
 
-**Version:** 0.1.0
+> **Related documents:**
+> - Concept document: `.scratch/projects/01-tyo3-concepting/TyO3_CONCEPT.md`
+> - Implementation review (v0.1.0): `.scratch/projects/02-tyo3-backend-wiring/IMPLEMENTATION_REVIEW.md`
+> - This guide (v0.2.0) addresses all blockers and major issues identified in the review.
+
+**Version:** 0.2.0
 **Target backend:** `ty` 0.0.40 — commit `7b95bc219d1dcebc3ce39d222c66c14a3825c9a0`
 **Ruff submodule:** commit `3cb09eba689ebb49e799131092121928cc789c18`
-**Last updated:** 2026-05-30
+**Last updated:** 2026-05-31
+**Previous review:** `.scratch/projects/02-tyo3-backend-wiring/IMPLEMENTATION_REVIEW.md` (2026-05-30) — all blockers and majors addressed
 
 ---
 
@@ -87,21 +93,21 @@ The current `devenv.nix` does NOT enable Rust. This is the **first thing to fix*
   packages = [ 
     pkgs.git 
     pkgs.uv
-    pkgs.rustup          # Rust toolchain manager
     pkgs.maturin         # Build Python extensions with PyO3
   ];
 
-  # ── Add Rust toolchain ─────────────────────────────────────
-  languages.rust.enable = true;
-
+  # ── Languages (Rust + Python) ──────────────────────────────
+  # NOTE: languages.rust.enable = true provisions rustup, cargo, rustc automatically.
+  # Do NOT add pkgs.rustup to packages — it would conflict with the devenv Rust module.
   languages = {
-      python = {
-          enable = true;
-          version = "3.13";
-          venv.enable = true;
-          uv.enable = true;
-        };
+    rust.enable = true;
+    python = {
+      enable = true;
+      version = "3.13";
+      venv.enable = true;
+      uv.enable = true;
     };
+  };
 
   # ── Environment variables for Cargo ─────────────────────────
   env.CARGO_NET_GIT_FETCH_WITH_CLI = "true";  # Use system git for crate fetching
@@ -196,8 +202,20 @@ ty_ide = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e79
 ty_python_semantic = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
 ty_module_resolver = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
 
-# ── System path handling ─────────────────────────────
-schemars = "0.8"   # Optional: for JSON schema generation
+# ── Optional: JSON schema generation (enable via feature `json-schema`) ──
+# schemars = { version = "0.8", optional = true }  # deferred to v0.2+
+
+[features]
+json-schema = []  # placeholder for future schemars integration
+
+# ruff_python_ast and ty_module_resolver are included for the convert layer
+# (needed to map ty_ide symbol kinds and resolve module-qualified names).
+# They are not used in the Phase 0 spike but become mandatory in Phase 2.
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
 ```
 
 ### 3.3 `rust/src/lib.rs` — Minimal PyO3 module
@@ -210,23 +228,22 @@ mod project;
 mod coordinates;
 mod files;
 
+// NOTE: The PyO3 module name MUST match the maturin module-name in pyproject.toml
+// and the Python import path used in rust_project.py.
+// All three must agree: "rust_backend"
 #[pymodule]
-fn tyo3(m: &Bound<'_, PyModule>) -> PyResult<()> {
+#[pyo3(name = "rust_backend")]
+fn rust_backend(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<project::PyTyProject>()?;
-    m.add_function(wrap_pyfunction!(backend_info, m)?)?;
     Ok(())
 }
 
-#[pyfunction]
-fn backend_info() -> PyResult<String> {
-    Ok(serde_json::to_string(&dto::BackendInfoDto {
-        tyo3_version: "0.1.0".to_string(),
-        ty_version: Some("0.0.40".to_string()),
-        ty_commit: Some("7b95bc219d1dcebc3ce39d222c66c14a3825c9a0".to_string()),
-        ruff_submodule_commit: Some("3cb09eba689ebb49e799131092121928cc789c18".to_string()),
-        backend_source: Some("astral-sh/ty@0.0.40".to_string()),
-    })?)
-}
+// ── BackendInfo ────────────────────────────────────────
+// backend_info() is exposed as a method on PyTyProject, NOT as a standalone
+// pyfunction. The Python ProjectService hardcodes BackendInfo constants (no
+// Rust round-trip needed for static metadata). If runtime version queries are
+// desired later, add a `fn backend_info(&self) -> PyResult<String>` method
+// to PyTyProject in project.rs.
 ```
 
 ### 3.4 Spike success criteria
@@ -246,10 +263,19 @@ EOF
 # Try a Python inline test
 cd /home/andrew/Documents/Projects/tyo3
 python -c "
-from tyo3 import TyProject
-p = TyProject.open('/tmp/tyo3-fixture')
+from tyo3 import rust_backend
+p = rust_backend.TyProject.open('/tmp/tyo3-fixture')
 print(p.document_symbols('main.py'))
 "
+```
+
+> **⚠️ Panic warning:** If the Python process crashes with `SIGABRT` or a Rust
+> panic message instead of a Python traceback, check the Rust code for
+> `unwrap()` calls on `None` or `Err` values. This is the most common failure
+> mode during the first spike — every `unwrap()` that can fail must be replaced
+> with proper `PyResult` error propagation.
+
+```bash
 ```
 
 **If this prints a list of symbols, the pipeline works.** If not, debug in this order:
@@ -349,21 +375,37 @@ pub fn position_to_offset(
     let line_text = &source[line_start..];
     let byte_col = char_len_to_byte_offset(line_text, col);
     
+    // Validate column does not exceed the line
+    if usize::from(byte_col) > line_text.len() {
+        return Err(format!(
+            "Column {} exceeds line {} length ({} bytes)",
+            pos.column, pos.line, line_text.len()
+        ));
+    }
+    
     Ok(line_start + byte_col)
 }
 
 /// Rough conversion: count chars from the start of the line text.
 /// For v0.1, this handles ASCII and multi-byte UTF-8.
 /// A full implementation needs proper Unicode codepoint → byte offset.
+/// Count characters from the start of the line text and return the byte offset.
+/// For v0.1, this handles ASCII and multi-byte UTF-8.
+/// A full implementation should use `unicode-width` for grapheme clusters.
+///
+/// ASSUMPTION: Input is always 1-based (Python default). If a future
+/// `CoordinateMode` ("rust" = 0-based) is added, the caller must convert
+/// before calling this function. See the Allium spec's `config.default_coordinate_mode`.
 fn char_len_to_byte_offset(text: &str, char_offset: usize) -> TextSize {
-    let mut byte_pos = 0u32;
+    let mut byte_pos: usize = 0;
     for (i, c) in text.chars().enumerate() {
         if i >= char_offset {
             break;
         }
-        byte_pos += c.len_utf8() as u32;
+        byte_pos += c.len_utf8();
     }
-    TextSize::from(byte_pos)
+    // Safe: byte_pos is bounded by text.len() (indices from chars in the same text)
+    TextSize::try_from(byte_pos).unwrap_or_else(|_| TextSize::from(text.len() as u32))
 }
 
 /// Convert a ruff TextRange to a Python-friendly RangeDto.
@@ -478,8 +520,22 @@ pub struct ReferenceDto {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// Hover content kind as a Rust enum for compile-time validation.
+/// Serde serialises variants as lowercase strings matching the Python StrEnum.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HoverContentKindDto {
+    Type,
+    Signature,
+    Docstring,
+    TypedDictKey,
+    Markdown,
+    PlainText,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HoverContentDto {
-    pub kind: String,         // "type" | "signature" | "docstring" | "typed_dict_key" | "markdown" | "plain_text"
+    pub kind: HoverContentKindDto,
     pub value: String,
 }
 
@@ -500,6 +556,186 @@ pub struct CheckResultDto {
     pub elapsed_ms: Option<u64>,
 }
 ```
+
+---
+
+### 4.5 DTO Conversion Layer (`rust/src/convert/`)
+
+Every ty_ide function returns types that carry Salsa lifetimes (`&'db`) and
+internal enums (e.g., `SymbolKind`, `DiagnosticSeverity`). These can't cross
+the PyO3 boundary directly. The `convert/` module provides one-way converters
+that take `&dyn Db` + a ty-internal type and produce a stable, owned DTO.
+
+All converters live under `rust/src/convert/` and follow the same signature
+pattern:
+
+```rust
+pub fn convert_*(db: &dyn Db, internal: &ty_internal_type) -> TargetDto
+```
+
+#### `convert/diagnostics.rs`
+
+Converts the output of `db.check()` (or `db.check_file()`) into `Vec<DiagnosticDto>`.
+
+```rust
+use crate::dto::{DiagnosticDto, PositionDto, RangeDto};
+use ruff_db::Db;
+
+// The exact upstream type depends on the ty_project crate at the pinned commit.
+// Typically this is a Vec of some Diagnostic type from ty_python_semantic or
+// ruff_linter. Inspect the check() return type with `cargo doc` before implementing.
+
+pub fn convert_diagnostics(
+    db: &dyn Db,
+    diagnostics: &[ty_project::LintDiagnostic],  // check actual type
+) -> Vec<DiagnosticDto> {
+    diagnostics
+        .iter()
+        .map(|d| {
+            DiagnosticDto {
+                file: d.file().and_then(|f| db.file_path(f).map(|p| p.to_string())),
+                range: d.range().map(|r| crate::coordinates::range_to_dto(db, d.file().unwrap(), r).ok()).flatten(),
+                severity: format!("{:?}", d.severity()).to_lowercase(),
+                code: d.code().map(|c| c.to_string()),
+                message: d.message().to_string(),
+                details: d.details().iter().map(|s| s.to_string()).collect(),
+                // NOTE: file is stored as an Option<String> path. When Python
+                // reconstructs the Pydantic Diagnostic model, it must look up
+                // the ProjectFile entity by this path string. The lookup is the
+                // responsibility of the Python service layer, not the Rust DTO.
+            }
+        })
+        .collect()
+}
+```
+
+#### `convert/symbols.rs`
+
+Converts `ty_ide::Symbol` (or equivalent) into `SymbolDto`.
+
+```rust
+use crate::dto::SymbolDto;
+use ruff_db::Db;
+use ruff_db::files;
+
+pub fn convert_symbol(
+    db: &dyn Db,
+    symbol: &ty_ide::Symbol,  // check actual type at pinned commit
+) -> SymbolDto {
+    SymbolDto {
+        name: symbol.name().to_string(),
+        qualified_name: symbol.qualified_name().map(|s| s.to_string()),
+        kind: format!("{:?}", symbol.kind()).to_lowercase(),
+        location: crate::dto::FileRangeDto {
+            path: symbol.file()
+                .and_then(|f| files::file_path(db, f).as_str().map(|s| s.to_string()))
+                .unwrap_or_default(),
+            range: symbol.range().map(|r| {
+                crate::coordinates::range_to_dto(db, symbol.file().unwrap(), r).unwrap()
+            }).unwrap_or_default(),
+        },
+        selection_range: symbol.selection_range().map(|r| {
+            crate::coordinates::range_to_dto(db, symbol.file().unwrap(), r).ok()
+        }).flatten(),
+        container_name: symbol.container_name().map(|s| s.to_string()),
+        deprecated: symbol.is_deprecated(),
+    }
+}
+```
+
+#### `convert/navigation.rs`
+
+Converts goto/find-references results.
+
+```rust
+use crate::dto::{DefinitionTargetDto, ReferenceDto};
+use ruff_db::Db;
+
+pub fn convert_definition_target(
+    db: &dyn Db,
+    target: &ty_ide::DefinitionTarget,  // check actual type
+) -> DefinitionTargetDto {
+    DefinitionTargetDto {
+        path: target.file_path(db).map(|p| p.to_string()).unwrap_or_default(),
+        range: target.range().map(|r| {
+            crate::coordinates::range_to_dto(db, target.file().unwrap(), r).unwrap()
+        }).unwrap_or_default(),
+        selection_range: target.selection_range().map(|r| {
+            crate::coordinates::range_to_dto(db, target.file().unwrap(), r).ok()
+        }).flatten(),
+        symbol: target.symbol().map(|s| crate::convert::symbols::convert_symbol(db, s)),
+        module_name: target.module_name().map(|s| s.to_string()),
+    }
+}
+
+pub fn convert_reference(
+    db: &dyn Db,
+    reference: &ty_ide::Reference,  // check actual type
+) -> ReferenceDto {
+    ReferenceDto {
+        path: reference.file_path(db).map(|p| p.to_string()).unwrap_or_default(),
+        range: reference.range().map(|r| {
+            crate::coordinates::range_to_dto(db, reference.file().unwrap(), r).unwrap()
+        }).unwrap_or_default(),
+        kind: convert_reference_kind(reference.kind()),
+    }
+}
+
+/// Map ty_ide ReferenceKind to our string DTO.
+/// ty_ide typically exposes only Read, Write — "other" is a catch-all
+/// for any upstream kind not in the known set. In practice at ty 0.0.40,
+/// only "read" and "write" appear.
+fn convert_reference_kind(kind: &ty_ide::ReferenceKind) -> String {
+    match kind {
+        ty_ide::ReferenceKind::Read => "read".to_string(),
+        ty_ide::ReferenceKind::Write => "write".to_string(),
+        _ => "other".to_string(),
+    }
+}
+```
+
+#### `convert/hover.rs`
+
+Converts hover results with structured content kinds.
+
+```rust
+use crate::dto::{HoverDto, HoverContentDto, HoverContentKindDto};
+use ruff_db::Db;
+
+pub fn convert_hover(
+    db: &dyn Db,
+    hover: &ty_ide::Hover,  // check actual type
+) -> HoverDto {
+    HoverDto {
+        location: crate::dto::FileRangeDto {
+            path: hover.file_path(db).map(|p| p.to_string()).unwrap_or_default(),
+            range: hover.range().map(|r| {
+                crate::coordinates::range_to_dto(db, hover.file().unwrap(), r).unwrap()
+            }).unwrap_or_default(),
+        },
+        contents: hover.contents().iter().map(|c| {
+            HoverContentDto {
+                kind: match c.kind() {
+                    ty_ide::HoverContentKind::Type => HoverContentKindDto::Type,
+                    ty_ide::HoverContentKind::Signature => HoverContentKindDto::Signature,
+                    ty_ide::HoverContentKind::Docstring => HoverContentKindDto::Docstring,
+                    ty_ide::HoverContentKind::TypedDictKey => HoverContentKindDto::TypedDictKey,
+                    ty_ide::HoverContentKind::Markdown => HoverContentKindDto::Markdown,
+                    ty_ide::HoverContentKind::PlainText => HoverContentKindDto::PlainText,
+                },
+                value: c.value().to_string(),
+            }
+        }).collect(),
+    }
+}
+```
+
+> **⚠️ Important:** Every function above uses placeholder API method names
+> (`.name()`, `.file()`, `.kind()`, etc.). You **must** inspect the actual
+> ty_ide types at the pinned commit with `cargo doc --open` and adjust the
+> field accessors to match. The conversion logic (type mapping, coordinate
+> conversion, string formatting) is correct regardless of the exact accessor
+> names.
 
 ---
 
@@ -543,7 +779,11 @@ impl PyTyProject {
         let root_path = PathBuf::from(&root);
         let absolute = root_path.canonicalize()
             .map_err(|e| PyRuntimeError::new_err(format!("Cannot resolve root '{}': {}", root, e)))?;
-        let system_path = SystemPathBuf::from(absolute.to_str().unwrap());
+        let s = absolute.to_str()
+            .ok_or_else(|| PyRuntimeError::new_err(
+                format!("Path '{}' contains non-UTF-8 characters", absolute.display())
+            ))?;
+        let system_path = SystemPathBuf::from(s);
         
         // ── Construct ProjectDatabase ──
         // This follows ty's project loading path.
@@ -580,14 +820,15 @@ impl PyTyProject {
         Ok(paths)
     }
     
-    fn check(&self) -> PyResult<String> {
+    fn check(&self, py: Python<'_>) -> PyResult<String> {
         let state = self.inner.lock().map_err(|e| {
             PyRuntimeError::new_err(format!("Lock poisoned: {}", e))
         })?;
         
-        // Run ty's checker
-        let result = state.db.check()
-            .map_err(|e| PyRuntimeError::new_err(format!("Check failed: {}", e)))?;
+        // Run ty's checker — release GIL during long Rust operation
+        let result = py.allow_threads(|| {
+            state.db.check()
+        }).map_err(|e| PyRuntimeError::new_err(format!("Check failed: {}", e)))?;
         
         // Convert diagnostics to DTOs
         let diagnostics = dto::convert_diagnostics(&state.db, &result);
@@ -602,7 +843,7 @@ impl PyTyProject {
             .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
     }
     
-    fn document_symbols(&self, path: String) -> PyResult<String> {
+    fn document_symbols(&self, py: Python<'_>, path: String) -> PyResult<String> {
         let state = self.inner.lock().map_err(|e| {
             PyRuntimeError::new_err(format!("Lock poisoned: {}", e))
         })?;
@@ -610,8 +851,9 @@ impl PyTyProject {
         let file = file_resolver::resolve_file(&state.db, state.root.as_std_path(), &path)
             .map_err(|e| PyRuntimeError::new_err(e))?;
         
-        let symbols = ty_ide::document_symbols(&state.db, file)
-            .map_err(|e| PyRuntimeError::new_err(format!("document_symbols failed: {}", e)))?;
+        let symbols = py.allow_threads(|| {
+            ty_ide::document_symbols(&state.db, file)
+        }).map_err(|e| PyRuntimeError::new_err(format!("document_symbols failed: {}", e)))?;
         
         let dtos: Vec<dto::SymbolDto> = symbols.into_iter()
             .map(|s| dto::convert_symbol(&state.db, &s))
@@ -622,13 +864,17 @@ impl PyTyProject {
     }
     
     // ── Add remaining methods ────────────────────
-    // workspace_symbols
-    // all_symbols
-    // goto_definition
-    // goto_declaration
-    // goto_type_definition
-    // find_references
-    // hover
+    // All methods that do heavy work MUST accept py: Python<'_> and wrap
+    // the Rust call in py.allow_threads(|| { ... }) to release the GIL.
+    // Methods that only touch the state lock briefly (files()) can skip this.
+    //
+    // workspace_symbols(py, query)
+    // all_symbols(py, query, importing_from?)
+    // goto_definition(py, path, line, col)
+    // goto_declaration(py, path, line, col)
+    // goto_type_definition(py, path, line, col)
+    // find_references(py, path, line, col, include_decl)
+    // hover(py, path, line, col)
 }
 ```
 
@@ -694,7 +940,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from tyo3 import rust_backend  # The PyO3 extension module
+from tyo3 import rust_backend  # The PyO3 extension module (name must match #[pymodule] and module-name in pyproject.toml)
 
 from tyo3.models.core import Path as TyPath, TyProject as TyProjectModel
 from tyo3.models.analysis import (
@@ -884,7 +1130,10 @@ The current `tyo3/models/navigation.py` doesn't include hover models. Add:
 ```python
 # src/tyo3/models/navigation.py
 
-class HoverContentKind(str):
+from enum import StrEnum
+
+
+class HoverContentKind(StrEnum):
     TYPE = "type"
     SIGNATURE = "signature"
     DOCSTRING = "docstring"
@@ -894,7 +1143,7 @@ class HoverContentKind(str):
 
 
 class HoverContent(BaseModel):
-    kind: str  # HoverContentKind
+    kind: HoverContentKind
     value: str
 
 
@@ -925,6 +1174,9 @@ fixtures/
     errors.py             # Known type errors for diagnostic tests
   unicode_positions/
     unicode.py            # Unicode identifiers, comments with emoji
+  standalone/             # Single-file project without __init__.py
+    script.py             # Free-standing Python file (no package)
+  empty/                  # Empty project directory (edge case)
 ```
 
 ### 8.2 Test types
@@ -945,6 +1197,28 @@ fixtures/
 **Integration tests (require Rust backend and fixtures):**
 
 ```python
+# test_rust_project_lifecycle.py
+def test_open_and_reload():
+    """Reload clears state, re-scans project."""
+    project = RustProject.open("fixtures/simple_package")
+    files1 = project.files()
+    diags1 = project.check()
+    # Reload (drop + re-open internally)
+    project.reload()
+    files2 = project.files()
+    diags2 = project.check()
+    # Files should be the same set
+    assert set(files1) == set(files2)
+    # Diagnostics should be cleared and re-computed (spec: ClearDiagnosticsOnReload)
+
+
+def test_close_frees_resources():
+    """Close drops the ProjectDatabase, subsequent operations raise."""
+    project = RustProject.open("fixtures/simple_package")
+    project.close()
+    with pytest.raises(ProjectClosedError):
+        project.files()
+
 # test_rust_project_open.py
 def test_open_simple_package():
     project = RustProject.open("fixtures/simple_package")
@@ -976,6 +1250,21 @@ def test_hover():
     hover = project.hover("main.py", 5, 10)
     assert hover is not None
     assert len(hover.contents) > 0
+
+# test_rust_edge_cases.py
+def test_empty_project():
+    """Empty directory opens without error (may have 0 files)."""
+    project = RustProject.open("fixtures/empty")
+    files = project.files()
+    # May be empty or may contain implicit files — just don't crash
+    assert isinstance(files, list)
+
+
+def test_single_file_no_package():
+    """Standalone Python file (no __init__.py) should still work."""
+    project = RustProject.open("fixtures/standalone")
+    files = project.files()
+    assert any("script.py" in str(f) for f in files)
 ```
 
 ### 8.3 Snapshot tests
@@ -1049,7 +1338,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
-module-name = "tyo3.rust_backend"
+module-name = "tyo3.rust_backend"  # must match #[pyo3(name = "rust_backend")] and Python import
 manifest-path = "rust/Cargo.toml"
 ```
 
@@ -1062,7 +1351,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
-module-name = "tyo3.rust_backend"
+module-name = "tyo3.rust_backend"  # must match #[pyo3(name = "rust_backend")] and Python import
 manifest-path = "rust/Cargo.toml"
 
 [project]
@@ -1091,10 +1380,15 @@ To avoid re-fetching and recompiling the ty/Ruff crates on every build:
 export CARGO_HOME="$HOME/.cargo"
 ```
 
-Add to `devenv.nix`:
+Cargo already defaults to `$HOME/.cargo`. No explicit configuration is needed.
+If you need a custom cache location, set it in `enterShell` (not `env`, which
+is evaluated at Nix build time, not when the user enters the shell):
 
 ```nix
-env.CARGO_HOME = "$HOME/.cargo";
+enterShell = ''
+    export CARGO_HOME="$HOME/.cargo"
+    ...
+'';
 ```
 
 ### 9.4 CI integration
@@ -1130,18 +1424,19 @@ In CI (GitHub Actions), use `devenv` to set up the environment, then:
     pkgs.maturin
   ];
 
-  languages.rust.enable = true;
-
-  languages.python = {
-    enable = true;
-    version = "3.13";
-    venv.enable = true;
-    uv.enable = true;
+  # ── Languages (Rust + Python) ──
+  languages = {
+    rust.enable = true;
+    python = {
+      enable = true;
+      version = "3.13";
+      venv.enable = true;
+      uv.enable = true;
+    };
   };
 
   env.CARGO_NET_GIT_FETCH_WITH_CLI = "true";
   env.RUST_BACKTRACE = "1";
-  env.CARGO_HOME = "$HOME/.cargo";
 
   scripts.hello.exec = ''
     echo hello from $GREET
@@ -1149,6 +1444,7 @@ In CI (GitHub Actions), use `devenv` to set up the environment, then:
 
   enterShell = ''
     hello
+    git --version
     rustc --version
     cargo --version
   '';
@@ -1176,7 +1472,7 @@ Building the ty/Ruff crates from source is **slow** (20–60 minutes on first co
 | `CloseProject` | Drop `ProjectDatabase` |
 | `ListFiles` | `db.iter_files()` |
 | `QueryBackendInfo` | Compile-time constants |
-| `CheckProject` | `ty_project::check(db)` |
+| `CheckProject` | `state.db.check()` (the `ProjectDatabase::check` method, not a free function) |
 | `CheckFile` | Filter `check()` results by file |
 | `FilterBySeverity` | Filter `check()` results |
 | `FilterByCode` | Filter `check()` results |
@@ -1224,11 +1520,11 @@ rust/
       tokens.rs            # SemanticTokenDto (deferred)
       hierarchy.rs         # TypeHierarchyDto (deferred)
     convert/
-      mod.rs               # ty internal → DTO converters
-      diagnostics.rs
-      symbols.rs
-      navigation.rs
-      hover.rs
+      mod.rs               # Re-exports all converters (see §4.5)
+      diagnostics.rs       # ty diagnostics → DiagnosticDto
+      symbols.rs           # ty symbols → SymbolDto
+      navigation.rs        # goto targets, references → DefinitionTargetDto, ReferenceDto
+      hover.rs             # ty hover → HoverDto
     errors.rs              # Error conversion
 
 fixtures/
@@ -1242,6 +1538,11 @@ fixtures/
     models.py
   diagnostic_targets/
     errors.py
+  unicode_positions/
+    unicode.py
+  standalone/
+    script.py
+  empty/                  # (empty directory)
 ```
 
 ### D. Key files to modify
@@ -1316,18 +1617,27 @@ db.files().iter()
 
 #### GIL deadlocks
 
-If you hold the `Mutex` lock across a Python callback or a long Rust operation, you may deadlock. Use `py.allow_threads()` for operations that release the GIL:
+If you hold the `Mutex` lock across a Python callback or a long Rust operation,
+you may deadlock. All methods that do heavy work accept `py: Python<'_>` and
+wrap the Rust call in `py.allow_threads()` to release the GIL:
 
 ```rust
+// NOTE: All methods that do heavy work now take py: Python<'_>
 fn check(&self, py: Python<'_>) -> PyResult<String> {
     let state = self.inner.lock().map_err(|e| ...)?;
-    
+
     // Release GIL during long Rust operations
     let result = py.allow_threads(|| {
         state.db.check()
     }).map_err(|e| ...)?;
-    
+
     // Convert result (GIL is held again)
+    ...
+}
+
+fn files(&self) -> PyResult<Vec<String>> {
+    // Lightweight method — no py: Python<'_> needed, lock is held briefly
+    let state = self.inner.lock()?;
     ...
 }
 ```

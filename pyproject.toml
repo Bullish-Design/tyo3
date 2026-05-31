@@ -1,7 +1,7 @@
 [project]
 name = "tyo3"
 version = "0.1.0"
-description = "TyO3: An LSP server for Python type checking and code intelligence, powered by the ty type checker."
+description = "TyO3: Python semantic engine powered by ty/Ruff"
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
@@ -23,19 +23,13 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.18"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7"]
+build-backend = "maturin"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/tyo3"]
-
-[tool.hatch.build.targets.sdist]
-include = [
-  "src",
-  "README.md",
-  "tests",
-  "pyproject.toml",
-]
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "tyo3.rust_backend"
+manifest-path = "rust/Cargo.toml"
 
 [tool.uv]
 
@@ -80,4 +74,3 @@ dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
 ]
-

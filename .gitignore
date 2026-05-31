@@ -11,7 +11,7 @@ __pycache__/
 devenv.lock
 uv.lock
 .devenv.flake.nix
-.agents/**
+.agents/pi/**
 .pi/**
 .loci/**
 secretspec.toml
@@ -229,6 +229,9 @@ devenv.local.yaml
 
 # direnv
 .direnv
+
+# Rust build artifacts
+rust/target/
 
 # pre-commit
 .pre-commit-config.yaml
