@@ -148,24 +148,32 @@
   - Runs full test suite with hypothesis
   - Runs performance benchmarks
   - Cargo caching step available (commented out)
-- [x] **Release build** (`maturin build --release` via `cargo build --release`):
-  - Complete in ~16m 40s (first build with LTO + opt-level=3)
-  - `.so` copied to package directory automatically
-  - All 275 tests pass with release build
+- [x] **Release build** — two methods verified:
+  - `cargo build --release`: ~16m 40s (LTO + opt-level=3), then manual `.so` copy ✅
+  - `maturin build --release --out dist/`: ~7m 49s, produces complete wheel (8.9MB) ✅
+  - Wheel contains all 36 Python source files + native `.so` ✅
+  - Wheel path: `dist/tyo3-0.1.0-cp313-cp313-manylinux_2_34_x86_64.whl`
 - [x] **Type-checking latency documented** (see performance benchmarks above)
 - [x] **Minor fix**: Pydantic `model_fields` deprecation warning (instance → class access)
+- [x] **Standalone exception tests** (`test_exceptions.py` — 81 lines, 22 tests, §8.2):
+  - All exceptions inherit from `TyO3Error` ✅
+  - All exception types carry messages correctly ✅
+  - Error chaining (e.g., `PositionError` from `ValueError`) works ✅
+  - No Rust backend needed — pure Python unit tests
+- [x] **`python-source = "src"`** added to pyproject.toml `[tool.maturin]` so wheel includes Python source files
 
-##### Test results (all 275 tests passing)
+##### Test results (all 289 tests passing)
 | Category | Count | Result |
 |---|---|---|
 | Existing tests (use_rust=False) | 75 | ✅ All pass |
 | Phase 4 integration tests | 44 | ✅ All pass |
 | Phase 4 snapshot tests | 16 | ✅ All pass |
 | Phase 4 coordinate tests | 22 | ✅ All pass |
-| Phase 5 property-based tests | 8 | ✅ All pass |
+| Phase 5 property-based tests (Hypothesis) | 8 | ✅ All pass |
 | Phase 5 performance benchmarks | 36 | ✅ All pass |
-| Model + other tests | 74 | ✅ All pass |
-| **Total** | **275** | **✅ 0 failures, 95% coverage** |
+| Phase 5 exception unit tests | 22 | ✅ All pass |
+| Model + other tests | 66 | ✅ All pass |
+| **Total** | **289** | **✅ 0 failures, 95% coverage** |
 
 ##### Verified Rust operations with real fixtures
 | Operation | Fixture | Result |
