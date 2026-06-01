@@ -115,7 +115,7 @@ class TestSnapshotSimplePackage:
         required_fields = {"name", "kind", "location"}
         for sym in symbols:
             for field in required_fields:
-                assert field in sym.model_fields, f"Symbol missing field: {field}"
+                assert field in Symbol.model_fields, f"Symbol missing field: {field}"
                 assert getattr(sym, field) is not None, f"Symbol {sym.name} has None for {field}"
 
 

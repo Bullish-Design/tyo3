@@ -220,6 +220,50 @@ cp target/debug/lib_native_impl.so ../src/tyo3/_native_impl.cpython-313-x86_64-l
 
 ---
 
+## 13. Release Build Takes ~16–60 Minutes First Time (Phase 5)
+
+**Severity:** DevEx — first-time build is extremely slow
+
+**Root cause:** The `release` profile enables LTO (`lto = true`) and `opt-level = 3`, and the ty/Ruff crates must be compiled from git source. The entire dependency graph (150+ crates) is compiled with full optimizations.
+
+**Measured time:** ~16 minutes 40 seconds on an AMD Ryzen 7 system. Slower machines or CI runners may take 30–60 minutes.
+
+**Resolution paths:**
+1. **Accept:** This is a one-time cost. Incremental builds are fast (~30s) after the initial build.
+2. **CI caching:** Use `actions/cache@v4` for `~/.cargo/registry`, `~/.cargo/git`, and `rust/target`. The `.github/workflows/ci.yml` has this step ready (commented out).
+3. **Debug-only CI:** Run `cargo build` (debug) in CI for test coverage, and only use release builds for deployment. Debug builds take ~30s incremental.
+
+---
+
+## 14. Cold vs Warm Check Performance Gap (Phase 5)
+
+**Severity:** Non-blocker — documented design characteristic
+
+**Root cause:** The first `check()` call on a freshly-opened `ProjectDatabase` must parse, analyse, and type-check all files from scratch. Subsequent calls on the same database benefit from the Salsa incremental computation cache.
+
+**Measured:**
+- Cold check (first call after open): 0.7–1.1s for small (1–3 file) fixtures
+- Warm check (second+ call): ~0.000s (**2688x speedup**)
+- First navigation operation after check also benefits from Salsa cache
+
+**Impact:** The first operation after `open()` or `reload()` is measurably slower. For an LSP server use case, this means the first hover/goto request after project load will have a ~1s latency. Subsequent requests are instant.
+
+**Acceptable for v0.1:** The 1s cold latency is well within acceptable bounds for interactive use. The type-checker in ty 0.0.40 is fast even on cold starts compared to comparable tools.
+
+---
+
+## 15. Hypothesis Tests Use Pre-Validated Fixture Pairs (Phase 5)
+
+**Severity:** Non-blocker — design trade-off
+
+**Root cause:** Generating arbitrary (fixture, filename) pairs with Hypothesis leads to a high filtering rate (~86% filtered) because only 8 out of 42 possible combos are valid (7 fixtures × 6 filenames). The `assume()`-based approach triggers Hypothesis's `HealthCheck.filter_too_much` and also wastes generation effort.
+
+**Current approach:** Pre-validated `FIXTURE_FILE_PAIRS` list with 8 known-valid combinations. Hypothesis generates 100 random (line, column) positions for each valid pair. This avoids filtering entirely while still testing the no-panic invariant exhaustively.
+
+**Trade-off:** The test no longer discovers unexpected path-resolution behavior for unknown (fixture, filename) pairs. Those cases are covered separately by the integration tests which test bad paths explicitly.
+
+---
+
 ## Summary
 
 | # | Limitation | Severity | Phase to Resolve |
@@ -236,3 +280,6 @@ cp target/debug/lib_native_impl.so ../src/tyo3/_native_impl.cpython-313-x86_64-l
 | 10 | Semantic tokens / type hierarchy | Deferred | v0.2+ |
 | 11 | Path model str repr not filesystem path | Non-blocker | Phase 5+ |
 | 12 | Negative positions raise OverflowError | Cosmetic | Phase 5+ |
+| 13 | Release build ~16-60 min first time | DevEx | Phase 5 ✅ documented |
+| 14 | Cold vs warm check performance gap | Non-blocker | Phase 5 ✅ documented |
+| 15 | Hypothesis uses pre-validated pairs | Non-blocker | Phase 5 ✅ documented |

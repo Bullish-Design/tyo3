@@ -1,0 +1,78 @@
+# TyO3 CI — Rust backend build + test pipeline
+#
+# Runs in the devenv shell with the pinned Rust toolchain and Python 3.13.
+# The build: (1) compiles the Rust extension, (2) copies the .so into the
+# Python package, (3) runs the full test suite.
+#
+# See RUST_BACKEND_IMPLEMENTATION.md §9.4 for the design.
+#
+# NOTE: This workflow does NOT cache cargo dependencies because the
+# ty/Ruff crates are large and tied to a specific commit hash. If CI
+# times out on the initial build, add a cargo cache step (see below).
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - "**.md"
+      - ".scratch/**"
+      - ".agents/**"
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  PYTHONPATH: src
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixpkgs-unstable
+
+      - name: Install devenv
+        uses: cachix/devenv-action@v1
+
+      # Optional: cache Cargo dependencies across builds
+      # Uncomment if the initial build is too slow in CI:
+      #
+      # - name: Cache Cargo dependencies
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       ~/.cargo/registry
+      #       ~/.cargo/git
+      #       rust/target
+      #     key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+
+      - name: Build Rust extension
+        run: |
+          cd rust
+          cargo build --release
+          cp target/release/lib_native_impl.so ../src/tyo3/_native_impl.cpython-313-x86_64-linux-gnu.so
+
+      - name: Verify native extension is importable
+        run: |
+          python -c "
+          from tyo3.rust_project import RustProject
+          print('Rust extension imported successfully')
+          "
+
+      - name: Run tests
+        run: |
+          uv pip install hypothesis  # for property-based tests
+          python -m pytest src/tyo3/tests/ -v -x --cov=tyo3 --cov-report=term-missing
+
+      - name: Run performance benchmarks
+        run: |
+          python -m pytest src/tyo3/tests/test_rust_performance.py -v -x
