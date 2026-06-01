@@ -18,7 +18,14 @@ from tyo3.models.analysis import (
     Range,
 )
 from tyo3.models.symbols import Symbol, SymbolKind
-from tyo3.models.navigation import DefinitionTarget, Reference, ReferenceKind
+from tyo3.models.navigation import (
+    DefinitionTarget,
+    HoverContent,
+    HoverContentKind,
+    HoverResult,
+    Reference,
+    ReferenceKind,
+)
 from tyo3.models.advanced import SemanticToken, SemanticTokenModifier, SemanticTokenType
 
 __all__ = [
@@ -42,8 +49,11 @@ __all__ = [
     "Symbol",
     # Navigation
     "ReferenceKind",
+    "HoverContentKind",
     "DefinitionTarget",
     "Reference",
+    "HoverContent",
+    "HoverResult",
     # Advanced
     "SemanticTokenType",
     "SemanticTokenModifier",

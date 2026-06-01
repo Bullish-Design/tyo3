@@ -15,6 +15,8 @@ from tyo3.models.core import (
     TyProjectConfig,
 )
 
+# ── Black-box stubs (used when `use_rust=False`) ────────────────────────
+
 
 def project_files(root: Path, config: TyProjectConfig) -> list[Path]:
     """Black-box: discover Python files belonging to a project root.
@@ -50,11 +52,40 @@ def is_dependency(path: Path) -> bool:
     return False
 
 
-class ProjectService:
-    """Implements project lifecycle rules from tyo3-core.allium."""
+# ── ProjectService ───────────────────────────────────────────────────────
 
-    def __init__(self) -> None:
+
+class ProjectService:
+    """Implements project lifecycle rules from tyo3-core.allium.
+
+    Parameters
+    ----------
+    use_rust:
+        When ``True``, operations are backed by the Rust ty engine via
+        :class:`~tyo3.rust_project.RustProject`.  Default ``False`` keeps
+        existing black-box stubs for unit testing.
+    """
+
+    def __init__(self, use_rust: bool = False) -> None:
         self._projects: list[TyProject] = []
+        self._use_rust: bool = use_rust
+        # RustProject instances keyed by root path string
+        self._rust_projects: dict[str, object] = {}
+
+    # ── Rust backend access ──────────────────────────────────────────
+
+    def _get_rust_project(self, root: Path) -> Optional[object]:
+        """Return the RustProject for *root*, or ``None``."""
+        key = str(root)
+        return self._rust_projects.get(key)
+
+    def _register_rust_project(self, root: Path, rp: object) -> None:
+        """Store a RustProject instance keyed by root."""
+        self._rust_projects[str(root)] = rp
+
+    def _remove_rust_project(self, root: Path) -> None:
+        """Remove the stored RustProject for *root*."""
+        self._rust_projects.pop(str(root), None)
 
     # ── Query helpers ──────────────────────────────────────────────────
 
@@ -80,15 +111,33 @@ class ProjectService:
         self, root: Path, config: Optional[TyProjectConfig] = None
     ) -> tuple[TyProject, list[ProjectFile]]:
         """OpenProject: requires root is a directory and no open project exists for root."""
-        if not is_directory(root):
+        # ── Precondition: path is a directory ──
+        if not self._use_rust and not is_directory(root):
             raise ValueError(f"Path not found: {root}")
 
+        # ── Precondition: no duplicate open project ──
         existing = self.find_open_project(root)
         if existing is not None:
             raise ValueError(f"Project already open: {root}")
 
         default_config = TyProjectConfig()
         effective = config if config is not None else default_config
+
+        # ── Open Rust backend (if available) ──
+        if self._use_rust:
+            from tyo3.rust_project import RustProject
+            from pathlib import Path as StdPath
+
+            real_path = StdPath(*root.components)  # type: ignore[arg-type]
+            rp = RustProject(real_path)
+            self._register_rust_project(root, rp)
+
+            # Use Rust for file discovery
+            discovered_paths: list[Path] = []
+            for f in rp.files():
+                discovered_paths.append(Path(components=StdPath(f).parts))  # type: ignore[arg-type]
+        else:
+            discovered_paths = project_files(root, effective)
 
         project = TyProject(
             root=root,
@@ -104,7 +153,6 @@ class ProjectService:
         )
         self._projects.append(project)
 
-        discovered_paths = project_files(root, effective)
         files: list[ProjectFile] = []
         for path in discovered_paths:
             if is_first_party(path):
@@ -128,6 +176,11 @@ class ProjectService:
         if not project.is_open:
             raise ValueError("Project is not open")
 
+        # Reload Rust backend if available
+        rp = self._get_rust_project(project.root)
+        if rp is not None:
+            rp.reload()  # type: ignore[union-attr]
+
         project.last_reloaded_at = datetime.now(timezone.utc)
         project.status = ProjectStatus.OPEN
         return project
@@ -139,6 +192,12 @@ class ProjectService:
         if not project.is_open:
             raise ValueError("Project is not open")
 
+        # Close Rust backend if available
+        rp = self._get_rust_project(project.root)
+        if rp is not None:
+            rp.close()  # type: ignore[union-attr]
+            self._remove_rust_project(project.root)
+
         project.status = ProjectStatus.CLOSED
         return project
 
@@ -147,6 +206,22 @@ class ProjectService:
     def list_files(self, project: TyProject) -> list[ProjectFile]:
         if not project.is_open:
             raise ValueError("Project is not open")
+
+        rp = self._get_rust_project(project.root)
+        if rp is not None:
+            result: list[ProjectFile] = []
+            for f in rp.files():  # type: ignore[union-attr]
+                from pathlib import Path as StdPath
+                p = StdPath(f)
+                result.append(
+                    ProjectFile(
+                        path=Path(components=list(p.parts)),  # type: ignore[arg-type]
+                        project=project,
+                        file_category=FileCategory.FIRST_PARTY,
+                    )
+                )
+            return result
+
         return [f for f in self._get_all_files() if f.project.root == project.root]
 
     def filter_files_by_category(

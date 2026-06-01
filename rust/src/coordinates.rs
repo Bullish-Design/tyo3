@@ -1,5 +1,5 @@
 use ruff_source_file::{LineIndex, OneIndexed, PositionEncoding};
-use ruff_text_size::{TextSize, TextLen};
+use ruff_text_size::TextSize;
 
 use crate::dto::{PositionDto, RangeDto};
 

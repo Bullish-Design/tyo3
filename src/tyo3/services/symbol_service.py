@@ -40,10 +40,31 @@ def first_project_file(project: TyProject) -> Optional[ProjectFile]:
 
 
 class SymbolService:
-    """Implements symbol discovery rules from tyo3-symbols.allium."""
+    """Implements symbol discovery rules from tyo3-symbols.allium.
 
-    def __init__(self) -> None:
+    Parameters
+    ----------
+    use_rust:
+        When ``True``, symbol queries are backed by the Rust ty engine via
+        :class:`~tyo3.rust_project.RustProject`.  Default ``False`` keeps
+        existing black-box stubs for unit testing.
+    """
+
+    def __init__(self, use_rust: bool = False) -> None:
         self._symbols: list[Symbol] = []
+        self._use_rust: bool = use_rust
+        # RustProject instances keyed by root path string
+        self._rust_projects: dict[str, object] = {}
+
+    # ── Rust backend access ─────────────────────────────────────────
+
+    def _get_rust_project(self, root_path: str) -> Optional[object]:
+        """Return the RustProject for *root_path*, or ``None``."""
+        return self._rust_projects.get(root_path)
+
+    def set_rust_project(self, root_path: str, rp: object) -> None:
+        """Register a RustProject instance for dependency injection."""
+        self._rust_projects[root_path] = rp
 
     @property
     def symbols(self) -> list[Symbol]:
@@ -59,6 +80,15 @@ class SymbolService:
             raise ValueError("Project is not open")
         if file.project.root != project.root:
             raise ValueError("File does not belong to project")
+
+        rp = self._get_rust_project(str(project.root))
+        if rp is not None and self._use_rust:
+            file_path = "/".join(file.path.components)
+            symbols = rp.document_symbols(file_path)  # type: ignore[union-attr]
+            for s in symbols:
+                s.project = project
+                self._symbols.append(s)
+            return symbols
 
         symbols = document_symbols(file)
         for s in symbols:
@@ -76,6 +106,14 @@ class SymbolService:
             raise ValueError("Project is not open")
         if len(query) < 1:
             return []
+
+        rp = self._get_rust_project(str(project.root))
+        if rp is not None and self._use_rust:
+            matches = rp.workspace_symbols(query)  # type: ignore[union-attr]
+            for s in matches:
+                s.project = project
+                self._symbols.append(s)
+            return matches
 
         matches = workspace_symbols(project, query)
         for s in matches:
@@ -103,6 +141,8 @@ class SymbolService:
         if context_file.project.root != project.root:
             raise ValueError("Context file does not belong to project")
 
+        # NOTE: all_symbols is not callable from Rust (QueryPattern not
+        # publicly exported from ty_ide).  Always fall back to stub.
         matches = all_symbols(project, query, context_file)
         for s in matches:
             s.project = project

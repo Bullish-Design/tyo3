@@ -9,10 +9,10 @@ inputs:
   #mk-shell-bin:
   #  url: github:rrbutani/nix-mk-shell-bin
   mypy-agent:
-    url: github:Bullish-Design/mypi-agent?ref=v0.3.6
+    url: github:Bullish-Design/mypi-agent?ref=v0.4.0
     flake: false
   allium-env:
-    url: github:Bullish-Design/allium-env?ref=v0.3.3
+    url: github:Bullish-Design/allium-env?ref=v0.3.5
     flake: false
 
 imports:

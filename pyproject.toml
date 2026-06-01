@@ -28,7 +28,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
-module-name = "tyo3.rust_backend"
+module-name = "tyo3._native_impl"
 manifest-path = "rust/Cargo.toml"
 
 [tool.uv]

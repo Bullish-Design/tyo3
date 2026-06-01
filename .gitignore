@@ -16,6 +16,7 @@ uv.lock
 .loci/**
 secretspec.toml
 devenv.local.yaml
+.vscode
 
 
 
@@ -235,3 +236,5 @@ rust/target/
 
 # pre-commit
 .pre-commit-config.yaml
+
+.env.*
