@@ -73,9 +73,20 @@ class NavigationService:
         """Register a RustProject instance for dependency injection."""
         self._rust_projects[root_path] = rp
 
+    @staticmethod
+    def _path_to_str(path: Path) -> str:
+        """Convert a Path model to a file-system path string.
+
+        Handles the root ``/`` component correctly (avoids ``//`` prefix).
+        """
+        components = path.components
+        if components and components[0] == "/":
+            return "/" + "/".join(components[1:])
+        return "/".join(components)
+
     def _file_path_str(self, file: ProjectFile) -> str:
         """Convert a ProjectFile's path to a file-system path string."""
-        return "/".join(file.path.components)
+        return self._path_to_str(file.path)
 
     # ── GotoDefinition ─────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from tyo3.models.core import ProjectFile, TyProject
+from tyo3.models.core import Path, ProjectFile, TyProject
 from tyo3.models.symbols import Symbol
 
 
@@ -58,6 +58,14 @@ class SymbolService:
 
     # ── Rust backend access ─────────────────────────────────────────
 
+    @staticmethod
+    def _path_to_str(path: Path) -> str:
+        """Convert a Path model to a file-system path string."""
+        components = path.components
+        if components and components[0] == "/":
+            return "/" + "/".join(components[1:])
+        return "/".join(components)
+
     def _get_rust_project(self, root_path: str) -> Optional[object]:
         """Return the RustProject for *root_path*, or ``None``."""
         return self._rust_projects.get(root_path)
@@ -83,7 +91,7 @@ class SymbolService:
 
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
-            file_path = "/".join(file.path.components)
+            file_path = self._path_to_str(file.path)
             symbols = rp.document_symbols(file_path)  # type: ignore[union-attr]
             for s in symbols:
                 s.project = project

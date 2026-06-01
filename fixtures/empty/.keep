@@ -1,0 +1,2 @@
+# Empty directory — used for edge case testing.
+# Tests that TyO3 handles an empty project gracefully.

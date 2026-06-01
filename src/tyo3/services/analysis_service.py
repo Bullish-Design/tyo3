@@ -9,7 +9,7 @@ from tyo3.models.analysis import (
     Diagnostic,
     DiagnosticSeverity,
 )
-from tyo3.models.core import ProjectFile, TyProject
+from tyo3.models.core import Path, ProjectFile, TyProject
 
 
 def run_ty_check(project: TyProject) -> CheckResult:
@@ -43,6 +43,14 @@ class AnalysisService:
         self._rust_projects: dict[str, object] = {}
 
     # ── Rust backend access ─────────────────────────────────────────
+
+    @staticmethod
+    def _path_to_str(path: Path) -> str:
+        """Convert a Path model to a file-system path string."""
+        components = path.components
+        if components and components[0] == "/":
+            return "/" + "/".join(components[1:])
+        return "/".join(components)
 
     def _get_rust_project(self, root_path: str) -> Optional[object]:
         """Return the RustProject for *root_path*, or ``None``."""

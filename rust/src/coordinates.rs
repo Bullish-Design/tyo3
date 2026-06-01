@@ -4,6 +4,11 @@ use ruff_text_size::TextSize;
 use crate::dto::{PositionDto, RangeDto};
 
 /// Convert a 1-based Python Position to a ruff TextSize byte offset.
+///
+/// Returns an error if:
+/// - line or column is < 1
+/// - line exceeds the file's total number of lines
+/// - column exceeds the line's length
 pub fn position_to_offset(
     source: &str,
     pos: &PositionDto,
@@ -18,6 +23,15 @@ pub fn position_to_offset(
         .column
         .checked_sub(1)
         .ok_or_else(|| "Column must be >= 1".to_string())? as usize;
+
+    // Validate line is within file bounds
+    let total_lines = line_index.line_count();
+    if line >= total_lines {
+        return Err(format!(
+            "Line {} exceeds file length ({} lines)",
+            pos.line, total_lines
+        ));
+    }
 
     let line_start = line_index.line_start(OneIndexed::from_zero_indexed(line), source);
 

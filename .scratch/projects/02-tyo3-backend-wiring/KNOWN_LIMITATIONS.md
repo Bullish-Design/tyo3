@@ -1,7 +1,7 @@
 # TyO3 Known Limitations
 
 > **Version:** v0.2.0
-> **Last updated:** 2026-06-01 (Phase 3 complete)
+> **Last updated:** 2026-06-01 (Phase 4 complete)
 > **Related:** `RUST_BACKEND_IMPLEMENTATION.md` (v0.2.0), `progress.md`
 
 This document tracks known limitations, upstream API gaps, and design trade-offs discovered during the TyO3 Rust backend wiring. Each limitation includes severity, the affected Allium spec rule(s), and the path to resolution.
@@ -157,7 +157,7 @@ cp target/debug/lib_native_impl.so ../src/tyo3/_native_impl.cpython-313-x86_64-l
 
 **Why:** The existing test suite (75 tests) uses abstract `Path` models that don't correspond to real filesystem paths. Making `use_rust=True` the default would break all tests. The current design allows gradual migration.
 
-**Resolution:** Phase 4 will add integration tests with real fixture projects and `use_rust=True`. At that point, the default can be flipped or the black-box stubs can be removed.
+**Resolution:** Phase 4 completed integration tests with real fixture projects and `use_rust=True` (44 tests). The default can be flipped or the black-box stubs removed once all existing tests are migrated to use real fixtures.
 
 ---
 
@@ -188,6 +188,38 @@ cp target/debug/lib_native_impl.so ../src/tyo3/_native_impl.cpython-313-x86_64-l
 
 ---
 
+## 11. Path Model String Representation Not Filesystem Path (Phase 4)
+
+**Severity:** Non-blocker — documented workaround
+
+**Root cause:** The `Path` model's default `__str__` (inherited from Pydantic `BaseModel`) returns a model repr like `"components=['/', 'home', 'user', 'project']"`, not a filesystem path string like `"/home/user/project"`. This makes it unsuitable as a dictionary key for cross-service RustProject lookups.
+
+**Current workaround:** Service classes that need to convert `Path` components to a filesystem string use a static `_path_to_str()` helper that handles the root `/` component correctly. The service layer uses `str(root)` for registry keys (matching Pydantic's `__str__`), which is consistent across services but not human-readable.
+
+**Where used:**
+- `NavigationService._path_to_str()` — converts `Path` model to filesystem path for `RustProject` calls
+- `SymbolService._path_to_str()` — same
+- `AnalysisService._path_to_str()` — same
+
+**Resolution paths:**
+1. Override `Path.__str__` to return the filesystem path (breaking change for existing key lookups).
+2. Use a dedicated path-to-string converter consistently across all services.
+3. Replace `Path` model with `pathlib.Path` in the RustProject boundary layer.
+
+---
+
+## 12. Negative Position Values Raise OverflowError (Phase 4)
+
+**Severity:** Cosmetic — Python exception type differs from expected
+
+**Root cause:** The Rust PyO3 methods accept `u32` for line/column parameters. When Python passes a negative value (e.g., `-1`), PyO3 raises `OverflowError` during type conversion before the Rust code runs. This differs from the `PositionError` that zero values produce (which are caught by Rust validation).
+
+**Impact:** Python code expecting uniform `PositionError` for all invalid positions must also catch `OverflowError` for negative values.
+
+**Resolution:** Change Rust method signatures to accept `i64` and validate `>= 1` in Rust, or add Python-side wrappers that convert negative values to `PositionError` before calling Rust.
+
+---
+
 ## Summary
 
 | # | Limitation | Severity | Phase to Resolve |
@@ -196,9 +228,11 @@ cp target/debug/lib_native_impl.so ../src/tyo3/_native_impl.cpython-313-x86_64-l
 | 2 | Hover content flattened to Markdown | Non-blocker | v0.2+ or upstream fix |
 | 3 | No GIL release (Salsa single-threaded) | Non-blocker | v0.2+ (snapshot approach) |
 | 4 | Module naming: `_native_impl` submodule | Resolved | N/A |
-| 5 | Error types partially resolved | Cosmetic | Phase 4+ |
-| 6 | `BackendInfoDto` unused | Cosmetic | Phase 4+ |
-| 7 | Maturin mixed layout not working | DevEx | Phase 4+ |
-| 8 | `use_rust=False` default | Non-blocker | Phase 4 |
-| 9 | `PYTHONPATH=src` required | DevEx | Phase 4+ |
+| 5 | Error types partially resolved | Cosmetic | Phase 5+ |
+| 6 | `BackendInfoDto` unused | Cosmetic | Phase 5+ |
+| 7 | Maturin mixed layout not working | DevEx | Phase 5+ |
+| 8 | `use_rust=False` default | Non-blocker | Phase 5 |
+| 9 | `PYTHONPATH=src` required | DevEx | Phase 5+ |
 | 10 | Semantic tokens / type hierarchy | Deferred | v0.2+ |
+| 11 | Path model str repr not filesystem path | Non-blocker | Phase 5+ |
+| 12 | Negative positions raise OverflowError | Cosmetic | Phase 5+ |
