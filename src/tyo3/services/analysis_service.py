@@ -109,7 +109,7 @@ class AnalysisService:
             file_path_str = "/".join(file.path.components)
             file_diagnostics = [
                 d for d in full_result.diagnostics
-                if d.file is not None and hasattr(d, 'file')
+                if d.file is not None
             ]
             # Note: Rust diagnostics don't have file set currently; keep stub behavior
             result = CheckResult(

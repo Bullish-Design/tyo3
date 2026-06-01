@@ -236,10 +236,8 @@ class ProjectService:
         ]
 
     def _get_all_files(self) -> list[ProjectFile]:
-        all_files: list[ProjectFile] = []
-        for p in self._projects:
-            all_files.extend(p.files) if hasattr(p, "files") else None
-        return all_files
+        """Return all files across all projects. Stub-mode only."""
+        return []
 
     # ── QueryBackendInfo ───────────────────────────────────────────────
 

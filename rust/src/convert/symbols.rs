@@ -22,7 +22,7 @@ pub fn convert_symbol(
     SymbolDto {
         name: name.to_string(),
         qualified_name,
-        kind: kind.to_string().to_string(),
+        kind: kind.to_string().to_owned(),
         location: FileRangeDto {
             path: file_path.to_string(),
             range: name_range_dto,

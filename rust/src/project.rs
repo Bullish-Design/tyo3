@@ -433,10 +433,9 @@ impl PyTyProject {
                 let file_path = file.path(&state.db).as_str().to_string();
 
                 // Render the entire hover as Markdown
-                let rendered = format!(
-                    "{}",
-                    hover_value.display(&state.db, ty_ide::MarkupKind::Markdown)
-                );
+                let rendered = hover_value
+                    .display(&state.db, ty_ide::MarkupKind::Markdown)
+                    .to_string();
 
                 let hover_dto = convert::hover::convert_hover_markdown(
                     &source_str,

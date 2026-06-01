@@ -2,7 +2,6 @@ use pyo3::prelude::*;
 
 mod convert;
 mod dto;
-mod errors;
 mod project;
 mod coordinates;
 mod files;

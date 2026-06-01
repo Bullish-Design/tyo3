@@ -3,9 +3,6 @@ mod diagnostics;
 mod symbols;
 mod navigation;
 mod hover;
-mod tokens;
-mod hierarchy;
-
 pub use coordinates::*;
 pub use diagnostics::*;
 pub use symbols::*;
