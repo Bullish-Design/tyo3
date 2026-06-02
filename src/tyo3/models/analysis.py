@@ -5,6 +5,7 @@ Derived from tyo3-analysis.allium
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -43,7 +44,7 @@ class CheckResult(BaseModel):
 # ── Enums ────────────────────────────────────────────────────────────────
 
 
-class DiagnosticSeverity(str):
+class DiagnosticSeverity(StrEnum):
     """Severity level for a diagnostic."""
     FATAL = "fatal"
     ERROR = "error"
@@ -60,7 +61,7 @@ class Diagnostic(BaseModel):
     project: TyProject
     file: Optional[ProjectFile] = None
     range: Optional[Range] = None
-    severity: str = "error"  # DiagnosticSeverity
+    severity: DiagnosticSeverity = DiagnosticSeverity.ERROR
     code: Optional[str] = None
     message: str
     details: set[str] = Field(default_factory=set)

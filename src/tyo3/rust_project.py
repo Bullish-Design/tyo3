@@ -35,6 +35,7 @@ from tyo3.exceptions import (
 from tyo3.models.analysis import (
     CheckResult,
     Diagnostic,
+    DiagnosticSeverity,
     FileRange as ModelFileRange,
     Position,
     Range,
@@ -50,7 +51,7 @@ from tyo3.models.navigation import (
     Reference,
     ReferenceKind,
 )
-from tyo3.models.symbols import Symbol
+from tyo3.models.symbols import Symbol, SymbolKind
 
 # The PyO3 extension module — must match
 # #[pyo3(name = "_native_impl")] in rust/src/lib.rs
@@ -150,7 +151,7 @@ class RustProject:
                     project=self._project_model,
                     file=None,  # path-only for now
                     range=range_ref,
-                    severity=d.get("severity", "error"),
+                    severity=DiagnosticSeverity(d.get("severity", "error")),
                     code=d.get("code"),
                     message=d.get("message", ""),
                     details=set(d.get("details", [])),
@@ -193,7 +194,7 @@ class RustProject:
                     project=self._project_model,
                     name=s["name"],
                     qualified_name=s.get("qualified_name"),
-                    kind=s.get("kind", "unknown"),
+                    kind=SymbolKind(s.get("kind", "unknown")),
                     location=loc,
                     selection_range=sel_range,
                     container_name=s.get("container_name"),
@@ -230,7 +231,7 @@ class RustProject:
                     project=self._project_model,
                     name=s["name"],
                     qualified_name=s.get("qualified_name"),
-                    kind=s.get("kind", "unknown"),
+                    kind=SymbolKind(s.get("kind", "unknown")),
                     location=loc,
                     selection_range=sel_range,
                     container_name=s.get("container_name"),
@@ -300,7 +301,7 @@ class RustProject:
                     project=self._project_model,
                     name=sym_data["name"],
                     qualified_name=sym_data.get("qualified_name"),
-                    kind=sym_data.get("kind", "unknown"),
+                    kind=SymbolKind(sym_data.get("kind", "unknown")),
                     location=sym_loc,
                     selection_range=sym_sel,
                     container_name=sym_data.get("container_name"),
@@ -348,7 +349,7 @@ class RustProject:
                     project=self._project_model,
                     path=_string_path_to_typath(r["path"]),
                     range=_json_range_to_model(r["range"]),
-                    kind=r.get("kind", ReferenceKind.OTHER),
+                    kind=ReferenceKind(r.get("kind", "other")),
                 )
             )
         return refs

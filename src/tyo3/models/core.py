@@ -6,6 +6,7 @@ Derived from tyo3-core.allium
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -46,14 +47,14 @@ class BackendInfo(BaseModel):
 # ── Enums ────────────────────────────────────────────────────────────────
 
 
-class ProjectStatus(str):
+class ProjectStatus(StrEnum):
     """Lifecycle status of a TyO3 project."""
     CLOSED = "closed"
     OPEN = "open"
     ERROR = "error"
 
 
-class FileCategory(str):
+class FileCategory(StrEnum):
     """Classification of a project file."""
     FIRST_PARTY = "first_party"
     VENDORED = "vendored"
@@ -67,7 +68,7 @@ class FileCategory(str):
 class TyProject(BaseModel):
     """A TyO3 project session — the root object owned by one project root."""
     root: Path
-    status: str  # ProjectStatus
+    status: ProjectStatus
     coordinate_mode: str = "python"
     python_version: Optional[str] = None
     config_path: Optional[Path] = None
@@ -94,5 +95,5 @@ class ProjectFile(BaseModel):
     """A discovered Python file belonging to a TyO3 project."""
     path: Path
     project: TyProject
-    file_category: str  # FileCategory
+    file_category: FileCategory
     last_checked_at: Optional[datetime] = None

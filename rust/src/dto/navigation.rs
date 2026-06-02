@@ -10,9 +10,16 @@ pub struct DefinitionTargetDto {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceKindDto {
+    Read,
+    Write,
+    Other,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReferenceDto {
     pub path: String,
     pub range: RangeDto,
-    /// "read" | "write" | "other"
-    pub kind: String,
+    pub kind: ReferenceKindDto,
 }

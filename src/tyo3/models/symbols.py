@@ -5,6 +5,7 @@ Derived from tyo3-symbols.allium
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Optional
 
 from pydantic import BaseModel
@@ -16,7 +17,7 @@ from tyo3.models.core import TyProject
 # ── Enums ────────────────────────────────────────────────────────────────
 
 
-class SymbolKind(str):
+class SymbolKind(StrEnum):
     """Classification of a code symbol."""
     MODULE = "module"
     CLASS_ = "class_"
@@ -41,7 +42,7 @@ class Symbol(BaseModel):
     project: TyProject
     name: str
     qualified_name: Optional[str] = None
-    kind: str  # SymbolKind
+    kind: SymbolKind
     location: FileRange
     selection_range: Optional[Range] = None
     container_name: Optional[str] = None

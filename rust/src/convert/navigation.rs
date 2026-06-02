@@ -1,7 +1,7 @@
 use ruff_db::Db;
 
 use crate::coordinates;
-use crate::dto::{DefinitionTargetDto, ReferenceDto};
+use crate::dto::{DefinitionTargetDto, ReferenceDto, ReferenceKindDto};
 
 /// Convert a ty_ide NavigationTarget into a DefinitionTargetDto.
 pub fn convert_navigation_target(
@@ -67,11 +67,11 @@ pub fn convert_references(
         .collect()
 }
 
-/// Map ty_ide ReferenceKind to our string DTO.
-fn convert_reference_kind(kind: ty_ide::ReferenceKind) -> String {
+/// Map ty_ide ReferenceKind to our ReferenceKindDto.
+fn convert_reference_kind(kind: ty_ide::ReferenceKind) -> ReferenceKindDto {
     match kind {
-        ty_ide::ReferenceKind::Read => "read".to_string(),
-        ty_ide::ReferenceKind::Write => "write".to_string(),
-        ty_ide::ReferenceKind::Other => "other".to_string(),
+        ty_ide::ReferenceKind::Read => ReferenceKindDto::Read,
+        ty_ide::ReferenceKind::Write => ReferenceKindDto::Write,
+        ty_ide::ReferenceKind::Other => ReferenceKindDto::Other,
     }
 }

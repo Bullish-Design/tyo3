@@ -5,6 +5,7 @@ Derived from tyo3-advanced.allium
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -16,7 +17,7 @@ from tyo3.models.core import ProjectFile, TyProject
 # ── Enums ────────────────────────────────────────────────────────────────
 
 
-class SemanticTokenType(str):
+class SemanticTokenType(StrEnum):
     """Classification of a semantic token."""
     NAMESPACE = "namespace"
     CLASS_ = "class_"
@@ -35,7 +36,7 @@ class SemanticTokenType(str):
     TYPE_PARAMETER = "type_parameter"
 
 
-class SemanticTokenModifier(str):
+class SemanticTokenModifier(StrEnum):
     """Modifier attribute for a semantic token."""
     DEFINITION = "definition"
     READONLY = "readonly"
@@ -51,5 +52,5 @@ class SemanticToken(BaseModel):
     project: TyProject
     file: ProjectFile
     range: Range
-    token_type: str  # SemanticTokenType
-    modifiers: set[str] = Field(default_factory=set)  # set of SemanticTokenModifier
+    token_type: SemanticTokenType
+    modifiers: set[SemanticTokenModifier] = Field(default_factory=set)

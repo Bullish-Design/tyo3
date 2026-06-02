@@ -18,7 +18,7 @@ from tyo3.models.symbols import Symbol
 # ── Enums ────────────────────────────────────────────────────────────────
 
 
-class ReferenceKind(str):
+class ReferenceKind(StrEnum):
     """Classification of a reference occurrence."""
     READ = "read"
     WRITE = "write"
@@ -56,7 +56,7 @@ class Reference(BaseModel):
     project: TyProject
     path: Path
     range: Range
-    kind: str  # ReferenceKind
+    kind: ReferenceKind
 
 
 class HoverContent(BaseModel):

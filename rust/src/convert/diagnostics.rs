@@ -1,6 +1,6 @@
 use ruff_db::diagnostic::{Diagnostic, DiagnosticId};
 
-use crate::dto::DiagnosticDto;
+use crate::dto::{DiagnosticDto, SeverityDto};
 
 /// Convert a slice of ruff_db diagnostics into DiagnosticDto objects.
 ///
@@ -11,12 +11,10 @@ pub fn convert_diagnostics(diagnostics: &[Diagnostic]) -> Vec<DiagnosticDto> {
     diagnostics
         .iter()
         .map(|d| {
-            let severity = severity_to_string(d.severity());
-
             DiagnosticDto {
                 file: None,
                 range: None,
-                severity,
+                severity: severity_to_dto(d.severity()),
                 code: diagnostic_id_to_code(d.id()),
                 message: d.primary_message().to_string(),
                 details: vec![],
@@ -33,12 +31,12 @@ fn diagnostic_id_to_code(id: DiagnosticId) -> Option<String> {
     }
 }
 
-/// Convert a ruff_db Severity to a lowercase string matching the Pydantic model.
-fn severity_to_string(severity: ruff_db::diagnostic::Severity) -> String {
+/// Convert a ruff_db Severity to a SeverityDto.
+fn severity_to_dto(severity: ruff_db::diagnostic::Severity) -> SeverityDto {
     match severity {
-        ruff_db::diagnostic::Severity::Fatal => "fatal".to_string(),
-        ruff_db::diagnostic::Severity::Error => "error".to_string(),
-        ruff_db::diagnostic::Severity::Warning => "warning".to_string(),
-        ruff_db::diagnostic::Severity::Info => "information".to_string(),
+        ruff_db::diagnostic::Severity::Fatal => SeverityDto::Fatal,
+        ruff_db::diagnostic::Severity::Error => SeverityDto::Error,
+        ruff_db::diagnostic::Severity::Warning => SeverityDto::Warning,
+        ruff_db::diagnostic::Severity::Info => SeverityDto::Information,
     }
 }

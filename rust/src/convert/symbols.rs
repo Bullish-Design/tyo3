@@ -1,5 +1,23 @@
 use crate::coordinates;
-use crate::dto::{FileRangeDto, SymbolDto};
+use crate::dto::{FileRangeDto, SymbolDto, SymbolKindDto};
+
+/// Map a ty_ide SymbolKind to a SymbolKindDto.
+fn symbol_kind_to_dto(kind: &ty_ide::SymbolKind) -> SymbolKindDto {
+    match kind {
+        ty_ide::SymbolKind::Module => SymbolKindDto::Module,
+        ty_ide::SymbolKind::Class => SymbolKindDto::Class,
+        ty_ide::SymbolKind::Function => SymbolKindDto::Function,
+        ty_ide::SymbolKind::Method => SymbolKindDto::Method,
+        ty_ide::SymbolKind::Constructor => SymbolKindDto::Constructor,
+        ty_ide::SymbolKind::Variable => SymbolKindDto::Variable,
+        ty_ide::SymbolKind::Constant => SymbolKindDto::Constant,
+        ty_ide::SymbolKind::Field => SymbolKindDto::Field,
+        ty_ide::SymbolKind::Parameter => SymbolKindDto::Parameter,
+        ty_ide::SymbolKind::Property => SymbolKindDto::Property,
+        ty_ide::SymbolKind::TypeParameter => SymbolKindDto::TypeParameter,
+        ty_ide::SymbolKind::Import => SymbolKindDto::Import,
+    }
+}
 
 /// Convert a ty_ide SymbolInfo into a stable SymbolDto.
 ///
@@ -22,7 +40,7 @@ pub fn convert_symbol(
     SymbolDto {
         name: name.to_string(),
         qualified_name,
-        kind: kind.to_string().to_owned(),
+        kind: symbol_kind_to_dto(kind),
         location: FileRangeDto {
             path: file_path.to_string(),
             range: name_range_dto,
