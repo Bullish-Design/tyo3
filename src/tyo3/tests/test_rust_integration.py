@@ -69,29 +69,29 @@ class TestProjectLifecycle:
         rp = RustProject(fixture_path("simple_package"))
         files = rp.files()
         assert len(files) >= 1
-        assert any("main.py" in f for f in files)
+        assert any("main.py" in str(f) for f in files)
         rp.close()
 
     def test_open_imports_package(self) -> None:
         rp = RustProject(fixture_path("imports"))
         files = rp.files()
         assert len(files) >= 2
-        assert any("main.py" in f for f in files)
-        assert any("math_ops.py" in f for f in files)
+        assert any("main.py" in str(f) for f in files)
+        assert any("math_ops.py" in str(f) for f in files)
         rp.close()
 
     def test_open_classes_package(self) -> None:
         rp = RustProject(fixture_path("classes"))
         files = rp.files()
         assert len(files) >= 1
-        assert any("models.py" in f for f in files)
+        assert any("models.py" in str(f) for f in files)
         rp.close()
 
     def test_open_standalone_script(self) -> None:
         rp = RustProject(fixture_path("standalone"))
         files = rp.files()
         assert len(files) >= 1
-        assert any("script.py" in f for f in files)
+        assert any("script.py" in str(f) for f in files)
         rp.close()
 
     def test_open_empty_directory(self) -> None:
@@ -105,7 +105,7 @@ class TestProjectLifecycle:
         rp = RustProject(fixture_path("unicode_positions"))
         files = rp.files()
         assert len(files) >= 1
-        assert any("unicode.py" in f for f in files)
+        assert any("unicode.py" in str(f) for f in files)
         rp.close()
 
     def test_reload_preserves_files(self) -> None:
@@ -144,7 +144,7 @@ class TestFileDiscovery:
         rp = RustProject(fixture_path("simple_package"))
         files = rp.files()
         for f in files:
-            assert f.startswith("/"), f"Expected absolute path, got: {f}"
+            assert str(f).startswith("/"), f"Expected absolute path, got: {f}"
         rp.close()
 
     def test_files_after_reload(self) -> None:
@@ -324,8 +324,8 @@ class TestNavigation:
             rp.goto_definition("main.py", 0, 1)
         with pytest.raises(PositionError):
             rp.goto_definition("main.py", 1, 0)
-        # Negative values raise OverflowError from PyO3 u32 conversion
-        with pytest.raises(OverflowError):
+        # Negative values raise PositionError (mapped from PyO3 OverflowError)
+        with pytest.raises(PositionError):
             rp.goto_definition("main.py", -1, 1)
         rp.close()
 

@@ -90,7 +90,7 @@ def _path_in_fixture(rp: RustProject, filename: str) -> bool:
     """Check if *filename* (basename) exists in the project."""
     try:
         files = rp.files()
-        return any(StdPath(f).name == filename for f in files)
+        return any(f.name == filename for f in files)
     except Exception:
         return False
 
@@ -318,7 +318,7 @@ def test_files_are_unique_and_absolute(fixture_name: str) -> None:
         files = rp.files()
         assert len(files) == len(set(files)), "Duplicate file paths"
         for f in files:
-            assert f.startswith("/"), f"Non-absolute: {f}"
+            assert str(f).startswith("/"), f"Non-absolute: {f}"
             assert StdPath(f).exists(), f"Missing on disk: {f}"
     finally:
         rp.close()

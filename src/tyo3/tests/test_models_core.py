@@ -11,8 +11,12 @@ Obligation groups:
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
+import pytest
+from pydantic import ValidationError
+
 from tyo3.models.core import (
     BackendInfo,
+    CoordinateMode,
     FileCategory,
     ProjectFile,
     ProjectStatus,
@@ -138,7 +142,8 @@ class TestTyProject:
         )
         assert project.root == root
         assert project.status == ProjectStatus.OPEN
-        assert project.coordinate_mode == "python"  # default
+        assert project.coordinate_mode == CoordinateMode.PYTHON
+        assert project.coordinate_mode == "python"  # StrEnum is still a str
         assert project.opened_at == now
         assert project.last_reloaded_at is None  # optional
 
@@ -197,6 +202,26 @@ class TestTyProject:
             opened_at=datetime.now(UTC),
         )
         assert len(project.extra_search_paths) == 2
+
+
+class TestCoordinateMode:
+    def test_default_is_python(self) -> None:
+        proj = TyProject(
+            root=PurePosixPath("/proj"),
+            status=ProjectStatus.OPEN,
+            opened_at=datetime.now(UTC),
+        )
+        assert proj.coordinate_mode == CoordinateMode.PYTHON
+        assert proj.coordinate_mode == "python"  # StrEnum is still a str
+
+    def test_rejects_invalid_mode(self) -> None:
+        with pytest.raises(ValidationError):
+            TyProject(
+                root=PurePosixPath("/proj"),
+                status=ProjectStatus.OPEN,
+                coordinate_mode="invalid_mode",
+                opened_at=datetime.now(UTC),
+            )
 
 
 class TestProjectFile:

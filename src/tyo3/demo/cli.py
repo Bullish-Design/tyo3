@@ -207,7 +207,7 @@ def _cmd_info(session: TyO3Session, args: list[str]) -> None:
     """Show project information."""
     root = session.root
     files = session.files()
-    py_files = [f for f in files if f.endswith(".py")]
+    py_files = [f for f in files if f.suffix == ".py"]
     print()
     print(f"  Root:        {bold(root)}")
     print(f"  Total files: {bold(str(len(files)))}")

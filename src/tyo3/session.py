@@ -54,7 +54,7 @@ class TyO3Session:
 
     # ── Files ────────────────────────────────────────────────
 
-    def files(self) -> list[str]:
+    def files(self) -> list[PurePosixPath]:
         """Return all file paths known to the project."""
         return self._rp.files()
 

@@ -117,6 +117,16 @@ class TestInternalTyError:
         with pytest.raises(TyO3Error):
             raise InternalTyError("test")
 
+    def test_inherits_from_base(self) -> None:
+        assert issubclass(InternalTyError, TyO3Error)
+
+    def test_wraps_unexpected_error(self) -> None:
+        original = RuntimeError("rust panic")
+        wrapped = InternalTyError("Unexpected error: rust panic")
+        wrapped.__cause__ = original
+        assert "rust panic" in str(wrapped)
+        assert wrapped.__cause__ is original
+
 
 class TestExceptionChaining:
     """Exceptions should preserve cause chains."""

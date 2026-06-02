@@ -55,6 +55,12 @@ class FileCategory(StrEnum):
     DEPENDENCY = "dependency"
 
 
+class CoordinateMode(StrEnum):
+    """Coordinate system used for position calculations."""
+
+    PYTHON = "python"
+
+
 # ── Entities ─────────────────────────────────────────────────────────────
 
 
@@ -63,7 +69,7 @@ class TyProject(BaseModel):
 
     root: PurePosixPath
     status: ProjectStatus
-    coordinate_mode: str = "python"
+    coordinate_mode: CoordinateMode = CoordinateMode.PYTHON
     python_version: str | None = None
     config_path: PurePosixPath | None = None
     extra_search_paths: set[PurePosixPath] = Field(default_factory=set)

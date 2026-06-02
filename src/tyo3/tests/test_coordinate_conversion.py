@@ -144,13 +144,13 @@ class TestRustCoordinateConversion:
             self.rp.goto_definition("main.py", 1, 0)
 
     def test_negative_line_rejected(self) -> None:
-        """(-1, *) positions raise OverflowError from PyO3 u32 conversion."""
-        with pytest.raises(OverflowError):
+        """(-1, *) positions raise PositionError (mapped from PyO3 OverflowError)."""
+        with pytest.raises(PositionError):
             self.rp.goto_definition("main.py", -1, 1)
 
     def test_negative_column_rejected(self) -> None:
-        """(*, -1) positions raise OverflowError from PyO3 u32 conversion."""
-        with pytest.raises(OverflowError):
+        """(*, -1) positions raise PositionError (mapped from PyO3 OverflowError)."""
+        with pytest.raises(PositionError):
             self.rp.goto_definition("main.py", 1, -1)
 
     def test_document_symbols_positions_valid(self) -> None:

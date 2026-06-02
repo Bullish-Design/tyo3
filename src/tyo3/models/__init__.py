@@ -11,6 +11,7 @@ from tyo3.models.analysis import (
 )
 from tyo3.models.core import (
     BackendInfo,
+    CoordinateMode,
     FileCategory,
     ProjectFile,
     ProjectStatus,
@@ -33,6 +34,7 @@ __all__ = [
     "BackendInfo",
     "ProjectStatus",
     "FileCategory",
+    "CoordinateMode",
     "TyProject",
     "ProjectFile",
     # Analysis

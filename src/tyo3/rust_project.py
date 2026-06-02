@@ -27,6 +27,7 @@ from pathlib import PurePosixPath
 
 from tyo3.exceptions import (
     AnalysisError,
+    InternalTyError,
     PathResolutionError,
     PositionError,
     ProjectClosedError,
@@ -138,12 +139,15 @@ class RustProject:
 
     # ── Files ────────────────────────────────────────────────────────
 
-    def files(self) -> list[str]:
+    def files(self) -> list[PurePosixPath]:
         """Return the file paths known to this project."""
         try:
-            return self._inner.files()
+            raw: list[str] = self._inner.files()
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in files(): {e}") from e
+        return [PurePosixPath(p) for p in raw]
 
     # ── Check ────────────────────────────────────────────────────────
 
@@ -155,6 +159,8 @@ class RustProject:
             raise ProjectClosedError(str(e)) from e
         except _NativeAnalysisError as e:
             raise AnalysisError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in check(): {e}") from e
 
         data = json.loads(raw_json)
         diagnostics: list[Diagnostic] = []
@@ -191,6 +197,8 @@ class RustProject:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
             raise PathResolutionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in document_symbols(): {e}") from e
 
         return [self._parse_symbol(s) for s in json.loads(raw_json)]
 
@@ -202,6 +210,8 @@ class RustProject:
             raw_json: str = self._inner.workspace_symbols(query)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in workspace_symbols(): {e}") from e
 
         return [self._parse_symbol(s) for s in json.loads(raw_json)]
 
@@ -233,6 +243,10 @@ class RustProject:
             raise PositionError(str(e)) from e
         except _NativePathError as e:
             raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in {method}(): {e}") from e
 
         return [self._parse_definition_target(t) for t in json.loads(raw_json)]
 
@@ -252,6 +266,8 @@ class RustProject:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
             raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in find_references(): {e}") from e
 
         data = json.loads(raw_json)
         refs: list[Reference] = []
@@ -278,6 +294,8 @@ class RustProject:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
             raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in hover(): {e}") from e
 
         if raw_json is None:
             return None
@@ -341,6 +359,8 @@ class RustProject:
             self._inner.reload()
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in reload(): {e}") from e
 
     def close(self) -> None:
         """Close the project and free Rust-side resources."""
