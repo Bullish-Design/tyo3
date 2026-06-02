@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import PurePosixPath
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from tyo3.models.core import ProjectFile
 
@@ -21,12 +21,30 @@ class Position(BaseModel):
     line: int  # 1-based
     column: int  # 1-based, Unicode codepoints
 
+    @model_validator(mode="after")
+    def _positive(self) -> Position:
+        if self.line < 1 or self.column < 1:
+            raise ValueError(
+                f"Position must be 1-based: got line={self.line}, column={self.column}"
+            )
+        return self
+
 
 class Range(BaseModel):
     """A range between two positions."""
 
     start: Position
     end: Position
+
+    @model_validator(mode="after")
+    def _start_before_end(self) -> Range:
+        s, e = self.start, self.end
+        if (s.line, s.column) > (e.line, e.column):
+            raise ValueError(
+                f"Range start ({s.line}:{s.column}) must not be "
+                f"after end ({e.line}:{e.column})"
+            )
+        return self
 
 
 class FileRange(BaseModel):
@@ -69,3 +87,12 @@ class Diagnostic(BaseModel):
     code: str | None = None
     message: str
     details: list[str] = Field(default_factory=list)
+
+__all__ = [
+    "Position",
+    "Range",
+    "FileRange",
+    "CheckResult",
+    "DiagnosticSeverity",
+    "Diagnostic",
+]

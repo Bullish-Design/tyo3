@@ -54,3 +54,9 @@ class SemanticToken(BaseModel):
     range: Range
     token_type: SemanticTokenType
     modifiers: set[SemanticTokenModifier] = Field(default_factory=set)
+
+__all__ = [
+    "SemanticTokenType",
+    "SemanticTokenModifier",
+    "SemanticToken",
+]

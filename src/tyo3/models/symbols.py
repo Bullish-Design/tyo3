@@ -45,3 +45,8 @@ class Symbol(BaseModel):
     selection_range: Range | None = None
     container_name: str | None = None
     deprecated: bool = False
+
+__all__ = [
+    "SymbolKind",
+    "Symbol",
+]

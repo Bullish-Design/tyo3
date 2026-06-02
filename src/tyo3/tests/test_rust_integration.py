@@ -13,13 +13,11 @@ Test groups:
 - Navigation (goto definition, find references, hover)
 - Diagnostic checking
 - Error handling (closed project, bad paths, bad positions)
-- Cross-service data flow chains
 """
 
 from __future__ import annotations
 
 from pathlib import Path as StdPath
-from pathlib import PurePosixPath
 
 import pytest
 
@@ -37,10 +35,6 @@ from tyo3.exceptions import (
     ProjectClosedError,
     ProjectOpenError,
 )
-from tyo3.services.analysis_service import AnalysisService
-from tyo3.services.navigation_service import NavigationService
-from tyo3.services.project_service import ProjectService
-from tyo3.services.symbol_service import SymbolService
 
 # ── Path helpers ──────────────────────────────────────────────────────────
 
@@ -361,7 +355,7 @@ class TestDiagnostics:
 
     def test_check_after_reload(self) -> None:
         rp = RustProject(fixture_path("simple_package"))
-        result1 = rp.check()
+        rp.check()
         rp.reload()
         result2 = rp.check()
         assert isinstance(result2.diagnostics, list)
@@ -404,149 +398,4 @@ class TestUnicodePositions:
         rp.close()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Service Layer Integration (use_rust=True)
-# ═══════════════════════════════════════════════════════════════════════════
 
-
-@needs_native
-class TestServiceLayerIntegration:
-    """Test that services delegate correctly to RustProject when use_rust=True."""
-
-    def test_project_service_with_rust(self) -> None:
-        ps = ProjectService(use_rust=True)
-        root = PurePosixPath(fixture_path("simple_package"))
-        project, files = ps.open_project(root)
-        assert project.is_open
-        assert len(files) >= 1
-        # Verify files came from real discovery
-        file_names = {f.path.name for f in files}
-        assert "main.py" in file_names
-        ps.close_project(project)
-        assert not project.is_open
-
-    def test_analysis_service_with_rust(self) -> None:
-        ps = ProjectService(use_rust=True)
-        a_svc = AnalysisService(use_rust=True)
-        root = PurePosixPath(fixture_path("simple_package"))
-        project, files = ps.open_project(root)
-
-        # Wire up the RustProject — use the key from project_service
-        rp = ps._get_rust_project(root)
-        a_svc.set_rust_project(str(root), rp)
-
-        result = a_svc.check_project(project)
-        assert result is not None
-        assert isinstance(result.diagnostics, list)
-        ps.close_project(project)
-
-    def test_symbol_service_with_rust(self) -> None:
-        ps = ProjectService(use_rust=True)
-        s_svc = SymbolService(use_rust=True)
-        root = PurePosixPath(fixture_path("simple_package"))
-        project, files = ps.open_project(root)
-
-        rp = ps._get_rust_project(root)
-        s_svc.set_rust_project(str(root), rp)
-
-        main_file = files[0]
-        symbols = s_svc.get_document_symbols(project, main_file)
-        assert len(symbols) >= 1
-        names = {s.name for s in symbols}
-        assert "greet" in names
-        ps.close_project(project)
-
-    def test_navigation_service_with_rust(self) -> None:
-        ps = ProjectService(use_rust=True)
-        n_svc = NavigationService(use_rust=True)
-        root = PurePosixPath(fixture_path("simple_package"))
-        project, files = ps.open_project(root)
-
-        rp = ps._get_rust_project(root)
-        n_svc.set_rust_project(str(root), rp)
-
-        main_file = files[0]
-        targets = n_svc.goto_definition(project, main_file, 3, 5)
-        assert isinstance(targets, list)
-        ps.close_project(project)
-
-    def test_workspace_symbols_service_with_rust(self) -> None:
-        ps = ProjectService(use_rust=True)
-        s_svc = SymbolService(use_rust=True)
-        root = PurePosixPath(fixture_path("simple_package"))
-        project, _ = ps.open_project(root)
-
-        rp = ps._get_rust_project(root)
-        s_svc.set_rust_project(str(root), rp)
-
-        matches = s_svc.search_workspace_symbols(project, "greet")
-        names = {s.name for s in matches}
-        assert "greet" in names
-        ps.close_project(project)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Cross-Service Data Flow (use_rust=True)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@needs_native
-class TestCrossServiceDataFlow:
-    """Test data flow chains: Project → Files → Symbols → Navigation."""
-
-    def test_full_workflow(self) -> None:
-        """End-to-end: open → list files → get symbols → navigate → close."""
-        ps = ProjectService(use_rust=True)
-        a_svc = AnalysisService(use_rust=True)
-        s_svc = SymbolService(use_rust=True)
-        n_svc = NavigationService(use_rust=True)
-
-        root = PurePosixPath(fixture_path("simple_package"))
-        project, files = ps.open_project(root)
-
-        rp = ps._get_rust_project(root)
-        a_svc.set_rust_project(str(root), rp)
-        s_svc.set_rust_project(str(root), rp)
-        n_svc.set_rust_project(str(root), rp)
-
-        # 1. List files
-        listed = ps.list_files(project)
-        assert len(listed) >= 1
-
-        # 2. Check project
-        check_result = a_svc.check_project(project)
-        assert check_result is not None
-
-        # 3. Get document symbols
-        symbols = s_svc.get_document_symbols(project, files[0])
-        assert len(symbols) >= 1
-
-        # 4. Navigate to a symbol
-        targets = n_svc.goto_definition(project, files[0], 3, 5)
-        assert isinstance(targets, list)
-
-        # 5. Find references
-        refs = n_svc.find_references(project, files[0], 3, 5)
-        assert isinstance(refs, list)
-
-        # 6. Hover
-        hover = n_svc.get_hover(project, files[0], 3, 5)
-        assert hover is not None
-
-        # 7. Reload
-        ps.reload_project(project)
-        assert project.is_open
-
-        # 8. Close
-        ps.close_project(project)
-        assert not project.is_open
-
-    def test_empty_project_workflow(self) -> None:
-        """Empty project: open → files → close without errors."""
-        ps = ProjectService(use_rust=True)
-        root = PurePosixPath(fixture_path("empty"))
-        project, files = ps.open_project(root)
-        # Empty project may have 0 files
-        assert isinstance(files, list)
-        ps.close_project(project)
-        assert not project.is_open

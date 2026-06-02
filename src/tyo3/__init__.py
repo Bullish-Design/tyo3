@@ -4,9 +4,21 @@ from __future__ import annotations
 
 __version__ = "0.1.0"
 
+from tyo3.models.analysis import CheckResult, Diagnostic
+from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
+from tyo3.models.symbols import Symbol
 from tyo3.session import TyO3Session
 
-__all__ = ["TyO3Session"]
+__all__ = [
+    "TyO3Session",
+    # Re-export commonly used types for convenience
+    "CheckResult",
+    "Diagnostic",
+    "Symbol",
+    "DefinitionTarget",
+    "Reference",
+    "HoverResult",
+]
 
 # Try to import the native TyProject class from the compiled Rust extension.
 # When the native extension is not built (pure-Python testing), this fails

@@ -18,11 +18,6 @@ from tyo3.models.core import (
 )
 from tyo3.models.navigation import DefinitionTarget, Reference, ReferenceKind
 from tyo3.models.symbols import Symbol, SymbolKind
-from tyo3.services.advanced_service import AdvancedService
-from tyo3.services.analysis_service import AnalysisService
-from tyo3.services.navigation_service import NavigationService
-from tyo3.services.project_service import ProjectService
-from tyo3.services.symbol_service import SymbolService
 
 # ── Fixture helpers ─────────────────────────────────────────────────────
 
@@ -183,29 +178,3 @@ def semantic_token(open_project: TyProject, first_party_file: ProjectFile) -> Se
     )
 
 
-# ── Service fixtures ────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def project_service() -> ProjectService:
-    return ProjectService()
-
-
-@pytest.fixture
-def analysis_service() -> AnalysisService:
-    return AnalysisService()
-
-
-@pytest.fixture
-def symbol_service() -> SymbolService:
-    return SymbolService()
-
-
-@pytest.fixture
-def navigation_service() -> NavigationService:
-    return NavigationService()
-
-
-@pytest.fixture
-def advanced_service() -> AdvancedService:
-    return AdvancedService()

@@ -18,7 +18,7 @@ dependencies = [
 dev = [
   "pytest>=7.0",
   "pytest-cov>=4.1",
-  "mypy>=1.10",
+  "ty>=0.0.40",
   "ruff>=0.5.0",
 ]
 
@@ -41,17 +41,11 @@ python-source = "src"
 addopts = "-q --cov=tyo3 --cov-report=term-missing"
 testpaths = ["src/tyo3/tests"]
 
-[tool.mypy]
-python_version = "3.13"
-packages = ["src/tyo3"]
-strict = true
-warn_unused_ignores = true
-warn_redundant_casts = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-disallow_untyped_calls = true
-no_implicit_optional = true
+[tool.ty]
+
+[tool.ty.environment]
+python-version = "3.13"
+# ty is strict by default; file exclusions via .gitignore
 
 [tool.ruff]
 line-length = 120

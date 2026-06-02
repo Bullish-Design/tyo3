@@ -240,7 +240,7 @@ def test_symbols_are_deterministic(data: st.DataObject) -> None:
         s2 = rp.document_symbols(file_name)
 
         assert len(s1) == len(s2), f"Count mismatch: {len(s1)} vs {len(s2)}"
-        for a, b in zip(s1, s2):
+        for a, b in zip(s1, s2, strict=True):
             assert a.name == b.name
             assert a.kind == b.kind
             assert a.location.range.start.line == b.location.range.start.line
@@ -275,7 +275,7 @@ def test_all_operations_raise_after_close(fixture_name: str) -> None:
         ("reload", lambda: rp.reload()),
     ]
 
-    for name, op in ops:
+    for _name, op in ops:
         with pytest.raises(ProjectClosedError):
             op()
 

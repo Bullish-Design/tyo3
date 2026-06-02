@@ -6,11 +6,10 @@ and NavigationService with a single coherent interface.
 
 from __future__ import annotations
 
-from pathlib import Path as StdPath, PurePosixPath
+from pathlib import Path as StdPath
+from pathlib import PurePosixPath
 
-from tyo3.exceptions import (
-    PositionError,
-)
+from tyo3.exceptions import PositionError
 from tyo3.models.analysis import CheckResult, Diagnostic
 from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
 from tyo3.models.symbols import Symbol

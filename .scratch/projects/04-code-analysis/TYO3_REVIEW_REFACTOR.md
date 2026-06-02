@@ -1202,9 +1202,9 @@ All tests must pass. If any fail, fix them before proceeding.
 ### 10.2 — Run type checking
 
 ```bash
-# mypy (strict mode is configured in pyproject.toml)
-# Run from devenv shell — Python 3.13 and mypy are provisioned by devenv
-PYTHONPATH=src mypy src/tyo3/ --ignore-missing-imports
+# ty (strict mode is configured in pyproject.toml)
+# Run from devenv shell — Python 3.13 and ty are provisioned by devenv
+PYTHONPATH=src ty src/tyo3/ --ignore-missing-imports
 
 # Lint with ruff (also provisioned by devenv)
 ruff check src/tyo3/

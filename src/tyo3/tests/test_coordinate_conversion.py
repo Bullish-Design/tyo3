@@ -28,6 +28,8 @@ try:
 except ImportError:
     _HAS_NATIVE = False
 
+from pydantic import ValidationError
+
 from tyo3.exceptions import PositionError
 from tyo3.models.analysis import Position
 
@@ -82,12 +84,10 @@ class TestPositionValidation:
             assert pos.line == line
             assert pos.column == col
         else:
-            # Pydantic doesn't enforce min > 0 by default, so these are
-            # accepted at the model level. Actual validation happens in
-            # the Rust position_to_offset and in the service layer's
-            # _validate_common methods.
-            pos = Position(line=line, column=col)
-            assert pos.line == line
+            # Positions must be 1-based — the model validator rejects
+            # zero or negative values at construction time.
+            with pytest.raises(ValidationError, match="1-based"):
+                Position(line=line, column=col)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -169,7 +169,8 @@ class TestRustCoordinateConversion:
             # Column check: if same line, end column >= start column is typical
             if sym.location.range.end.line == sym.location.range.start.line:
                 assert sym.location.range.end.column >= sym.location.range.start.column, (
-                    f"Symbol {sym.name}: end col {sym.location.range.end.column} < start {sym.location.range.start.column}"
+                    f"Symbol {sym.name}: end col {sym.location.range.end.column}"
+                    f" < start {sym.location.range.start.column}"
                 )
 
 

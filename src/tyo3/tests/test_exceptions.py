@@ -8,6 +8,9 @@ exception classes directly.
 
 from __future__ import annotations
 
+import warnings
+from unittest.mock import MagicMock
+
 import pytest
 
 from tyo3.exceptions import (
@@ -151,3 +154,58 @@ class TestExceptionChaining:
         except PositionError as e:
             assert e.__cause__ is not None
             assert isinstance(e.__cause__, ValueError)
+
+
+class TestCloseIdempotent:
+    """Verify that RustProject.close() is idempotent and __del__ warns."""
+
+    def test_double_close_no_error(self) -> None:
+        """Calling close() twice should not raise — second call is a no-op."""
+        from tyo3.rust_project import RustProject
+
+        rp = object.__new__(RustProject)
+        rp._inner = MagicMock()
+        rp._closed = False
+        rp._root = None
+
+        rp.close()
+        assert rp._closed is True
+        rp._inner.close.assert_called_once()
+
+        # Second close should be a no-op
+        rp.close()
+        rp._inner.close.assert_called_once()  # still only once
+
+    def test_del_warns_when_not_closed(self) -> None:
+        """__del__ should emit a ResourceWarning if close() was never called."""
+        from tyo3.rust_project import RustProject
+
+        rp = object.__new__(RustProject)
+        rp._inner = MagicMock()
+        rp._closed = False
+        rp._root = None
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rp.__del__()
+
+        assert len(w) == 1
+        assert issubclass(w[0].category, ResourceWarning)
+        assert "RustProject was not closed explicitly" in str(w[0].message)
+        # After __del__, close() should have been called
+        assert rp._closed is True
+
+    def test_del_does_not_warn_when_closed(self) -> None:
+        """__del__ should be silent if close() was already called."""
+        from tyo3.rust_project import RustProject
+
+        rp = object.__new__(RustProject)
+        rp._inner = MagicMock()
+        rp._closed = True
+        rp._root = None
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rp.__del__()
+
+        assert len(w) == 0

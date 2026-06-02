@@ -8,6 +8,9 @@ Obligation groups:
 
 from pathlib import PurePosixPath
 
+import pytest
+from pydantic import ValidationError
+
 from tyo3.models.analysis import (
     CheckResult,
     Diagnostic,
@@ -123,3 +126,52 @@ class TestDiagnostic:
             details=["a", "b"],
         )
         assert set(d.details) == {"a", "b"}
+
+
+class TestPositionValidation:
+    """Position model validators: line and column must be >= 1."""
+
+    def test_valid_position(self) -> None:
+        p = Position(line=1, column=1)
+        assert p.line == 1
+
+    def test_rejects_zero_line(self) -> None:
+        with pytest.raises(ValidationError, match="1-based"):
+            Position(line=0, column=1)
+
+    def test_rejects_negative_column(self) -> None:
+        with pytest.raises(ValidationError, match="1-based"):
+            Position(line=1, column=-1)
+
+
+class TestRangeValidation:
+    """Range model validators: start must be <= end."""
+
+    def test_valid_range(self) -> None:
+        r = Range(
+            start=Position(line=1, column=1),
+            end=Position(line=1, column=10),
+        )
+        assert r.start.column == 1
+
+    def test_same_position_is_valid(self) -> None:
+        """A zero-width range (cursor position) is allowed."""
+        r = Range(
+            start=Position(line=5, column=3),
+            end=Position(line=5, column=3),
+        )
+        assert r.start == r.end
+
+    def test_rejects_inverted_range(self) -> None:
+        with pytest.raises(ValidationError, match="must not be after"):
+            Range(
+                start=Position(line=10, column=1),
+                end=Position(line=1, column=1),
+            )
+
+    def test_rejects_inverted_columns_same_line(self) -> None:
+        with pytest.raises(ValidationError, match="must not be after"):
+            Range(
+                start=Position(line=5, column=20),
+                end=Position(line=5, column=10),
+            )

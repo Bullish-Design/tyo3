@@ -298,7 +298,7 @@ class TestNavigationTiming:
                 timeout=HOVER_TIMEOUT,
             )
             hover = rp.hover(file_name, line, col)
-            has_content = len(hover.contents) if hover else 0
+            _has_content = len(hover.contents) if hover else 0
             print(f"\n  ⏱  hover({line},{col}): {elapsed:.3f}s [{'has content' if hover else 'None'}]")
         finally:
             rp.close()

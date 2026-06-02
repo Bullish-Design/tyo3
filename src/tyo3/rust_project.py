@@ -22,6 +22,7 @@ See RUST_BACKEND_IMPLEMENTATION.md §6.1 for the design.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path as StdPath
 from pathlib import PurePosixPath
 
@@ -132,6 +133,7 @@ class RustProject:
         except Exception as e:
             raise ProjectOpenError(f"Cannot open project at '{root_str}': {e}") from e
         self._root = StdPath(root_str).resolve()
+        self._closed = False
 
     @property
     def root(self) -> StdPath:
@@ -363,8 +365,14 @@ class RustProject:
             raise InternalTyError(f"Unexpected error in reload(): {e}") from e
 
     def close(self) -> None:
-        """Close the project and free Rust-side resources."""
+        """Close the project and free Rust-side resources.
+
+        Safe to call multiple times — subsequent calls are no-ops.
+        """
+        if self._closed:
+            return
         self._inner.close()
+        self._closed = True
 
     def __enter__(self) -> RustProject:
         return self
@@ -373,9 +381,14 @@ class RustProject:
         self.close()
 
     def __del__(self) -> None:
-        # Best-effort cleanup if user forgets to close.
-        # Don't raise from __del__.
-        try:
-            self.close()
-        except Exception:
-            pass
+        if not getattr(self, "_closed", True):
+            warnings.warn(
+                "RustProject was not closed explicitly. "
+                "Use 'with RustProject(...) as rp:' or call rp.close().",
+                ResourceWarning,
+                stacklevel=2,
+            )
+            try:
+                self.close()
+            except Exception:
+                pass

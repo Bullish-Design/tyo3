@@ -71,3 +71,12 @@ class HoverResult(BaseModel):
 
     location: FileRange
     contents: list[HoverContent]
+
+__all__ = [
+    "ReferenceKind",
+    "HoverContentKind",
+    "DefinitionTarget",
+    "Reference",
+    "HoverContent",
+    "HoverResult",
+]
