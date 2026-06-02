@@ -6,7 +6,6 @@ Derived from tyo3-analysis.allium
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -37,8 +36,8 @@ class FileRange(BaseModel):
 class CheckResult(BaseModel):
     """Result of a type-check invocation."""
     diagnostics: list[Diagnostic] = Field(default_factory=list)
-    files_checked: Optional[int] = None
-    elapsed_ms: Optional[int] = None
+    files_checked: int | None = None
+    elapsed_ms: int | None = None
 
 
 # ── Enums ────────────────────────────────────────────────────────────────
@@ -59,9 +58,9 @@ class DiagnosticSeverity(StrEnum):
 class Diagnostic(BaseModel):
     """A type-checking diagnostic for a specific location in a project file."""
     project: TyProject
-    file: Optional[ProjectFile] = None
-    range: Optional[Range] = None
+    file: ProjectFile | None = None
+    range: Range | None = None
     severity: DiagnosticSeverity = DiagnosticSeverity.ERROR
-    code: Optional[str] = None
+    code: str | None = None
     message: str
-    details: set[str] = Field(default_factory=set)
+    details: list[str] = Field(default_factory=list)

@@ -138,7 +138,7 @@ def diagnostic(open_project: TyProject, first_party_file: ProjectFile) -> Diagno
         severity=DiagnosticSeverity.ERROR,
         code="type-arg",
         message="Missing type argument in generic",
-        details={"TypeVar", "bound"},
+        details=["TypeVar", "bound"],
     )
 
 

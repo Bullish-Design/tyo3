@@ -97,7 +97,7 @@ class TestDiagnostic:
         assert d.range is None
         assert d.severity == "error"
         assert d.code is None
-        assert d.details == set()
+        assert d.details == []
 
     def test_with_file_and_range(self, first_party_file, range_) -> None:
         d = Diagnostic(
@@ -120,4 +120,4 @@ class TestDiagnostic:
             message="test",
             details={"a", "b"},
         )
-        assert d.details == {"a", "b"}
+        assert set(d.details) == {"a", "b"}

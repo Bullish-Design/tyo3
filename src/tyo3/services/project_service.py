@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from tyo3.models.core import (
     BackendInfo,
@@ -74,7 +73,7 @@ class ProjectService:
 
     # ── Rust backend access ──────────────────────────────────────────
 
-    def _get_rust_project(self, root: Path) -> Optional[object]:
+    def _get_rust_project(self, root: Path) -> object | None:
         """Return the RustProject for *root*, or ``None``."""
         key = str(root)
         return self._rust_projects.get(key)
@@ -89,13 +88,13 @@ class ProjectService:
 
     # ── Query helpers ──────────────────────────────────────────────────
 
-    def find_open_project(self, root: Path) -> Optional[TyProject]:
+    def find_open_project(self, root: Path) -> TyProject | None:
         for p in self._projects:
             if p.root == root and p.is_open:
                 return p
         return None
 
-    def find_project(self, root: Path) -> Optional[TyProject]:
+    def find_project(self, root: Path) -> TyProject | None:
         for p in self._projects:
             if p.root == root:
                 return p
@@ -108,7 +107,7 @@ class ProjectService:
     # ── OpenProject ────────────────────────────────────────────────────
 
     def open_project(
-        self, root: Path, config: Optional[TyProjectConfig] = None
+        self, root: Path, config: TyProjectConfig | None = None
     ) -> tuple[TyProject, list[ProjectFile]]:
         """OpenProject: requires root is a directory and no open project exists for root."""
         # ── Precondition: path is a directory ──

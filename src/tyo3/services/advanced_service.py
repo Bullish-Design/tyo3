@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import Range
 from tyo3.models.core import ProjectFile, TyProject
 
 
 def classify_tokens(
-    project: TyProject, file: ProjectFile, range: Optional[Range] = None
+    project: TyProject, file: ProjectFile, range: Range | None = None
 ) -> list[SemanticToken]:
     """Black-box: returns typed tokens using ty_ide::semantic_tokens.
 
@@ -21,7 +19,7 @@ def classify_tokens(
 
 def prepare_hierarchy(
     project: TyProject, file: ProjectFile, line: int, column: int
-) -> Optional[dict]:
+) -> dict | None:
     """Black-box: initialises a type hierarchy query using ty_ide::prepare_type_hierarchy."""
     return None
 
@@ -52,7 +50,7 @@ class AdvancedService:
         self,
         project: TyProject,
         file: ProjectFile,
-        range: Optional[Range] = None,
+        range: Range | None = None,
     ) -> list[SemanticToken]:
         """GetSemanticTokens: requires project.is_open and file.project == project."""
         if not project.is_open:
@@ -73,7 +71,7 @@ class AdvancedService:
         file: ProjectFile,
         line: int,
         column: int,
-        direction: Optional[str] = None,
+        direction: str | None = None,
     ) -> dict:
         """ExploreTypeHierarchy: validates preconditions then resolves.
 

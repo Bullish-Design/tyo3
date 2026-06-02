@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from tyo3.models.core import ProjectFile, TyProject
 from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
 
@@ -42,7 +40,7 @@ def resolve_references(
 
 def resolve_hover(
     project: TyProject, file: ProjectFile, line: int, column: int
-) -> Optional[dict]:
+) -> dict | None:
     """Black-box: returns structured hover content, using ty_ide::hover."""
     return None
 
@@ -65,7 +63,7 @@ class NavigationService:
 
     # ── Rust backend access ─────────────────────────────────────────
 
-    def _get_rust_project(self, root_path: str) -> Optional[object]:
+    def _get_rust_project(self, root_path: str) -> object | None:
         """Return the RustProject for *root_path*, or ``None``."""
         return self._rust_projects.get(root_path)
 
@@ -173,7 +171,7 @@ class NavigationService:
 
     def get_hover(
         self, project: TyProject, file: ProjectFile, line: int, column: int
-    ) -> Optional[HoverResult]:
+    ) -> HoverResult | None:
         """GetHover: validates preconditions, then resolves."""
         self._validate_common(project, file, line, column)
 

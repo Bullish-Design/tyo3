@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,8 +24,8 @@ class Path(BaseModel):
 
 class TyProjectConfig(BaseModel):
     """Configuration for opening a TyO3 project."""
-    python_version: Optional[str] = None
-    config_path: Optional[Path] = None
+    python_version: str | None = None
+    config_path: Path | None = None
     extra_search_paths: set[Path] = Field(default_factory=set)
     respect_gitignore: bool = True
     force_exclude: bool = False
@@ -70,14 +69,14 @@ class TyProject(BaseModel):
     root: Path
     status: ProjectStatus
     coordinate_mode: str = "python"
-    python_version: Optional[str] = None
-    config_path: Optional[Path] = None
+    python_version: str | None = None
+    config_path: Path | None = None
     extra_search_paths: set[Path] = Field(default_factory=set)
     respect_gitignore: bool = True
     force_exclude: bool = False
     check_all_files: bool = True
     opened_at: datetime
-    last_reloaded_at: Optional[datetime] = None
+    last_reloaded_at: datetime | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -96,4 +95,4 @@ class ProjectFile(BaseModel):
     path: Path
     project: TyProject
     file_category: FileCategory
-    last_checked_at: Optional[datetime] = None
+    last_checked_at: datetime | None = None

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from tyo3.models.core import Path, ProjectFile, TyProject
 from tyo3.models.symbols import Symbol
 
@@ -34,7 +32,7 @@ def all_symbols(
     return []
 
 
-def first_project_file(project: TyProject) -> Optional[ProjectFile]:
+def first_project_file(project: TyProject) -> ProjectFile | None:
     """Returns the first indexed first-party file, or None."""
     return None
 
@@ -66,7 +64,7 @@ class SymbolService:
             return "/" + "/".join(components[1:])
         return "/".join(components)
 
-    def _get_rust_project(self, root_path: str) -> Optional[object]:
+    def _get_rust_project(self, root_path: str) -> object | None:
         """Return the RustProject for *root_path*, or ``None``."""
         return self._rust_projects.get(root_path)
 
@@ -135,7 +133,7 @@ class SymbolService:
         self,
         project: TyProject,
         query: str,
-        importing_from: Optional[ProjectFile] = None,
+        importing_from: ProjectFile | None = None,
     ) -> list[Symbol]:
         """SearchAllSymbols: requires project.is_open and len(query) >= 1."""
         if not project.is_open:

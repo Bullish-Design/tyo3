@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path as StdPath
-from typing import Optional
 
 from tyo3.exceptions import (
     AnalysisError,
@@ -175,7 +174,7 @@ class RustProject:
                     severity=DiagnosticSeverity(d.get("severity", "error")),
                     code=d.get("code"),
                     message=d.get("message", ""),
-                    details=set(d.get("details", [])),
+                    details=d.get("details", []),
                 )
             )
 
@@ -196,31 +195,7 @@ class RustProject:
         except _NativePathError as e:
             raise PathResolutionError(str(e)) from e
 
-        data = json.loads(raw_json)
-        symbols: list[Symbol] = []
-        for s in data:
-            location_data = s["location"]
-            loc = ModelFileRange(
-                path=_string_path_to_typath(location_data["path"]),
-                range=_json_range_to_model(location_data["range"]),
-            )
-            sel_range = None
-            if s.get("selection_range"):
-                sel_range = _json_range_to_model(s["selection_range"])
-
-            symbols.append(
-                Symbol(
-                    project=self._project_model,
-                    name=s["name"],
-                    qualified_name=s.get("qualified_name"),
-                    kind=SymbolKind(s.get("kind", "unknown")),
-                    location=loc,
-                    selection_range=sel_range,
-                    container_name=s.get("container_name"),
-                    deprecated=s.get("deprecated", False),
-                )
-            )
-        return symbols
+        return [self._parse_symbol(s) for s in json.loads(raw_json)]
 
     # ── Workspace Symbols ────────────────────────────────────────────
 
@@ -231,31 +206,7 @@ class RustProject:
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
 
-        data = json.loads(raw_json)
-        symbols: list[Symbol] = []
-        for s in data:
-            location_data = s["location"]
-            loc = ModelFileRange(
-                path=_string_path_to_typath(location_data["path"]),
-                range=_json_range_to_model(location_data["range"]),
-            )
-            sel_range = None
-            if s.get("selection_range"):
-                sel_range = _json_range_to_model(s["selection_range"])
-
-            symbols.append(
-                Symbol(
-                    project=self._project_model,
-                    name=s["name"],
-                    qualified_name=s.get("qualified_name"),
-                    kind=SymbolKind(s.get("kind", "unknown")),
-                    location=loc,
-                    selection_range=sel_range,
-                    container_name=s.get("container_name"),
-                    deprecated=s.get("deprecated", False),
-                )
-            )
-        return symbols
+        return [self._parse_symbol(s) for s in json.loads(raw_json)]
 
     # ── Goto Definition ──────────────────────────────────────────────
 
@@ -294,46 +245,7 @@ class RustProject:
         except _NativePathError as e:
             raise PathResolutionError(str(e)) from e
 
-        data = json.loads(raw_json)
-        targets: list[DefinitionTarget] = []
-        for t in data:
-            sel_range = None
-            if t.get("selection_range"):
-                sel_range = _json_range_to_model(t["selection_range"])
-
-            symbol = None
-            if t.get("symbol"):
-                sym_data = t["symbol"]
-                loc_data = sym_data["location"]
-                sym_loc = ModelFileRange(
-                    path=_string_path_to_typath(loc_data["path"]),
-                    range=_json_range_to_model(loc_data["range"]),
-                )
-                sym_sel = None
-                if sym_data.get("selection_range"):
-                    sym_sel = _json_range_to_model(sym_data["selection_range"])
-                symbol = Symbol(
-                    project=self._project_model,
-                    name=sym_data["name"],
-                    qualified_name=sym_data.get("qualified_name"),
-                    kind=SymbolKind(sym_data.get("kind", "unknown")),
-                    location=sym_loc,
-                    selection_range=sym_sel,
-                    container_name=sym_data.get("container_name"),
-                    deprecated=sym_data.get("deprecated", False),
-                )
-
-            targets.append(
-                DefinitionTarget(
-                    project=self._project_model,
-                    path=_string_path_to_typath(t["path"]),
-                    range=_json_range_to_model(t["range"]),
-                    selection_range=sel_range,
-                    symbol=symbol,
-                    module_name=t.get("module_name"),
-                )
-            )
-        return targets
+        return [self._parse_definition_target(t) for t in json.loads(raw_json)]
 
     # ── Find References ─────────────────────────────────────────────
 
@@ -371,7 +283,7 @@ class RustProject:
 
     def hover(
         self, path: str | StdPath, line: int, column: int
-    ) -> Optional[HoverResult]:
+    ) -> HoverResult | None:
         """Get hover information for the symbol at *(line, column)*.
 
         Returns ``None`` when no hover information is available.
@@ -404,6 +316,49 @@ class RustProject:
 
         return HoverResult(location=location, contents=contents)
 
+    # ── JSON parsing helpers ─────────────────────────────────────────
+
+    def _parse_symbol(self, s: dict) -> Symbol:
+        """Parse a SymbolDto JSON dict into a Symbol model."""
+        location_data = s["location"]
+        loc = ModelFileRange(
+            path=_string_path_to_typath(location_data["path"]),
+            range=_json_range_to_model(location_data["range"]),
+        )
+        sel_range = (
+            _json_range_to_model(s["selection_range"])
+            if s.get("selection_range")
+            else None
+        )
+        return Symbol(
+            project=self._project_model,
+            name=s["name"],
+            qualified_name=s.get("qualified_name"),
+            kind=SymbolKind(s.get("kind", "unknown")),
+            location=loc,
+            selection_range=sel_range,
+            container_name=s.get("container_name"),
+            deprecated=s.get("deprecated", False),
+        )
+
+    def _parse_definition_target(self, t: dict) -> DefinitionTarget:
+        """Parse a DefinitionTargetDto JSON dict into a DefinitionTarget model."""
+        sel_range = (
+            _json_range_to_model(t["selection_range"])
+            if t.get("selection_range")
+            else None
+        )
+        symbol = self._parse_symbol(t["symbol"]) if t.get("symbol") else None
+
+        return DefinitionTarget(
+            project=self._project_model,
+            path=_string_path_to_typath(t["path"]),
+            range=_json_range_to_model(t["range"]),
+            selection_range=sel_range,
+            symbol=symbol,
+            module_name=t.get("module_name"),
+        )
+
     # ── Lifecycle ────────────────────────────────────────────────────
 
     def reload(self) -> None:
@@ -416,3 +371,17 @@ class RustProject:
     def close(self) -> None:
         """Close the project and free Rust-side resources."""
         self._inner.close()
+
+    def __enter__(self) -> RustProject:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # Best-effort cleanup if user forgets to close.
+        # Don't raise from __del__.
+        try:
+            self.close()
+        except Exception:
+            pass

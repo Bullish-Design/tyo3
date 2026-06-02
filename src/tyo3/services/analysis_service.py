@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from tyo3.models.analysis import (
     CheckResult,
     Diagnostic,
@@ -52,7 +50,7 @@ class AnalysisService:
             return "/" + "/".join(components[1:])
         return "/".join(components)
 
-    def _get_rust_project(self, root_path: str) -> Optional[object]:
+    def _get_rust_project(self, root_path: str) -> object | None:
         """Return the RustProject for *root_path*, or ``None``."""
         return self._rust_projects.get(root_path)
 
@@ -88,7 +86,7 @@ class AnalysisService:
                 severity=d.severity,
                 code=d.code,
                 message=d.message,
-                details=set(d.details) if d.details else set(),
+                details=list(d.details) if d.details else [],
             )
             self._diagnostics.append(diagnostic)
         return result
@@ -136,7 +134,7 @@ class AnalysisService:
                 severity=d.severity,
                 code=d.code,
                 message=d.message,
-                details=set(d.details) if d.details else set(),
+                details=list(d.details) if d.details else [],
             )
             self._diagnostics.append(diagnostic)
 

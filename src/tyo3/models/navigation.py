@@ -6,7 +6,6 @@ Derived from tyo3-navigation.allium
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -46,9 +45,9 @@ class DefinitionTarget(BaseModel):
     project: TyProject
     path: Path
     range: Range
-    selection_range: Optional[Range] = None
-    symbol: Optional[Symbol] = None
-    module_name: Optional[str] = None
+    selection_range: Range | None = None
+    symbol: Symbol | None = None
+    module_name: str | None = None
 
 
 class Reference(BaseModel):

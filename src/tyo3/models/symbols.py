@@ -6,7 +6,6 @@ Derived from tyo3-symbols.allium
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -41,9 +40,9 @@ class Symbol(BaseModel):
     """A code symbol discovered in a TyO3 project."""
     project: TyProject
     name: str
-    qualified_name: Optional[str] = None
+    qualified_name: str | None = None
     kind: SymbolKind
     location: FileRange
-    selection_range: Optional[Range] = None
-    container_name: Optional[str] = None
+    selection_range: Range | None = None
+    container_name: str | None = None
     deprecated: bool = False
