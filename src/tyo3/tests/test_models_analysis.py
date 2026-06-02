@@ -89,7 +89,6 @@ class TestDiagnostic:
 
     def test_required_fields(self, open_project) -> None:
         d = Diagnostic(
-            project=open_project,
             message="Unexpected type",
         )
         assert d.message == "Unexpected type"
@@ -101,7 +100,6 @@ class TestDiagnostic:
 
     def test_with_file_and_range(self, first_party_file, range_) -> None:
         d = Diagnostic(
-            project=first_party_file.project,
             file=first_party_file,
             range=range_,
             severity=DiagnosticSeverity.WARNING,
@@ -116,7 +114,6 @@ class TestDiagnostic:
 
     def test_details_set(self, open_project) -> None:
         d = Diagnostic(
-            project=open_project,
             message="test",
             details={"a", "b"},
         )

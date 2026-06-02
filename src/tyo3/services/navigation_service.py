@@ -1,8 +1,11 @@
-"""Code navigation service — tyo3-navigation.allium rules."""
+"""Code navigation service — tyo3-navigation.allium rules.
+
+DEPRECATED: Use tyo3.TyO3Session instead. This module will be removed in v0.2.
+"""
 
 from __future__ import annotations
 
-from tyo3.models.core import ProjectFile, TyProject
+from tyo3.models.core import Path, ProjectFile, TyProject
 from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
 
 
@@ -96,12 +99,9 @@ class NavigationService:
 
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
-            targets = rp.goto_definition(  # type: ignore[union-attr]
+            return rp.goto_definition(  # type: ignore[union-attr]
                 self._file_path_str(file), line, column
             )
-            for t in targets:
-                t.project = project
-            return targets
 
         return resolve_definition(project, file, line, column)
 
@@ -115,12 +115,9 @@ class NavigationService:
 
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
-            targets = rp.goto_declaration(  # type: ignore[union-attr]
+            return rp.goto_declaration(  # type: ignore[union-attr]
                 self._file_path_str(file), line, column
             )
-            for t in targets:
-                t.project = project
-            return targets
 
         return resolve_declaration(project, file, line, column)
 
@@ -134,12 +131,9 @@ class NavigationService:
 
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
-            targets = rp.goto_type_definition(  # type: ignore[union-attr]
+            return rp.goto_type_definition(  # type: ignore[union-attr]
                 self._file_path_str(file), line, column
             )
-            for t in targets:
-                t.project = project
-            return targets
 
         return resolve_type_definition(project, file, line, column)
 
@@ -158,12 +152,9 @@ class NavigationService:
 
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
-            refs = rp.find_references(  # type: ignore[union-attr]
+            return rp.find_references(  # type: ignore[union-attr]
                 self._file_path_str(file), line, column, include_declaration
             )
-            for r in refs:
-                r.project = project
-            return refs
 
         return resolve_references(project, file, line, column, include_declaration)
 
@@ -185,8 +176,8 @@ class NavigationService:
         if result is None:
             return None
         # Convert dict to HoverResult (legacy path)
-        from tyo3.models.navigation import HoverContent, HoverContentKind
         from tyo3.models.analysis import FileRange
+        from tyo3.models.navigation import HoverContent, HoverContentKind
 
         contents = [
             HoverContent(

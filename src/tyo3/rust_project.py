@@ -35,13 +35,13 @@ from tyo3.models.analysis import (
     CheckResult,
     Diagnostic,
     DiagnosticSeverity,
-    FileRange as ModelFileRange,
     Position,
     Range,
 )
-from datetime import datetime, timezone
-
-from tyo3.models.core import Path as TyPath, TyProject as TyProjectModel
+from tyo3.models.analysis import (
+    FileRange as ModelFileRange,
+)
+from tyo3.models.core import Path as TyPath
 from tyo3.models.navigation import (
     DefinitionTarget,
     HoverContent,
@@ -63,10 +63,16 @@ except ImportError:
 # Import typed exception classes so we can catch Rust errors without string matching.
 try:
     from tyo3._native_impl import (
-        ProjectClosedError as _NativeClosedError,
-        PathResolutionError as _NativePathError,
-        PositionError as _NativePositionError,
         AnalysisError as _NativeAnalysisError,
+    )
+    from tyo3._native_impl import (
+        PathResolutionError as _NativePathError,
+    )
+    from tyo3._native_impl import (
+        PositionError as _NativePositionError,
+    )
+    from tyo3._native_impl import (
+        ProjectClosedError as _NativeClosedError,
     )
 except ImportError:
     # When the native extension isn't built, define dummy classes
@@ -127,12 +133,6 @@ class RustProject:
         except Exception as e:
             raise ProjectOpenError(f"Cannot open project at '{root_str}': {e}") from e
         self._root = StdPath(root_str).resolve()
-        # Minimal TyProject model used to enrich DTOs that require a project reference.
-        self._project_model = TyProjectModel(
-            root=TyPath(components=list(self._root.parts)),
-            status="open",
-            opened_at=datetime.now(timezone.utc),
-        )
 
     @property
     def root(self) -> StdPath:
@@ -168,7 +168,6 @@ class RustProject:
 
             diagnostics.append(
                 Diagnostic(
-                    project=self._project_model,
                     file=None,  # path-only for now
                     range=range_ref,
                     severity=DiagnosticSeverity(d.get("severity", "error")),
@@ -271,7 +270,6 @@ class RustProject:
         for r in data:
             refs.append(
                 Reference(
-                    project=self._project_model,
                     path=_string_path_to_typath(r["path"]),
                     range=_json_range_to_model(r["range"]),
                     kind=ReferenceKind(r.get("kind", "other")),
@@ -289,7 +287,7 @@ class RustProject:
         Returns ``None`` when no hover information is available.
         """
         try:
-            raw_json: Optional[str] = self._inner.hover(str(path), line, column)
+            raw_json: str | None = self._inner.hover(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -331,7 +329,6 @@ class RustProject:
             else None
         )
         return Symbol(
-            project=self._project_model,
             name=s["name"],
             qualified_name=s.get("qualified_name"),
             kind=SymbolKind(s.get("kind", "unknown")),
@@ -351,7 +348,6 @@ class RustProject:
         symbol = self._parse_symbol(t["symbol"]) if t.get("symbol") else None
 
         return DefinitionTarget(
-            project=self._project_model,
             path=_string_path_to_typath(t["path"]),
             range=_json_range_to_model(t["range"]),
             selection_range=sel_range,

@@ -8,7 +8,7 @@ Obligation groups:
 - Relationship tests (ProjectFile.project)
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from tyo3.models.core import (
     BackendInfo,
@@ -124,7 +124,7 @@ class TestTyProject:
     """TyProject entity tests."""
 
     def test_creation(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         root = Path(components=["home", "user", "proj"])
         project = TyProject(
             root=root,
@@ -141,7 +141,7 @@ class TestTyProject:
         project = TyProject(
             root=Path(components=["r"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         assert project.is_open is True
         assert project.has_error is False
@@ -150,7 +150,7 @@ class TestTyProject:
         project = TyProject(
             root=Path(components=["r"]),
             status=ProjectStatus.CLOSED,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         assert project.is_open is False
 
@@ -158,7 +158,7 @@ class TestTyProject:
         project = TyProject(
             root=Path(components=["r"]),
             status=ProjectStatus.ERROR,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         assert project.has_error is True
         assert project.is_open is False
@@ -168,7 +168,7 @@ class TestTyProject:
             root=Path(components=["r"]),
             status=ProjectStatus.OPEN,
             python_version="3.13",
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         assert project.python_version == "3.13"
 
@@ -176,7 +176,7 @@ class TestTyProject:
         project = TyProject(
             root=Path(components=["r"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         assert project.python_version is None
         assert project.config_path is None
@@ -189,7 +189,7 @@ class TestTyProject:
             root=Path(components=["r"]),
             status=ProjectStatus.OPEN,
             extra_search_paths={p1, p2},
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         assert len(project.extra_search_paths) == 2
 
@@ -202,7 +202,7 @@ class TestProjectFile:
         project = TyProject(
             root=root,
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         file_path = Path(components=["r", "main.py"])
         pf = ProjectFile(
@@ -219,7 +219,7 @@ class TestProjectFile:
         project = TyProject(
             root=Path(components=["r"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         pf = ProjectFile(
             path=Path(components=["r", "f.py"]),
@@ -233,7 +233,7 @@ class TestProjectFile:
         project = TyProject(
             root=Path(components=["r"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         for cat in [FileCategory.FIRST_PARTY, FileCategory.VENDORED, FileCategory.STUB, FileCategory.DEPENDENCY]:
             pf = ProjectFile(

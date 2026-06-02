@@ -44,12 +44,10 @@ class TestSymbol:
 
     def test_required_fields(self, open_project, first_party_file) -> None:
         sym = Symbol(
-            project=open_project,
             name="foo",
             kind=SymbolKind.FUNCTION,
             location=_file_range(first_party_file.path),
         )
-        assert sym.project == open_project
         assert sym.name == "foo"
         assert sym.kind == SymbolKind.FUNCTION
         assert sym.qualified_name is None
@@ -59,7 +57,6 @@ class TestSymbol:
 
     def test_symbol_with_qualified_name(self, open_project, first_party_file) -> None:
         sym = Symbol(
-            project=open_project,
             name="MyClass",
             qualified_name="pkg.module.MyClass",
             kind=SymbolKind.CLASS_,
@@ -78,7 +75,6 @@ class TestSymbol:
             "type_parameter", "import_", "unknown",
         ]:
             sym = Symbol(
-                project=open_project,
                 name="sym",
                 kind=kind_name,
                 location=_file_range(first_party_file.path),

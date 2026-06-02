@@ -10,9 +10,8 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 from tyo3.models.analysis import FileRange, Range
-from tyo3.models.core import Path, TyProject
+from tyo3.models.core import Path
 from tyo3.models.symbols import Symbol
-
 
 # ── Enums ────────────────────────────────────────────────────────────────
 
@@ -42,7 +41,6 @@ class HoverContentKind(StrEnum):
 
 class DefinitionTarget(BaseModel):
     """A navigation target produced by goto-definition-like operations."""
-    project: TyProject
     path: Path
     range: Range
     selection_range: Range | None = None
@@ -52,7 +50,6 @@ class DefinitionTarget(BaseModel):
 
 class Reference(BaseModel):
     """A reference occurrence within a project file."""
-    project: TyProject
     path: Path
     range: Range
     kind: ReferenceKind

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
+from tyo3.models.advanced import SemanticToken, SemanticTokenModifier, SemanticTokenType
 from tyo3.models.analysis import Diagnostic, DiagnosticSeverity, Position, Range
 from tyo3.models.core import (
     FileCategory,
@@ -17,13 +18,11 @@ from tyo3.models.core import (
 )
 from tyo3.models.navigation import DefinitionTarget, Reference, ReferenceKind
 from tyo3.models.symbols import Symbol, SymbolKind
-from tyo3.models.advanced import SemanticToken, SemanticTokenModifier, SemanticTokenType
+from tyo3.services.advanced_service import AdvancedService
 from tyo3.services.analysis_service import AnalysisService
 from tyo3.services.navigation_service import NavigationService
 from tyo3.services.project_service import ProjectService
 from tyo3.services.symbol_service import SymbolService
-from tyo3.services.advanced_service import AdvancedService
-
 
 # ── Fixture helpers ─────────────────────────────────────────────────────
 
@@ -39,7 +38,7 @@ def make_project(
     return TyProject(
         root=make_path(root_components or ["home", "user", "project"]),
         status=status,
-        opened_at=datetime.now(timezone.utc),
+        opened_at=datetime.now(UTC),
     )
 
 
@@ -132,7 +131,6 @@ def range_() -> Range:
 @pytest.fixture
 def diagnostic(open_project: TyProject, first_party_file: ProjectFile) -> Diagnostic:
     return Diagnostic(
-        project=open_project,
         file=first_party_file,
         range=Range(start=Position(line=5, column=1), end=Position(line=5, column=20)),
         severity=DiagnosticSeverity.ERROR,
@@ -146,7 +144,6 @@ def diagnostic(open_project: TyProject, first_party_file: ProjectFile) -> Diagno
 def symbol(open_project: TyProject, first_party_file: ProjectFile) -> Symbol:
     from tyo3.models.analysis import FileRange, Position, Range
     return Symbol(
-        project=open_project,
         name="MyClass",
         qualified_name="my_module.MyClass",
         kind=SymbolKind.CLASS_,
@@ -161,7 +158,6 @@ def symbol(open_project: TyProject, first_party_file: ProjectFile) -> Symbol:
 @pytest.fixture
 def definition_target(open_project: TyProject) -> DefinitionTarget:
     return DefinitionTarget(
-        project=open_project,
         path=make_path(["home", "user", "project", "main.py"]),
         range=Range(start=Position(line=1, column=1), end=Position(line=10, column=5)),
     )
@@ -170,7 +166,6 @@ def definition_target(open_project: TyProject) -> DefinitionTarget:
 @pytest.fixture
 def reference(open_project: TyProject) -> Reference:
     return Reference(
-        project=open_project,
         path=make_path(["home", "user", "project", "main.py"]),
         range=Range(start=Position(line=15, column=10), end=Position(line=15, column=20)),
         kind=ReferenceKind.READ,
@@ -180,7 +175,6 @@ def reference(open_project: TyProject) -> Reference:
 @pytest.fixture
 def semantic_token(open_project: TyProject, first_party_file: ProjectFile) -> SemanticToken:
     return SemanticToken(
-        project=open_project,
         file=first_party_file,
         range=Range(start=Position(line=1, column=1), end=Position(line=1, column=10)),
         token_type=SemanticTokenType.FUNCTION,

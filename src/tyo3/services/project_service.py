@@ -1,8 +1,11 @@
-"""Project lifecycle service — tyo3-core.allium rules."""
+"""Project lifecycle service — tyo3-core.allium rules.
+
+DEPRECATED: Use tyo3.TyO3Session instead. This module will be removed in v0.2.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from tyo3.models.core import (
     BackendInfo,
@@ -124,8 +127,9 @@ class ProjectService:
 
         # ── Open Rust backend (if available) ──
         if self._use_rust:
-            from tyo3.rust_project import RustProject
             from pathlib import Path as StdPath
+
+            from tyo3.rust_project import RustProject
 
             real_path = StdPath(*root.components)  # type: ignore[arg-type]
             rp = RustProject(real_path)
@@ -148,7 +152,7 @@ class ProjectService:
             respect_gitignore=effective.respect_gitignore,
             force_exclude=effective.force_exclude,
             check_all_files=effective.check_all_files,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         self._projects.append(project)
 
@@ -180,7 +184,7 @@ class ProjectService:
         if rp is not None:
             rp.reload()  # type: ignore[union-attr]
 
-        project.last_reloaded_at = datetime.now(timezone.utc)
+        project.last_reloaded_at = datetime.now(UTC)
         project.status = ProjectStatus.OPEN
         return project
 

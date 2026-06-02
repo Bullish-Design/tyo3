@@ -18,8 +18,6 @@ Test groups:
 
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path as StdPath
 
 import pytest
@@ -32,13 +30,12 @@ except ImportError:
     _HAS_NATIVE = False
 
 from tyo3.exceptions import (
-    AnalysisError,
     PathResolutionError,
     PositionError,
     ProjectClosedError,
     ProjectOpenError,
 )
-from tyo3.models.core import FileCategory, Path, ProjectFile, ProjectStatus, TyProject, TyProjectConfig
+from tyo3.models.core import Path
 from tyo3.services.analysis_service import AnalysisService
 from tyo3.services.navigation_service import NavigationService
 from tyo3.services.project_service import ProjectService

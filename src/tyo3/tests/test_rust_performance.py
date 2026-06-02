@@ -30,7 +30,6 @@ try:
 except ImportError:
     _HAS_NATIVE = False
 
-from tyo3.exceptions import PositionError
 
 # ── Path helpers ──────────────────────────────────────────────────────────
 

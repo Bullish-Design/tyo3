@@ -28,11 +28,9 @@ class TestDefinitionTarget:
         from tyo3.models.core import Path
 
         target = DefinitionTarget(
-            project=open_project,
             path=Path(components=["src", "main.py"]),
             range=Range(start=Position(line=1, column=1), end=Position(line=5, column=1)),
         )
-        assert target.project == open_project
         assert target.module_name is None
         assert target.symbol is None
         assert target.selection_range is None
@@ -42,7 +40,6 @@ class TestDefinitionTarget:
         from tyo3.models.core import Path
 
         target = DefinitionTarget(
-            project=open_project,
             path=Path(components=["src", "main.py"]),
             range=Range(start=Position(line=1, column=1), end=Position(line=5, column=1)),
             selection_range=Range(start=Position(line=2, column=1), end=Position(line=2, column=10)),
@@ -61,7 +58,6 @@ class TestReference:
         from tyo3.models.core import Path
 
         ref = Reference(
-            project=open_project,
             path=Path(components=["src", "main.py"]),
             range=Range(start=Position(line=10, column=5), end=Position(line=10, column=15)),
             kind=ReferenceKind.READ,
@@ -74,5 +70,5 @@ class TestReference:
 
         r = Range(start=Position(line=1, column=1), end=Position(line=1, column=2))
         for kind in [ReferenceKind.READ, ReferenceKind.WRITE, ReferenceKind.OTHER]:
-            ref = Reference(project=open_project, path=Path(components=["f.py"]), range=r, kind=kind)
+            ref = Reference(path=Path(components=["f.py"]), range=r, kind=kind)
             assert ref.kind == kind

@@ -1,4 +1,7 @@
-"""Symbol discovery service — tyo3-symbols.allium rules."""
+"""Symbol discovery service — tyo3-symbols.allium rules.
+
+DEPRECATED: Use tyo3.TyO3Session instead. This module will be removed in v0.2.
+"""
 
 from __future__ import annotations
 
@@ -91,15 +94,11 @@ class SymbolService:
         if rp is not None and self._use_rust:
             file_path = self._path_to_str(file.path)
             symbols = rp.document_symbols(file_path)  # type: ignore[union-attr]
-            for s in symbols:
-                s.project = project
-                self._symbols.append(s)
+            self._symbols.extend(symbols)
             return symbols
 
         symbols = document_symbols(file)
-        for s in symbols:
-            s.project = project
-            self._symbols.append(s)
+        self._symbols.extend(symbols)
         return symbols
 
     # ── SearchWorkspaceSymbols ─────────────────────────────────────────
@@ -116,15 +115,11 @@ class SymbolService:
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
             matches = rp.workspace_symbols(query)  # type: ignore[union-attr]
-            for s in matches:
-                s.project = project
-                self._symbols.append(s)
+            self._symbols.extend(matches)
             return matches
 
         matches = workspace_symbols(project, query)
-        for s in matches:
-            s.project = project
-            self._symbols.append(s)
+        self._symbols.extend(matches)
         return matches
 
     # ── SearchAllSymbols ───────────────────────────────────────────────
@@ -150,7 +145,5 @@ class SymbolService:
         # NOTE: all_symbols is not callable from Rust (QueryPattern not
         # publicly exported from ty_ide).  Always fall back to stub.
         matches = all_symbols(project, query, context_file)
-        for s in matches:
-            s.project = project
-            self._symbols.append(s)
+        self._symbols.extend(matches)
         return matches

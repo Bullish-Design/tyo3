@@ -1,11 +1,13 @@
-"""Type checking and analysis service — tyo3-analysis.allium rules."""
+"""Type checking and analysis service — tyo3-analysis.allium rules.
+
+DEPRECATED: Use tyo3.TyO3Session instead. This module will be removed in v0.2.
+"""
 
 from __future__ import annotations
 
 from tyo3.models.analysis import (
     CheckResult,
     Diagnostic,
-    DiagnosticSeverity,
 )
 from tyo3.models.core import Path, ProjectFile, TyProject
 
@@ -26,6 +28,8 @@ def check_duration() -> int:
 class AnalysisService:
     """Implements type-checking rules from tyo3-analysis.allium.
 
+    DEPRECATED: Use :class:`tyo3.TyO3Session` instead.
+
     Parameters
     ----------
     use_rust:
@@ -35,7 +39,7 @@ class AnalysisService:
     """
 
     def __init__(self, use_rust: bool = False) -> None:
-        self._diagnostics: list[Diagnostic] = []
+        self._diagnostics_by_project: dict[str, list[Diagnostic]] = {}
         self._use_rust: bool = use_rust
         # RustProject instances keyed by root path string
         self._rust_projects: dict[str, object] = {}
@@ -58,9 +62,19 @@ class AnalysisService:
         """Register a RustProject instance for dependency injection."""
         self._rust_projects[root_path] = rp
 
+    def _ensure_project_key(self, project: TyProject) -> str:
+        """Return the string key for a project and ensure it has a diagnostics list."""
+        key = str(project.root)
+        if key not in self._diagnostics_by_project:
+            self._diagnostics_by_project[key] = []
+        return key
+
     @property
     def diagnostics(self) -> list[Diagnostic]:
-        return list(self._diagnostics)
+        result: list[Diagnostic] = []
+        for diags in self._diagnostics_by_project.values():
+            result.extend(diags)
+        return result
 
     # ── CheckProject ───────────────────────────────────────────────────
 
@@ -69,18 +83,17 @@ class AnalysisService:
         if not project.is_open:
             raise ValueError("Project is not open")
 
+        key = self._ensure_project_key(project)
+
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
             result = rp.check()  # type: ignore[union-attr]
-            for d in result.diagnostics:
-                d.project = project
-                self._diagnostics.append(d)
+            self._diagnostics_by_project[key].extend(result.diagnostics)
             return result
 
         result = run_ty_check(project)
         for d in result.diagnostics:
             diagnostic = Diagnostic(
-                project=project,
                 file=d.file,
                 range=d.range,
                 severity=d.severity,
@@ -88,7 +101,7 @@ class AnalysisService:
                 message=d.message,
                 details=list(d.details) if d.details else [],
             )
-            self._diagnostics.append(diagnostic)
+            self._diagnostics_by_project[key].append(diagnostic)
         return result
 
     # ── CheckFile ──────────────────────────────────────────────────────
@@ -100,25 +113,22 @@ class AnalysisService:
         if file.project.root != project.root:
             raise ValueError("File does not belong to project")
 
+        key = self._ensure_project_key(project)
+
         # With Rust backend: run full check, filter by file path
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
             full_result = rp.check()  # type: ignore[union-attr]
-            file_path_str = "/".join(file.path.components)
             file_diagnostics = [
                 d for d in full_result.diagnostics
                 if d.file is not None
             ]
-            # Note: Rust diagnostics don't have file set currently; keep stub behavior
-            result = CheckResult(
+            self._diagnostics_by_project[key].extend(file_diagnostics)
+            return CheckResult(
                 diagnostics=file_diagnostics,
                 files_checked=1,
                 elapsed_ms=full_result.elapsed_ms,
             )
-            for d in file_diagnostics:
-                d.project = project
-                self._diagnostics.append(d)
-            return result
 
         all_results = run_ty_check(project)
         file_diagnostics = [
@@ -128,7 +138,6 @@ class AnalysisService:
         ]
         for d in file_diagnostics:
             diagnostic = Diagnostic(
-                project=project,
                 file=file,
                 range=d.range,
                 severity=d.severity,
@@ -136,7 +145,7 @@ class AnalysisService:
                 message=d.message,
                 details=list(d.details) if d.details else [],
             )
-            self._diagnostics.append(diagnostic)
+            self._diagnostics_by_project[key].append(diagnostic)
 
         return CheckResult(
             diagnostics=file_diagnostics, files_checked=1, elapsed_ms=check_duration()
@@ -150,26 +159,23 @@ class AnalysisService:
         if not project.is_open:
             raise ValueError("Project is not open")
 
-        filtered = [
-            d for d in self._diagnostics
-            if d.project.root == project.root and d.severity == severity
-        ]
+        key = str(project.root)
+        diags = self._diagnostics_by_project.get(key, [])
+        filtered = [d for d in diags if d.severity == severity]
         return CheckResult(diagnostics=filtered)
 
     def filter_by_code(self, project: TyProject, code: str) -> CheckResult:
         if not project.is_open:
             raise ValueError("Project is not open")
 
-        filtered = [
-            d for d in self._diagnostics
-            if d.project.root == project.root and d.code == code
-        ]
+        key = str(project.root)
+        diags = self._diagnostics_by_project.get(key, [])
+        filtered = [d for d in diags if d.code == code]
         return CheckResult(diagnostics=filtered)
 
     # ── ClearDiagnosticsOnReload ───────────────────────────────────────
 
     def clear_diagnostics_for_project(self, project: TyProject) -> None:
         """Clear all diagnostics belonging to a project (on reload)."""
-        self._diagnostics = [
-            d for d in self._diagnostics if d.project.root != project.root
-        ]
+        key = str(project.root)
+        self._diagnostics_by_project.pop(key, None)

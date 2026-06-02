@@ -58,12 +58,10 @@ class TestSemanticToken:
         from tyo3.models.analysis import Position, Range
 
         token = SemanticToken(
-            project=open_project,
             file=first_party_file,
             range=Range(start=Position(line=1, column=1), end=Position(line=1, column=10)),
             token_type=SemanticTokenType.FUNCTION,
         )
-        assert token.project == open_project
         assert token.file == first_party_file
         assert token.token_type == SemanticTokenType.FUNCTION
         assert token.modifiers == set()
@@ -72,7 +70,6 @@ class TestSemanticToken:
         from tyo3.models.analysis import Position, Range
 
         token = SemanticToken(
-            project=open_project,
             file=first_party_file,
             range=Range(start=Position(line=1, column=1), end=Position(line=1, column=10)),
             token_type=SemanticTokenType.FUNCTION,

@@ -8,6 +8,8 @@ Obligation groups:
 - GetHover: success, no-content, invalid position
 """
 
+from datetime import UTC
+
 import pytest
 
 from tyo3.models.core import ProjectFile
@@ -31,13 +33,14 @@ class TestGotoDefinition:
             navigation_service.goto_definition(closed_project, first_party_file, 1, 1)
 
     def test_rejects_file_not_in_project(self, navigation_service, open_project) -> None:
-        from datetime import datetime, timezone
-        from tyo3.models.core import TyProject, ProjectStatus, Path
+        from datetime import datetime
+
+        from tyo3.models.core import Path, ProjectStatus, TyProject
 
         other = TyProject(
             root=Path(components=["other"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
             path=Path(components=["other", "f.py"]),

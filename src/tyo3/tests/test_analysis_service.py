@@ -7,6 +7,8 @@ Obligation groups:
 - ClearDiagnosticsOnReload: diagnostics cleared on project reload
 """
 
+from datetime import UTC
+
 import pytest
 
 from tyo3.models.analysis import DiagnosticSeverity
@@ -37,13 +39,14 @@ class TestCheckFile:
         assert result.files_checked == 1
 
     def test_rejects_file_not_in_project(self, analysis_service, open_project) -> None:
-        from tyo3.models.core import TyProject, ProjectStatus
-        from datetime import datetime, timezone
+        from datetime import datetime
+
+        from tyo3.models.core import ProjectStatus, TyProject
 
         other_project = TyProject(
             root=Path(components=["other"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         other_file = type('obj', (object,), {'path': Path(components=["x"]), 'project': other_project})()
         # We need a real ProjectFile for this
@@ -89,36 +92,32 @@ class TestClearDiagnosticsOnReload:
     """ClearDiagnosticsOnReload rule tests."""
 
     def test_clears_diagnostics(self, analysis_service, open_project, diagnostic) -> None:
-        analysis_service._diagnostics.append(diagnostic)
-        assert len(analysis_service._diagnostics) == 1
+        key = str(open_project.root)
+        analysis_service._diagnostics_by_project[key] = [diagnostic]
+        assert len(analysis_service.diagnostics) == 1
         analysis_service.clear_diagnostics_for_project(open_project)
-        assert len(analysis_service._diagnostics) == 0
+        assert len(analysis_service.diagnostics) == 0
 
     def test_does_not_clear_other_projects(self, analysis_service, open_project) -> None:
-        from datetime import datetime, timezone
-        from tyo3.models.core import TyProject, ProjectStatus
+        from datetime import datetime
+
+        from tyo3.models.core import Path, ProjectStatus, TyProject
 
         other = TyProject(
             root=Path(components=["other"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
-        other_diag = type('d', (object,), {'project': other})()
-        # We need proper Diagnostic objects
         from tyo3.models.analysis import Diagnostic
-        from tyo3.models.analysis import Position, Range
 
         diag_a = Diagnostic(
-            project=open_project,
             message="A",
-            severity=DiagnosticSeverity.ERROR,
         )
         diag_b = Diagnostic(
-            project=other,
             message="B",
-            severity=DiagnosticSeverity.ERROR,
         )
-        analysis_service._diagnostics = [diag_a, diag_b]
+        analysis_service._diagnostics_by_project[str(open_project.root)] = [diag_a]
+        analysis_service._diagnostics_by_project[str(other.root)] = [diag_b]
         analysis_service.clear_diagnostics_for_project(open_project)
-        assert len(analysis_service._diagnostics) == 1
-        assert analysis_service._diagnostics[0].message == "B"
+        assert len(analysis_service.diagnostics) == 1
+        assert analysis_service.diagnostics[0].message == "B"

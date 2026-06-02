@@ -16,7 +16,6 @@ class TestTyProjectAPISurface:
 
     def test_open_project_available_always(self, project_service) -> None:
         """UserOpensProject has no 'when' guard — always available."""
-        import typing
         # Check the surface provides UserOpensProject without a 'when' condition
         has_open_project = hasattr(project_service, "open_project")
         assert has_open_project

@@ -6,6 +6,8 @@ Obligation groups:
 - Deferred spec awareness (SemanticTokens.full, TypeHierarchy.explore)
 """
 
+from datetime import UTC
+
 import pytest
 
 from tyo3.models.core import FileCategory, Path, ProjectFile
@@ -19,13 +21,14 @@ class TestGetSemanticTokens:
         assert tokens == []
 
     def test_rejects_file_not_in_project(self, advanced_service, open_project) -> None:
-        from datetime import datetime, timezone
-        from tyo3.models.core import TyProject, ProjectStatus
+        from datetime import datetime
+
+        from tyo3.models.core import ProjectStatus, TyProject
 
         other = TyProject(
             root=Path(components=["other"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
             path=Path(components=["other", "f.py"]),

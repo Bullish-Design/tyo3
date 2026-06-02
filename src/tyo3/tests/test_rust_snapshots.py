@@ -12,8 +12,6 @@ Run with: PYTHONPATH=src pytest src/tyo3/tests/test_rust_snapshots.py -v
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path as StdPath
 
 import pytest
@@ -25,7 +23,6 @@ try:
 except ImportError:
     _HAS_NATIVE = False
 
-from tyo3.models.core import Path
 from tyo3.models.symbols import Symbol
 
 # ── Path helpers ──────────────────────────────────────────────────────────
@@ -143,8 +140,8 @@ class TestSnapshotClasses:
             assert cls_name in names, f"Expected class '{cls_name}' in symbols, got: {names}"
 
         # Verify class methods
-        assert "__init__" in names, f"Expected '__init__' constructor in symbols"
-        assert "speak" in names, f"Expected 'speak' method in symbols"
+        assert "__init__" in names, "Expected '__init__' constructor in symbols"
+        assert "speak" in names, "Expected 'speak' method in symbols"
 
         # Count should be reasonable (classes + constructors + methods + properties)
         assert 15 <= len(symbols) <= 30, f"Expected 15-30 symbols, got {len(symbols)}"

@@ -12,14 +12,12 @@ Obligation groups:
 - Terminal states: closed has no outbound rules in current spec
 """
 
-from datetime import datetime, timezone
 
 import pytest
 
 from tyo3.models.core import (
     Path,
     ProjectStatus,
-    TyProject,
 )
 
 

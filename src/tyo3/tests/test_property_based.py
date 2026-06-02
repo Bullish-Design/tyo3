@@ -19,7 +19,8 @@ from __future__ import annotations
 from pathlib import Path as StdPath
 
 import pytest
-from hypothesis import assume, given, settings, strategies as st
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 # Check if native extension is available
 try:
@@ -200,7 +201,7 @@ def test_symbols_have_valid_positions(data: st.DataObject) -> None:
 
         symbols = rp.document_symbols(file_name)
         for s in symbols:
-            assert s.name, f"Symbol with empty name"
+            assert s.name, "Symbol with empty name"
             assert s.kind, f"Symbol {s.name} has no kind"
 
             loc = s.location

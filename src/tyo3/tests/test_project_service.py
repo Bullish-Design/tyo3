@@ -9,16 +9,14 @@ Obligation groups:
 - QueryBackendInfo: returns correct metadata
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from tyo3.models.core import (
     FileCategory,
     Path,
-    ProjectFile,
     ProjectStatus,
-    TyProject,
     TyProjectConfig,
 )
 
@@ -74,9 +72,9 @@ class TestOpenProject:
 
     def test_sets_opened_at(self, project_service) -> None:
         root = Path(components=["ts"])
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         project, _ = project_service.open_project(root)
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
         assert before <= project.opened_at <= after
 
 

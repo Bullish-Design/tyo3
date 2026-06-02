@@ -10,8 +10,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from tyo3.models.analysis import Range
-from tyo3.models.core import ProjectFile, TyProject
-
+from tyo3.models.core import ProjectFile
 
 # ── Enums ────────────────────────────────────────────────────────────────
 
@@ -48,7 +47,6 @@ class SemanticTokenModifier(StrEnum):
 
 class SemanticToken(BaseModel):
     """A classified semantic token within a project file."""
-    project: TyProject
     file: ProjectFile
     range: Range
     token_type: SemanticTokenType

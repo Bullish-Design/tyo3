@@ -1,4 +1,7 @@
-"""Advanced semantic analysis service — tyo3-advanced.allium rules (deferred v0.2+)."""
+"""Advanced semantic analysis service — tyo3-advanced.allium rules (deferred v0.2+).
+
+DEPRECATED: Use tyo3.TyO3Session instead. This module will be removed in v0.2.
+"""
 
 from __future__ import annotations
 

@@ -9,8 +9,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from tyo3.models.core import Path, ProjectFile, TyProject
-
+from tyo3.models.core import Path, ProjectFile
 
 # ── Value Types ──────────────────────────────────────────────────────────
 
@@ -57,7 +56,6 @@ class DiagnosticSeverity(StrEnum):
 
 class Diagnostic(BaseModel):
     """A type-checking diagnostic for a specific location in a project file."""
-    project: TyProject
     file: ProjectFile | None = None
     range: Range | None = None
     severity: DiagnosticSeverity = DiagnosticSeverity.ERROR

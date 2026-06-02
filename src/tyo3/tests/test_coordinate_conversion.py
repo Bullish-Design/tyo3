@@ -16,7 +16,6 @@ Run with: PYTHONPATH=src pytest src/tyo3/tests/test_coordinate_conversion.py -v
 
 from __future__ import annotations
 
-import os
 from pathlib import Path as StdPath
 
 import pytest
@@ -28,9 +27,8 @@ try:
 except ImportError:
     _HAS_NATIVE = False
 
-from tyo3.exceptions import PositionError, PathResolutionError
+from tyo3.exceptions import PositionError
 from tyo3.models.analysis import Position
-
 
 # ── Path helpers ──────────────────────────────────────────────────────────
 

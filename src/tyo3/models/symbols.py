@@ -10,8 +10,6 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 from tyo3.models.analysis import FileRange, Range
-from tyo3.models.core import TyProject
-
 
 # ── Enums ────────────────────────────────────────────────────────────────
 
@@ -38,7 +36,6 @@ class SymbolKind(StrEnum):
 
 class Symbol(BaseModel):
     """A code symbol discovered in a TyO3 project."""
-    project: TyProject
     name: str
     qualified_name: str | None = None
     kind: SymbolKind

@@ -6,6 +6,8 @@ Obligation groups:
 - SearchAllSymbols: success, no-context returns empty
 """
 
+from datetime import UTC
+
 import pytest
 
 from tyo3.models.core import FileCategory, Path, ProjectFile
@@ -19,13 +21,14 @@ class TestGetDocumentSymbols:
         assert symbols == []
 
     def test_rejects_file_not_in_project(self, symbol_service, open_project) -> None:
-        from datetime import datetime, timezone
-        from tyo3.models.core import TyProject, ProjectStatus
+        from datetime import datetime
+
+        from tyo3.models.core import ProjectStatus, TyProject
 
         other = TyProject(
             root=Path(components=["other"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
             path=Path(components=["other", "f.py"]),
@@ -76,13 +79,14 @@ class TestSearchAllSymbols:
             symbol_service.search_all_symbols(closed_project, "foo")
 
     def test_rejects_wrong_context_file(self, symbol_service, open_project) -> None:
-        from datetime import datetime, timezone
-        from tyo3.models.core import TyProject, ProjectStatus
+        from datetime import datetime
+
+        from tyo3.models.core import ProjectStatus, TyProject
 
         other = TyProject(
             root=Path(components=["other"]),
             status=ProjectStatus.OPEN,
-            opened_at=datetime.now(timezone.utc),
+            opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
             path=Path(components=["other", "f.py"]),
