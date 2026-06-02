@@ -72,18 +72,18 @@ fn char_len_to_byte_offset(text: &str, char_offset: usize) -> TextSize {
     TextSize::try_from(byte_pos).unwrap_or_else(|_| TextSize::from(text.len() as u32))
 }
 
-/// Convert a ruff TextRange to a Python-friendly RangeDto using 1-based line/column.
-pub fn range_to_dto(
+/// Convert a ruff TextRange to a Python-friendly RangeDto using a precomputed LineIndex.
+///
+/// Use this when converting multiple ranges for the same file — avoids
+/// recomputing the line index on every call.
+pub fn range_to_dto_with_index(
     source: &str,
+    line_index: &LineIndex,
     range: ruff_text_size::TextRange,
 ) -> RangeDto {
-    let line_index = LineIndex::from_source_text(source);
-
-    // ruff's line_index uses 0-based internally
     let start_loc = line_index.source_location(range.start(), source, PositionEncoding::Utf32);
     let end_loc = line_index.source_location(range.end(), source, PositionEncoding::Utf32);
 
-    // source_location returns OneIndexed values, convert to 1-based u32
     RangeDto {
         start: PositionDto {
             line: start_loc.line.get() as u32,
@@ -94,4 +94,16 @@ pub fn range_to_dto(
             column: (end_loc.character_offset.to_zero_indexed() + 1) as u32,
         },
     }
+}
+
+/// Convert a ruff TextRange to a Python-friendly RangeDto using 1-based line/column.
+///
+/// Convenience wrapper that computes a LineIndex internally.
+/// Use `range_to_dto_with_index` when converting multiple ranges for the same source.
+pub fn range_to_dto(
+    source: &str,
+    range: ruff_text_size::TextRange,
+) -> RangeDto {
+    let line_index = LineIndex::from_source_text(source);
+    range_to_dto_with_index(source, &line_index, range)
 }

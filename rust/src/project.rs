@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -30,7 +30,7 @@ struct TyProjectState {
 /// every operation checks this first and raises if the project is closed.
 #[pyclass(name = "TyProject")]
 pub struct PyTyProject {
-    inner: Arc<Mutex<Option<TyProjectState>>>,
+    inner: Mutex<Option<TyProjectState>>,
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────
@@ -71,6 +71,93 @@ fn resolve_file_and_source(
     Ok((file, source_str))
 }
 
+/// Shared implementation for goto_definition, goto_declaration,
+/// goto_type_definition.  Resolves the path, computes the source offset,
+/// calls the provided navigation function, converts the results, and
+/// serialises to JSON.
+fn navigate_to_targets(
+    inner: &Mutex<Option<TyProjectState>>,
+    op_name: &str,
+    path: &str,
+    line: u32,
+    column: u32,
+    navigate_fn: fn(
+        &dyn Db,
+        File,
+        ruff_text_size::TextSize,
+    ) -> Option<ty_ide::RangedValue<ty_ide::NavigationTargets>>,
+) -> PyResult<String> {
+    let guard = lock_state(inner, op_name)?;
+    let state = guard.as_ref().unwrap();
+
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+
+    let pos = dto::PositionDto { line, column };
+    let offset = coordinates::position_to_offset(&source_str, &pos)
+        .map_err(|e| PositionError::new_err(e))?;
+
+    let result = navigate_fn(&state.db, file, offset);
+
+    let targets = match result {
+        Some(targets) => {
+            convert::navigation::convert_navigation_targets(&state.db, &targets)
+        }
+        None => Vec::new(),
+    };
+
+    serde_json::to_string(&targets)
+        .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+}
+
+/// Recursively collect document symbols from a hierarchical symbol tree.
+fn collect_symbols_recursive(
+    hierarchical: &ty_ide::HierarchicalSymbols,
+    id: ty_ide::SymbolId,
+    info: &ty_ide::SymbolInfo,
+    source: &str,
+    line_index: &ruff_source_file::LineIndex,
+    file_path: &str,
+    parent_name: Option<&str>,
+    symbols: &mut Vec<dto::SymbolDto>,
+) {
+    let qualified = match parent_name {
+        Some(p) => Some(format!("{}.{}", p, info.name)),
+        None => None,
+    };
+
+    let sym = convert::symbols::convert_symbol(
+        source,
+        line_index,
+        file_path,
+        &info.name,
+        &info.kind,
+        info.deprecated,
+        info.name_range,
+        info.full_range,
+        parent_name,
+        qualified.clone(),
+    );
+    symbols.push(sym);
+
+    let own_name = match &qualified {
+        Some(q) => q.as_str(),
+        None => &info.name,
+    };
+
+    for (child_id, child_info) in hierarchical.children(id) {
+        collect_symbols_recursive(
+            hierarchical,
+            child_id,
+            &child_info,
+            source,
+            line_index,
+            file_path,
+            Some(own_name),
+            symbols,
+        );
+    }
+}
+
 // ── PyO3 Methods ─────────────────────────────────────────────────────────
 
 #[pymethods]
@@ -99,10 +186,10 @@ impl PyTyProject {
         let db = ProjectDatabase::use_defaults(metadata, system);
 
         Ok(PyTyProject {
-            inner: Arc::new(Mutex::new(Some(TyProjectState {
+            inner: Mutex::new(Some(TyProjectState {
                 db,
                 root: system_root,
-            }))),
+            })),
         })
     }
 
@@ -200,37 +287,21 @@ impl PyTyProject {
         let flat_symbols = ty_ide::document_symbols(&state.db, file);
         let hierarchical = flat_symbols.to_hierarchical();
 
+        let file_path = file.path(&state.db).as_str().to_string();
+        let line_index = ruff_source_file::LineIndex::from_source_text(&source_str);
+
         let mut symbols: Vec<dto::SymbolDto> = Vec::new();
         for (id, info) in hierarchical.iter() {
-            let file_path = file.path(&state.db).as_str().to_string();
-
-            let parent = convert::symbols::convert_symbol(
+            collect_symbols_recursive(
+                &hierarchical,
+                id,
+                &info,
                 &source_str,
+                &line_index,
                 &file_path,
-                &info.name,
-                &info.kind,
-                info.deprecated,
-                info.name_range,
-                info.full_range,
                 None,
-                None,
+                &mut symbols,
             );
-            symbols.push(parent);
-
-            for (_child_id, child_info) in hierarchical.children(id) {
-                let child = convert::symbols::convert_symbol(
-                    &source_str,
-                    &file_path,
-                    &child_info.name,
-                    &child_info.kind,
-                    child_info.deprecated,
-                    child_info.name_range,
-                    child_info.full_range,
-                    Some(&info.name),
-                    Some(format!("{}.{}", info.name, child_info.name)),
-                );
-                symbols.push(child);
-            }
         }
 
         serde_json::to_string(&symbols)
@@ -252,8 +323,11 @@ impl PyTyProject {
             let source_str = src.as_str().to_string();
             let file_path = ws_info.file.path(&state.db).as_str().to_string();
 
+            let line_index = ruff_source_file::LineIndex::from_source_text(&source_str);
+
             let sym = convert::symbols::convert_symbol(
                 &source_str,
+                &line_index,
                 &file_path,
                 &ws_info.symbol.name,
                 &ws_info.symbol.kind,
@@ -283,26 +357,14 @@ impl PyTyProject {
         line: u32,
         column: u32,
     ) -> PyResult<String> {
-        let guard = lock_state(&self.inner, "goto_definition")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-
-        let pos = dto::PositionDto { line, column };
-        let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PositionError::new_err(e))?;
-
-        let result = ty_ide::goto_definition(&state.db, file, offset);
-
-        let targets = match result {
-            Some(targets) => {
-                convert::navigation::convert_navigation_targets(&state.db, &targets)
-            }
-            None => Vec::new(),
-        };
-
-        serde_json::to_string(&targets)
-            .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+        navigate_to_targets(
+            &self.inner,
+            "goto_definition",
+            path,
+            line,
+            column,
+            ty_ide::goto_definition,
+        )
     }
 
     // ── Goto Declaration ─────────────────────────────────────────────
@@ -314,26 +376,14 @@ impl PyTyProject {
         line: u32,
         column: u32,
     ) -> PyResult<String> {
-        let guard = lock_state(&self.inner, "goto_declaration")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-
-        let pos = dto::PositionDto { line, column };
-        let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PositionError::new_err(e))?;
-
-        let result = ty_ide::goto_declaration(&state.db, file, offset);
-
-        let targets = match result {
-            Some(targets) => {
-                convert::navigation::convert_navigation_targets(&state.db, &targets)
-            }
-            None => Vec::new(),
-        };
-
-        serde_json::to_string(&targets)
-            .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+        navigate_to_targets(
+            &self.inner,
+            "goto_declaration",
+            path,
+            line,
+            column,
+            ty_ide::goto_declaration,
+        )
     }
 
     // ── Goto Type Definition ─────────────────────────────────────────
@@ -345,26 +395,14 @@ impl PyTyProject {
         line: u32,
         column: u32,
     ) -> PyResult<String> {
-        let guard = lock_state(&self.inner, "goto_type_definition")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-
-        let pos = dto::PositionDto { line, column };
-        let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PositionError::new_err(e))?;
-
-        let result = ty_ide::goto_type_definition(&state.db, file, offset);
-
-        let targets = match result {
-            Some(targets) => {
-                convert::navigation::convert_navigation_targets(&state.db, &targets)
-            }
-            None => Vec::new(),
-        };
-
-        serde_json::to_string(&targets)
-            .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+        navigate_to_targets(
+            &self.inner,
+            "goto_type_definition",
+            path,
+            line,
+            column,
+            ty_ide::goto_type_definition,
+        )
     }
 
     // ── Find References ──────────────────────────────────────────────

@@ -1,4 +1,5 @@
 use ruff_db::Db;
+use ruff_source_file::LineIndex;
 
 use crate::coordinates;
 use crate::dto::{DefinitionTargetDto, ReferenceDto, ReferenceKindDto};
@@ -13,11 +14,15 @@ pub fn convert_navigation_target(
     let source_str = source.as_str();
     let file_path = file.path(db).as_str().to_string();
 
+    // Precompute LineIndex once — we convert two ranges for the same file.
+    let line_index = LineIndex::from_source_text(source_str);
+
     DefinitionTargetDto {
         path: file_path,
-        range: coordinates::range_to_dto(source_str, target.focus_range()),
-        selection_range: Some(coordinates::range_to_dto(
+        range: coordinates::range_to_dto_with_index(source_str, &line_index, target.focus_range()),
+        selection_range: Some(coordinates::range_to_dto_with_index(
             source_str,
+            &line_index,
             target.full_range(),
         )),
         symbol: None,

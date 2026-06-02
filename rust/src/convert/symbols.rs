@@ -1,3 +1,5 @@
+use ruff_source_file::LineIndex;
+
 use crate::coordinates;
 use crate::dto::{FileRangeDto, SymbolDto, SymbolKindDto};
 
@@ -21,10 +23,12 @@ fn symbol_kind_to_dto(kind: &ty_ide::SymbolKind) -> SymbolKindDto {
 
 /// Convert a ty_ide SymbolInfo into a stable SymbolDto.
 ///
-/// The caller is responsible for providing the source text and file path
-/// so we can convert TextRange into 1-based line/column RangeDto.
+/// The caller is responsible for providing the source text, a precomputed
+/// `LineIndex`, and file path so we can convert TextRange into 1-based
+/// line/column RangeDto.
 pub fn convert_symbol(
     source: &str,
+    line_index: &LineIndex,
     file_path: &str,
     name: &str,
     kind: &ty_ide::SymbolKind,
@@ -34,8 +38,8 @@ pub fn convert_symbol(
     container_name: Option<&str>,
     qualified_name: Option<String>,
 ) -> SymbolDto {
-    let name_range_dto = coordinates::range_to_dto(source, name_range);
-    let full_range_dto = coordinates::range_to_dto(source, full_range);
+    let name_range_dto = coordinates::range_to_dto_with_index(source, line_index, name_range);
+    let full_range_dto = coordinates::range_to_dto_with_index(source, line_index, full_range);
 
     SymbolDto {
         name: name.to_string(),
