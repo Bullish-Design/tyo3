@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
+use crate::{ProjectClosedError, PathResolutionError, PositionError};
+
 use ruff_db::files::File;
 use ruff_db::source::source_text;
 use ruff_db::system::{OsSystem, SystemPathBuf};
@@ -43,7 +45,7 @@ fn lock_state<'a>(
         PyRuntimeError::new_err(format!("Lock poisoned: {}", e))
     })?;
     if guard.is_none() {
-        return Err(PyRuntimeError::new_err(format!(
+        return Err(ProjectClosedError::new_err(format!(
             "Project is closed — cannot call {}()",
             op_name
         )));
@@ -61,7 +63,7 @@ fn resolve_file_and_source(
         state.root.as_std_path(),
         path,
     )
-    .map_err(|e| PyRuntimeError::new_err(e))?;
+    .map_err(|e| PathResolutionError::new_err(e))?;
 
     let src = source_text(&state.db, file);
     let source_str = src.as_str().to_string();
@@ -78,10 +80,10 @@ impl PyTyProject {
     fn open(root: &str) -> PyResult<Self> {
         let root_path = PathBuf::from(root);
         let absolute = root_path.canonicalize().map_err(|e| {
-            PyRuntimeError::new_err(format!("Cannot resolve root '{}': {}", root, e))
+            PathResolutionError::new_err(format!("Cannot resolve root '{}': {}", root, e))
         })?;
         let s = absolute.to_str().ok_or_else(|| {
-            PyRuntimeError::new_err(format!(
+            PathResolutionError::new_err(format!(
                 "Path '{}' contains non-UTF-8 characters",
                 absolute.display()
             ))
@@ -141,7 +143,7 @@ impl PyTyProject {
         })?;
 
         if guard.is_none() {
-            return Err(PyRuntimeError::new_err("Project is already closed"));
+            return Err(ProjectClosedError::new_err("Project is already closed"));
         }
 
         // Drop the database
@@ -288,7 +290,7 @@ impl PyTyProject {
 
         let pos = dto::PositionDto { line, column };
         let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PyRuntimeError::new_err(e))?;
+            .map_err(|e| PositionError::new_err(e))?;
 
         let result = ty_ide::goto_definition(&state.db, file, offset);
 
@@ -319,7 +321,7 @@ impl PyTyProject {
 
         let pos = dto::PositionDto { line, column };
         let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PyRuntimeError::new_err(e))?;
+            .map_err(|e| PositionError::new_err(e))?;
 
         let result = ty_ide::goto_declaration(&state.db, file, offset);
 
@@ -350,7 +352,7 @@ impl PyTyProject {
 
         let pos = dto::PositionDto { line, column };
         let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PyRuntimeError::new_err(e))?;
+            .map_err(|e| PositionError::new_err(e))?;
 
         let result = ty_ide::goto_type_definition(&state.db, file, offset);
 
@@ -382,7 +384,7 @@ impl PyTyProject {
 
         let pos = dto::PositionDto { line, column };
         let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PyRuntimeError::new_err(e))?;
+            .map_err(|e| PositionError::new_err(e))?;
 
         let result = ty_ide::find_references(
             &state.db,
@@ -422,7 +424,7 @@ impl PyTyProject {
 
         let pos = dto::PositionDto { line, column };
         let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PyRuntimeError::new_err(e))?;
+            .map_err(|e| PositionError::new_err(e))?;
 
         let result = ty_ide::hover(&state.db, file, offset);
 

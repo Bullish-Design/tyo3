@@ -61,6 +61,29 @@ try:
 except ImportError:
     _native = None  # type: ignore[assignment]
 
+# Import typed exception classes so we can catch Rust errors without string matching.
+try:
+    from tyo3._native_impl import (
+        ProjectClosedError as _NativeClosedError,
+        PathResolutionError as _NativePathError,
+        PositionError as _NativePositionError,
+        AnalysisError as _NativeAnalysisError,
+    )
+except ImportError:
+    # When the native extension isn't built, define dummy classes
+    # that never match in `except` clauses.
+    class _NativeClosedError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class _NativePathError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class _NativePositionError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class _NativeAnalysisError(Exception):  # type: ignore[no-redef]
+        pass
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -122,10 +145,8 @@ class RustProject:
         """Return the file paths known to this project."""
         try:
             return self._inner.files()
-        except Exception as e:
-            if "closed" in str(e).lower():
-                raise ProjectClosedError(str(e)) from e
-            raise
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
 
     # ── Check ────────────────────────────────────────────────────────
 
@@ -133,10 +154,10 @@ class RustProject:
         """Run the type-checker and return structured diagnostics."""
         try:
             raw_json: str = self._inner.check()
-        except Exception as e:
-            if "closed" in str(e).lower():
-                raise ProjectClosedError(str(e)) from e
-            raise AnalysisError(f"Check failed: {e}") from e
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativeAnalysisError as e:
+            raise AnalysisError(str(e)) from e
 
         data = json.loads(raw_json)
         diagnostics: list[Diagnostic] = []
@@ -170,12 +191,10 @@ class RustProject:
         """Return symbols defined in the given file."""
         try:
             raw_json: str = self._inner.document_symbols(str(path))
-        except Exception as e:
-            if "closed" in str(e).lower():
-                raise ProjectClosedError(str(e)) from e
-            if "resolve" in str(e).lower() or "not in project" in str(e).lower():
-                raise PathResolutionError(str(e)) from e
-            raise
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
 
         data = json.loads(raw_json)
         symbols: list[Symbol] = []
@@ -209,10 +228,8 @@ class RustProject:
         """Search for symbols matching *query* across the project."""
         try:
             raw_json: str = self._inner.workspace_symbols(query)
-        except Exception as e:
-            if "closed" in str(e).lower():
-                raise ProjectClosedError(str(e)) from e
-            raise
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
 
         data = json.loads(raw_json)
         symbols: list[Symbol] = []
@@ -270,14 +287,12 @@ class RustProject:
         """Shared implementation for all goto-* methods."""
         try:
             raw_json: str = getattr(self._inner, method)(str(path), line, column)
-        except Exception as e:
-            if "closed" in str(e).lower():
-                raise ProjectClosedError(str(e)) from e
-            if any(kw in str(e).lower() for kw in ("position", "column", "line")):
-                raise PositionError(str(e)) from e
-            if any(kw in str(e).lower() for kw in ("resolve", "not in project")):
-                raise PathResolutionError(str(e)) from e
-            raise
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
 
         data = json.loads(raw_json)
         targets: list[DefinitionTarget] = []
@@ -334,12 +349,10 @@ class RustProject:
             raw_json: str = self._inner.find_references(
                 str(path), line, column, include_declaration
             )
-        except Exception as e:
-            if "closed" in str(e).lower():
-                raise ProjectClosedError(str(e)) from e
-            if any(kw in str(e).lower() for kw in ("position", "column", "line")):
-                raise PositionError(str(e)) from e
-            raise
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
 
         data = json.loads(raw_json)
         refs: list[Reference] = []
@@ -365,12 +378,10 @@ class RustProject:
         """
         try:
             raw_json: Optional[str] = self._inner.hover(str(path), line, column)
-        except Exception as e:
-            if "closed" in str(e).lower():
-                raise ProjectClosedError(str(e)) from e
-            if any(kw in str(e).lower() for kw in ("position", "column", "line")):
-                raise PositionError(str(e)) from e
-            raise
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
 
         if raw_json is None:
             return None
@@ -399,10 +410,8 @@ class RustProject:
         """Reload the project, clearing cached diagnostics and re-scanning."""
         try:
             self._inner.reload()
-        except Exception as e:
-            if "closed" in str(e).lower():
-                raise ProjectClosedError(str(e)) from e
-            raise
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
 
     def close(self) -> None:
         """Close the project and free Rust-side resources."""
