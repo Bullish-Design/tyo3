@@ -26,10 +26,10 @@ import pytest
 # Check if native extension is available
 try:
     from tyo3.rust_project import RustProject
+
     _HAS_NATIVE = True
 except ImportError:
     _HAS_NATIVE = False
-
 
 # ── Path helpers ──────────────────────────────────────────────────────────
 
@@ -63,9 +63,7 @@ def _time_op(label: str, fn, *, timeout: float) -> float:
     start = time.perf_counter()
     fn()
     elapsed = time.perf_counter() - start
-    assert elapsed < timeout, (
-        f"{label} took {elapsed:.3f}s (timeout={timeout}s)"
-    )
+    assert elapsed < timeout, f"{label} took {elapsed:.3f}s (timeout={timeout}s)"
     return elapsed
 
 
@@ -78,14 +76,17 @@ def _time_op(label: str, fn, *, timeout: float) -> float:
 class TestOpenTiming:
     """Time to open a project for each fixture."""
 
-    @pytest.mark.parametrize("fixture_name, expected_files", [
-        ("simple_package", 1),
-        ("classes", 2),
-        ("imports", 3),
-        ("standalone", 1),
-        ("unicode_positions", 1),
-        ("empty", 0),
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name, expected_files",
+        [
+            ("simple_package", 1),
+            ("classes", 2),
+            ("imports", 3),
+            ("standalone", 1),
+            ("unicode_positions", 1),
+            ("empty", 0),
+        ],
+    )
     def test_open_project(self, fixture_name: str, expected_files: int) -> None:
         """Opening a project should complete within OPEN_TIMEOUT."""
         elapsed = _time_op(
@@ -97,13 +98,10 @@ class TestOpenTiming:
         rp = RustProject(fixture_path(fixture_name))
         try:
             files = rp.files()
-            assert len(files) == expected_files, (
-                f"Expected {expected_files} files for {fixture_name}, got {len(files)}"
-            )
+            assert len(files) == expected_files, f"Expected {expected_files} files for {fixture_name}, got {len(files)}"
 
             # Report the timing (visible with -v)
-            print(f"\n  ⏱  open({fixture_name}): {elapsed:.3f}s "
-                  f"[files={len(files)}, expected={expected_files}]")
+            print(f"\n  ⏱  open({fixture_name}): {elapsed:.3f}s [files={len(files)}, expected={expected_files}]")
         finally:
             rp.close()
 
@@ -122,11 +120,14 @@ class TestOpenTiming:
 class TestListFilesTiming:
     """Time for files() operation."""
 
-    @pytest.mark.parametrize("fixture_name", [
-        "simple_package",
-        "classes",
-        "imports",
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "simple_package",
+            "classes",
+            "imports",
+        ],
+    )
     def test_list_files(self, fixture_name: str) -> None:
         rp = RustProject(fixture_path(fixture_name))
         try:
@@ -144,13 +145,16 @@ class TestListFilesTiming:
 class TestSymbolsTiming:
     """Time for document_symbols() operation."""
 
-    @pytest.mark.parametrize("fixture_name, file_name", [
-        ("simple_package", "main.py"),
-        ("classes", "models.py"),
-        ("imports", "main.py"),
-        ("standalone", "script.py"),
-        ("unicode_positions", "unicode.py"),
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name, file_name",
+        [
+            ("simple_package", "main.py"),
+            ("classes", "models.py"),
+            ("imports", "main.py"),
+            ("standalone", "script.py"),
+            ("unicode_positions", "unicode.py"),
+        ],
+    )
     def test_document_symbols(self, fixture_name: str, file_name: str) -> None:
         rp = RustProject(fixture_path(fixture_name))
         try:
@@ -160,8 +164,7 @@ class TestSymbolsTiming:
                 timeout=SYMBOLS_TIMEOUT,
             )
             symbols = rp.document_symbols(file_name)
-            print(f"\n  ⏱  document_symbols({file_name}): {elapsed:.3f}s "
-                  f"[{len(symbols)} symbols]")
+            print(f"\n  ⏱  document_symbols({file_name}): {elapsed:.3f}s [{len(symbols)} symbols]")
         finally:
             rp.close()
 
@@ -170,15 +173,18 @@ class TestSymbolsTiming:
 class TestCheckTiming:
     """Time for full project check()."""
 
-    @pytest.mark.parametrize("fixture_name", [
-        "simple_package",
-        "classes",
-        "imports",
-        "standalone",
-        "unicode_positions",
-        "diagnostic_targets",
-        "empty",
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "simple_package",
+            "classes",
+            "imports",
+            "standalone",
+            "unicode_positions",
+            "diagnostic_targets",
+            "empty",
+        ],
+    )
     def test_full_check(self, fixture_name: str) -> None:
         rp = RustProject(fixture_path(fixture_name))
         try:
@@ -188,8 +194,7 @@ class TestCheckTiming:
                 timeout=CHECK_TIMEOUT,
             )
             result = rp.check()
-            print(f"\n  ⏱  check({fixture_name}): {elapsed:.3f}s "
-                  f"[{len(result.diagnostics)} diagnostics]")
+            print(f"\n  ⏱  check({fixture_name}): {elapsed:.3f}s [{len(result.diagnostics)} diagnostics]")
         finally:
             rp.close()
 
@@ -219,14 +224,13 @@ class TestCheckTiming:
             )
 
             print(f"\n  ⏱  check timing: 1st={t1:.3f}s, 2nd={t2:.3f}s, 3rd={t3:.3f}s")
-            print(f"  ⚡ Speedup: {t1/t2:.1f}x (cold→warm)")
+            print(f"  ⚡ Speedup: {t1 / t2:.1f}x (cold→warm)")
 
             # After the first check, subsequent checks should be faster
             # (Salsa incremental computation).  This is not a strict assertion
             # because the fixture is small and the first check may already be fast.
             assert t2 <= t1 * 2 or t2 < 1.0, (
-                f"Second check ({t2:.3f}s) should not be dramatically slower "
-                f"than first ({t1:.3f}s)"
+                f"Second check ({t2:.3f}s) should not be dramatically slower than first ({t1:.3f}s)"
             )
         finally:
             rp.close()
@@ -236,14 +240,15 @@ class TestCheckTiming:
 class TestNavigationTiming:
     """Time for goto_definition, find_references, hover operations."""
 
-    @pytest.mark.parametrize("fixture_name, file_name, line, col", [
-        ("simple_package", "main.py", 3, 5),    # greet function definition
-        ("classes", "models.py", 10, 8),         # Animal.__init__
-        ("standalone", "script.py", 6, 5),        # standalone_greeting
-    ])
-    def test_goto_definition(
-        self, fixture_name: str, file_name: str, line: int, col: int
-    ) -> None:
+    @pytest.mark.parametrize(
+        "fixture_name, file_name, line, col",
+        [
+            ("simple_package", "main.py", 3, 5),  # greet function definition
+            ("classes", "models.py", 10, 8),  # Animal.__init__
+            ("standalone", "script.py", 6, 5),  # standalone_greeting
+        ],
+    )
+    def test_goto_definition(self, fixture_name: str, file_name: str, line: int, col: int) -> None:
         rp = RustProject(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
@@ -252,18 +257,18 @@ class TestNavigationTiming:
                 timeout=NAVIGATION_TIMEOUT,
             )
             targets = rp.goto_definition(file_name, line, col)
-            print(f"\n  ⏱  goto_definition({line},{col}): {elapsed:.3f}s "
-                  f"[{len(targets)} targets]")
+            print(f"\n  ⏱  goto_definition({line},{col}): {elapsed:.3f}s [{len(targets)} targets]")
         finally:
             rp.close()
 
-    @pytest.mark.parametrize("fixture_name, file_name, line, col", [
-        ("simple_package", "main.py", 3, 5),
-        ("classes", "models.py", 60, 8),  # Eagle.hunt
-    ])
-    def test_find_references(
-        self, fixture_name: str, file_name: str, line: int, col: int
-    ) -> None:
+    @pytest.mark.parametrize(
+        "fixture_name, file_name, line, col",
+        [
+            ("simple_package", "main.py", 3, 5),
+            ("classes", "models.py", 60, 8),  # Eagle.hunt
+        ],
+    )
+    def test_find_references(self, fixture_name: str, file_name: str, line: int, col: int) -> None:
         rp = RustProject(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
@@ -272,19 +277,19 @@ class TestNavigationTiming:
                 timeout=NAVIGATION_TIMEOUT,
             )
             refs = rp.find_references(file_name, line, col)
-            print(f"\n  ⏱  find_references({line},{col}): {elapsed:.3f}s "
-                  f"[{len(refs)} refs]")
+            print(f"\n  ⏱  find_references({line},{col}): {elapsed:.3f}s [{len(refs)} refs]")
         finally:
             rp.close()
 
-    @pytest.mark.parametrize("fixture_name, file_name, line, col", [
-        ("simple_package", "main.py", 3, 5),
-        ("classes", "models.py", 4, 8),  # Animal class
-        ("unicode_positions", "unicode.py", 10, 1),  # α identifier
-    ])
-    def test_hover(
-        self, fixture_name: str, file_name: str, line: int, col: int
-    ) -> None:
+    @pytest.mark.parametrize(
+        "fixture_name, file_name, line, col",
+        [
+            ("simple_package", "main.py", 3, 5),
+            ("classes", "models.py", 4, 8),  # Animal class
+            ("unicode_positions", "unicode.py", 10, 1),  # α identifier
+        ],
+    )
+    def test_hover(self, fixture_name: str, file_name: str, line: int, col: int) -> None:
         rp = RustProject(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
@@ -294,8 +299,7 @@ class TestNavigationTiming:
             )
             hover = rp.hover(file_name, line, col)
             has_content = len(hover.contents) if hover else 0
-            print(f"\n  ⏱  hover({line},{col}): {elapsed:.3f}s "
-                  f"[{'has content' if hover else 'None'}]")
+            print(f"\n  ⏱  hover({line},{col}): {elapsed:.3f}s [{'has content' if hover else 'None'}]")
         finally:
             rp.close()
 
@@ -304,11 +308,14 @@ class TestNavigationTiming:
 class TestReloadTiming:
     """Time for reload() operation."""
 
-    @pytest.mark.parametrize("fixture_name", [
-        "simple_package",
-        "classes",
-        "imports",
-    ])
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "simple_package",
+            "classes",
+            "imports",
+        ],
+    )
     def test_reload(self, fixture_name: str) -> None:
         rp = RustProject(fixture_path(fixture_name))
         try:
@@ -338,9 +345,7 @@ class TestReloadTiming:
             rp.check()
             t1 = time.perf_counter() - t1_start
             print(f"\n  ⏱  reload+check: {t1:.3f}s")
-            assert t1 < CHECK_TIMEOUT + OPEN_TIMEOUT, (
-                f"reload+check took {t1:.3f}s"
-            )
+            assert t1 < CHECK_TIMEOUT + OPEN_TIMEOUT, f"reload+check took {t1:.3f}s"
         finally:
             rp.close()
 

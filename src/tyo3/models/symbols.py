@@ -16,6 +16,7 @@ from tyo3.models.analysis import FileRange, Range
 
 class SymbolKind(StrEnum):
     """Classification of a code symbol."""
+
     MODULE = "module"
     CLASS_ = "class_"
     FUNCTION = "function"
@@ -36,6 +37,7 @@ class SymbolKind(StrEnum):
 
 class Symbol(BaseModel):
     """A code symbol discovered in a TyO3 project."""
+
     name: str
     qualified_name: str | None = None
     kind: SymbolKind

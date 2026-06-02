@@ -92,23 +92,17 @@ class TyO3Session:
 
     # ── Navigation ───────────────────────────────────────────
 
-    def goto_definition(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def goto_definition(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the definition of the symbol at (line, column)."""
         self._validate_position(line, column)
         return self._rp.goto_definition(path, line, column)
 
-    def goto_declaration(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def goto_declaration(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the declaration of the symbol at (line, column)."""
         self._validate_position(line, column)
         return self._rp.goto_declaration(path, line, column)
 
-    def goto_type_definition(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def goto_type_definition(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the type definition of the symbol at (line, column)."""
         self._validate_position(line, column)
         return self._rp.goto_type_definition(path, line, column)
@@ -124,9 +118,7 @@ class TyO3Session:
         self._validate_position(line, column)
         return self._rp.find_references(path, line, column, include_declaration)
 
-    def hover(
-        self, path: str | StdPath, line: int, column: int
-    ) -> HoverResult | None:
+    def hover(self, path: str | StdPath, line: int, column: int) -> HoverResult | None:
         """Get hover information for the symbol at (line, column)."""
         self._validate_position(line, column)
         return self._rp.hover(path, line, column)

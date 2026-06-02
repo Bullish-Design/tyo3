@@ -23,6 +23,7 @@ import pytest
 # Check if native extension is available
 try:
     from tyo3.rust_project import RustProject
+
     _HAS_NATIVE = True
 except ImportError:
     _HAS_NATIVE = False
@@ -44,10 +45,10 @@ def fixture_path(name: str) -> str:
 
 needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Position Validation Tests (Python-side)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestPositionValidation:
     """Test the Python-side position model validation."""
@@ -62,15 +63,18 @@ class TestPositionValidation:
         assert Position(line=1, column=1) != Position(line=1, column=2)
         assert Position(line=1, column=1) != Position(line=2, column=1)
 
-    @pytest.mark.parametrize("line,col,valid", [
-        (1, 1, True),      # start of file
-        (99999, 1, True),  # potentially beyond file (Rust will catch)
-        (1, 99999, True),  # potentially beyond line (Rust will catch)
-        (-1, 1, False),    # negative line
-        (1, -1, False),    # negative column
-        (0, 1, False),     # zero line
-        (1, 0, False),     # zero column
-    ])
+    @pytest.mark.parametrize(
+        "line,col,valid",
+        [
+            (1, 1, True),  # start of file
+            (99999, 1, True),  # potentially beyond file (Rust will catch)
+            (1, 99999, True),  # potentially beyond line (Rust will catch)
+            (-1, 1, False),  # negative line
+            (1, -1, False),  # negative column
+            (0, 1, False),  # zero line
+            (1, 0, False),  # zero column
+        ],
+    )
     def test_position_boundaries(self, line: int, col: int, valid: bool) -> None:
         """Test position boundary values."""
         if valid:
@@ -89,6 +93,7 @@ class TestPositionValidation:
 # ═══════════════════════════════════════════════════════════════════════════
 # Rust-side Coordinate Tests (requires native extension)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @needs_native
 class TestRustCoordinateConversion:
@@ -152,16 +157,20 @@ class TestRustCoordinateConversion:
         """All symbol positions returned by Rust should be valid."""
         symbols = self.rp.document_symbols("main.py")
         for sym in symbols:
-            assert sym.location.range.start.line >= 1, \
+            assert sym.location.range.start.line >= 1, (
                 f"Symbol {sym.name}: start line {sym.location.range.start.line} < 1"
-            assert sym.location.range.start.column >= 1, \
+            )
+            assert sym.location.range.start.column >= 1, (
                 f"Symbol {sym.name}: start column {sym.location.range.start.column} < 1"
-            assert sym.location.range.end.line >= sym.location.range.start.line, \
+            )
+            assert sym.location.range.end.line >= sym.location.range.start.line, (
                 f"Symbol {sym.name}: end line {sym.location.range.end.line} < start {sym.location.range.start.line}"
+            )
             # Column check: if same line, end column >= start column is typical
             if sym.location.range.end.line == sym.location.range.start.line:
-                assert sym.location.range.end.column >= sym.location.range.start.column, \
+                assert sym.location.range.end.column >= sym.location.range.start.column, (
                     f"Symbol {sym.name}: end col {sym.location.range.end.column} < start {sym.location.range.start.column}"
+                )
 
 
 @needs_native

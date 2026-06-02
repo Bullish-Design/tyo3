@@ -31,9 +31,12 @@ class TestSemanticTokenType:
 
     def test_all_distinct(self) -> None:
         types = {
-            SemanticTokenType.NAMESPACE, SemanticTokenType.CLASS_,
-            SemanticTokenType.PARAMETER, SemanticTokenType.FUNCTION,
-            SemanticTokenType.METHOD, SemanticTokenType.KEYWORD,
+            SemanticTokenType.NAMESPACE,
+            SemanticTokenType.CLASS_,
+            SemanticTokenType.PARAMETER,
+            SemanticTokenType.FUNCTION,
+            SemanticTokenType.METHOD,
+            SemanticTokenType.KEYWORD,
         }
         assert len(types) == 6
 

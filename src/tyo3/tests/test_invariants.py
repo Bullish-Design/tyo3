@@ -8,11 +8,11 @@ Invariants to verify:
 """
 
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 from tyo3.models.analysis import Diagnostic
 from tyo3.models.core import (
     FileCategory,
-    Path,
     ProjectFile,
     ProjectStatus,
     TyProject,
@@ -27,7 +27,7 @@ class TestProjectCannotBeReopened:
     """
 
     def test_unique_open_per_root(self) -> None:
-        root = Path(components=["shared"])
+        root = PurePosixPath("shared")
         now = datetime.now(UTC)
         p1 = TyProject(root=root, status=ProjectStatus.OPEN, opened_at=now)
         open_projects = [p for p in [p1] if p.status == ProjectStatus.OPEN]
@@ -35,7 +35,7 @@ class TestProjectCannotBeReopened:
         assert len(roots) == len(open_projects), "Duplicate open project roots detected"
 
     def test_closed_project_allows_reopen(self) -> None:
-        root = Path(components=["cycle"])
+        root = PurePosixPath("cycle")
         now = datetime.now(UTC)
         p1 = TyProject(root=root, status=ProjectStatus.CLOSED, opened_at=now)
         p2 = TyProject(root=root, status=ProjectStatus.OPEN, opened_at=now)
@@ -51,7 +51,7 @@ class TestFilesBelongToOpenProject:
 
     def test_file_project_must_be_open(self, open_project) -> None:
         pf = ProjectFile(
-            path=Path(components=["f.py"]),
+            path=PurePosixPath("f.py"),
             project=open_project,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -60,7 +60,7 @@ class TestFilesBelongToOpenProject:
     def test_file_belongs_to_closed_project(self, closed_project) -> None:
         # This would violate the invariant — detect and flag
         pf = ProjectFile(
-            path=Path(components=["f.py"]),
+            path=PurePosixPath("f.py"),
             project=closed_project,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -97,12 +97,12 @@ class TestDiagnosticFileConsistency:
 
     def test_file_from_different_project(self, open_project) -> None:
         other = TyProject(
-            root=Path(components=["other"]),
+            root=PurePosixPath("other"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
-            path=Path(components=["other.py"]),
+            path=PurePosixPath("other.py"),
             project=other,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -122,7 +122,7 @@ class TestSymbolLocationHasPath:
             name="foo",
             kind=SymbolKind.FUNCTION,
             location=FileRange(
-                path=Path(components=["f.py"]),
+                path=PurePosixPath("f.py"),
                 range=Range(start=Position(line=1, column=1), end=Position(line=1, column=1)),
             ),
         )

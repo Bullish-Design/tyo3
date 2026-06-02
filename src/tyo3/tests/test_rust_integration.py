@@ -19,12 +19,14 @@ Test groups:
 from __future__ import annotations
 
 from pathlib import Path as StdPath
+from pathlib import PurePosixPath
 
 import pytest
 
 # Check if native extension is available
 try:
     from tyo3.rust_project import RustProject
+
     _HAS_NATIVE = True
 except ImportError:
     _HAS_NATIVE = False
@@ -35,7 +37,6 @@ from tyo3.exceptions import (
     ProjectClosedError,
     ProjectOpenError,
 )
-from tyo3.models.core import Path
 from tyo3.services.analysis_service import AnalysisService
 from tyo3.services.navigation_service import NavigationService
 from tyo3.services.project_service import ProjectService
@@ -55,10 +56,10 @@ def fixture_path(name: str) -> str:
 
 needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Project Lifecycle Tests
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @needs_native
 class TestProjectLifecycle:
@@ -134,6 +135,7 @@ class TestProjectLifecycle:
 # File Discovery Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @needs_native
 class TestFileDiscovery:
     """Test file listing through Rust backend."""
@@ -158,6 +160,7 @@ class TestFileDiscovery:
 # ═══════════════════════════════════════════════════════════════════════════
 # Document Symbols Tests
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @needs_native
 class TestDocumentSymbols:
@@ -217,6 +220,7 @@ class TestDocumentSymbols:
 # Workspace Symbols Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @needs_native
 class TestWorkspaceSymbols:
     """Test workspace_symbols() through Rust backend."""
@@ -252,6 +256,7 @@ class TestWorkspaceSymbols:
 # ═══════════════════════════════════════════════════════════════════════════
 # Navigation Tests
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @needs_native
 class TestNavigation:
@@ -335,6 +340,7 @@ class TestNavigation:
 # Diagnostics / Check Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @needs_native
 class TestDiagnostics:
     """Test check() and diagnostics through Rust backend."""
@@ -365,6 +371,7 @@ class TestDiagnostics:
 # ═══════════════════════════════════════════════════════════════════════════
 # Unicode Position Tests
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @needs_native
 class TestUnicodePositions:
@@ -401,18 +408,19 @@ class TestUnicodePositions:
 # Service Layer Integration (use_rust=True)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @needs_native
 class TestServiceLayerIntegration:
     """Test that services delegate correctly to RustProject when use_rust=True."""
 
     def test_project_service_with_rust(self) -> None:
         ps = ProjectService(use_rust=True)
-        root = Path(components=FIXTURE_DIR_PARTS + ("simple_package",))
+        root = PurePosixPath(fixture_path("simple_package"))
         project, files = ps.open_project(root)
         assert project.is_open
         assert len(files) >= 1
         # Verify files came from real discovery
-        file_names = {"/".join(f.path.components[-1:]) for f in files}
+        file_names = {f.path.name for f in files}
         assert "main.py" in file_names
         ps.close_project(project)
         assert not project.is_open
@@ -420,7 +428,7 @@ class TestServiceLayerIntegration:
     def test_analysis_service_with_rust(self) -> None:
         ps = ProjectService(use_rust=True)
         a_svc = AnalysisService(use_rust=True)
-        root = Path(components=FIXTURE_DIR_PARTS + ("simple_package",))
+        root = PurePosixPath(fixture_path("simple_package"))
         project, files = ps.open_project(root)
 
         # Wire up the RustProject — use the key from project_service
@@ -435,7 +443,7 @@ class TestServiceLayerIntegration:
     def test_symbol_service_with_rust(self) -> None:
         ps = ProjectService(use_rust=True)
         s_svc = SymbolService(use_rust=True)
-        root = Path(components=FIXTURE_DIR_PARTS + ("simple_package",))
+        root = PurePosixPath(fixture_path("simple_package"))
         project, files = ps.open_project(root)
 
         rp = ps._get_rust_project(root)
@@ -451,7 +459,7 @@ class TestServiceLayerIntegration:
     def test_navigation_service_with_rust(self) -> None:
         ps = ProjectService(use_rust=True)
         n_svc = NavigationService(use_rust=True)
-        root = Path(components=FIXTURE_DIR_PARTS + ("simple_package",))
+        root = PurePosixPath(fixture_path("simple_package"))
         project, files = ps.open_project(root)
 
         rp = ps._get_rust_project(root)
@@ -465,7 +473,7 @@ class TestServiceLayerIntegration:
     def test_workspace_symbols_service_with_rust(self) -> None:
         ps = ProjectService(use_rust=True)
         s_svc = SymbolService(use_rust=True)
-        root = Path(components=FIXTURE_DIR_PARTS + ("simple_package",))
+        root = PurePosixPath(fixture_path("simple_package"))
         project, _ = ps.open_project(root)
 
         rp = ps._get_rust_project(root)
@@ -481,6 +489,7 @@ class TestServiceLayerIntegration:
 # Cross-Service Data Flow (use_rust=True)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @needs_native
 class TestCrossServiceDataFlow:
     """Test data flow chains: Project → Files → Symbols → Navigation."""
@@ -492,7 +501,7 @@ class TestCrossServiceDataFlow:
         s_svc = SymbolService(use_rust=True)
         n_svc = NavigationService(use_rust=True)
 
-        root = Path(components=FIXTURE_DIR_PARTS + ("simple_package",))
+        root = PurePosixPath(fixture_path("simple_package"))
         project, files = ps.open_project(root)
 
         rp = ps._get_rust_project(root)
@@ -535,19 +544,9 @@ class TestCrossServiceDataFlow:
     def test_empty_project_workflow(self) -> None:
         """Empty project: open → files → close without errors."""
         ps = ProjectService(use_rust=True)
-        root = Path(components=FIXTURE_DIR_PARTS + ("empty",))
+        root = PurePosixPath(fixture_path("empty"))
         project, files = ps.open_project(root)
         # Empty project may have 0 files
         assert isinstance(files, list)
         ps.close_project(project)
         assert not project.is_open
-
-
-# ── Fixture helpers ──────────────────────────────────────────────────────
-
-# Path parts for absolute path — includes the root "/" as first component
-_FIXTURE_RAW_PARTS = tuple(
-    str(FIXTURES_DIR.resolve()).split("/")
-)  # e.g., ("", "home", "andrew", ...) for "/home/andrew/..."
-# Ensure first element is "/" not ""
-FIXTURE_DIR_PARTS = ("/",) + _FIXTURE_RAW_PARTS[1:]

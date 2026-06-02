@@ -12,7 +12,6 @@ from tyo3.models.analysis import (
 from tyo3.models.core import (
     BackendInfo,
     FileCategory,
-    Path,
     ProjectFile,
     ProjectStatus,
     TyProject,
@@ -30,7 +29,6 @@ from tyo3.models.symbols import Symbol, SymbolKind
 
 __all__ = [
     # Core
-    "Path",
     "TyProjectConfig",
     "BackendInfo",
     "ProjectStatus",

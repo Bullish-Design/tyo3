@@ -25,6 +25,7 @@ from hypothesis import strategies as st
 # Check if native extension is available
 try:
     from tyo3.rust_project import RustProject
+
     _HAS_NATIVE = True
 except ImportError:
     _HAS_NATIVE = False
@@ -69,19 +70,21 @@ column_numbers = st.integers(min_value=1, max_value=100)
 fixture_names = st.sampled_from(ALL_FIXTURES)
 
 # Common file names found across fixtures
-common_paths = st.sampled_from([
-    "main.py",
-    "models.py",
-    "script.py",
-    "math_ops.py",
-    "unicode.py",
-    "errors.py",
-])
-
+common_paths = st.sampled_from(
+    [
+        "main.py",
+        "models.py",
+        "script.py",
+        "math_ops.py",
+        "unicode.py",
+        "errors.py",
+    ]
+)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helper: open a fixture, run checks, close
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _path_in_fixture(rp: RustProject, filename: str) -> bool:
     """Check if *filename* (basename) exists in the project."""
@@ -107,7 +110,6 @@ FIXTURE_FILE_PAIRS = [
 ]
 
 fixture_file_strategy = st.sampled_from(FIXTURE_FILE_PAIRS)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Property 1: Coordinate conversion never panics
@@ -185,6 +187,7 @@ def test_find_references_never_panics(pair, line: int, column: int) -> None:
 # Property 2: Document symbols are well-formed
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @needs_native
 @settings(max_examples=30, deadline=None)
 @given(data=st.data())
@@ -252,6 +255,7 @@ def test_symbols_are_deterministic(data: st.DataObject) -> None:
 # Property 3: Closed-project invariant
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @needs_native
 @settings(max_examples=15, deadline=None)
 @given(fixture_name=st.sampled_from(NON_EMPTY_FIXTURES))
@@ -280,6 +284,7 @@ def test_all_operations_raise_after_close(fixture_name: str) -> None:
 # Property 4: Empty project invariants
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @needs_native
 @settings(max_examples=10, deadline=None)
 @given(line=line_numbers, column=column_numbers)
@@ -301,6 +306,7 @@ def test_empty_project_operations(line: int, column: int) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 # Property 5: Files are unique and absolute
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @needs_native
 @settings(max_examples=20, deadline=None)

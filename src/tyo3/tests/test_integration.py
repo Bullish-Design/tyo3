@@ -7,11 +7,11 @@ Tests derived from Allium spec data flow chain analysis:
 """
 
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 from tyo3.models.analysis import Diagnostic, DiagnosticSeverity
 from tyo3.models.core import (
     FileCategory,
-    Path,
     ProjectFile,
     ProjectStatus,
     TyProject,
@@ -28,7 +28,7 @@ class TestProjectToDiagnosticDataFlow:
         ps = ProjectService()
         a_svc = AnalysisService()
 
-        root = Path(components=["chain-test"])
+        root = PurePosixPath("chain-test")
         project, _ = ps.open_project(root)
         result = a_svc.check_project(project)
 
@@ -40,7 +40,7 @@ class TestProjectToDiagnosticDataFlow:
         ps = ProjectService()
         a_svc = AnalysisService()
 
-        root = Path(components=["chain-reload"])
+        root = PurePosixPath("chain-reload")
         project, _ = ps.open_project(root)
         a_svc.clear_diagnostics_for_project(project)
         result = a_svc.check_project(project)
@@ -52,11 +52,11 @@ class TestCrossEntityConsistency:
 
     def test_file_belongs_to_project_files(self) -> None:
         """A ProjectFile's project relationship should be consistent."""
-        root = Path(components=["consistency"])
+        root = PurePosixPath("consistency")
         now = datetime.now(UTC)
         project = TyProject(root=root, status=ProjectStatus.OPEN, opened_at=now)
         pf = ProjectFile(
-            path=Path(components=["consistency", "main.py"]),
+            path=PurePosixPath("consistency/main.py"),
             project=project,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -68,11 +68,11 @@ class TestCrossEntityConsistency:
         they must be consistent with the DiagnosticBelongsToOpenProject
         and DiagnosticFileBelongsToProject invariants.
         """
-        root = Path(components=["diag-cross"])
+        root = PurePosixPath("diag-cross")
         now = datetime.now(UTC)
         project = TyProject(root=root, status=ProjectStatus.OPEN, opened_at=now)
         pf = ProjectFile(
-            path=Path(components=["diag-cross", "src.py"]),
+            path=PurePosixPath("diag-cross/src.py"),
             project=project,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -98,7 +98,7 @@ class TestSurfaceToRuleChain:
         a_svc = AnalysisService()
 
         # Surface provides: UserOpensProject
-        root = Path(components=["surface-chain"])
+        root = PurePosixPath("surface-chain")
         project, _ = ps.open_project(root)
 
         # Data flows: project.status = open → precondition for UserChecksProject

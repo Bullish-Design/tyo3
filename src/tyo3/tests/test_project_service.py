@@ -10,12 +10,12 @@ Obligation groups:
 """
 
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 import pytest
 
 from tyo3.models.core import (
     FileCategory,
-    Path,
     ProjectStatus,
     TyProjectConfig,
 )
@@ -25,7 +25,7 @@ class TestOpenProject:
     """OpenProject rule tests."""
 
     def test_opens_new_project(self, project_service) -> None:
-        root = Path(components=["home", "user", "project"])
+        root = PurePosixPath("home/user/project")
         project, files = project_service.open_project(root)
         assert project.root == root
         assert project.status == ProjectStatus.OPEN
@@ -33,7 +33,7 @@ class TestOpenProject:
         assert isinstance(project.opened_at, datetime)
 
     def test_sets_default_config(self, project_service) -> None:
-        root = Path(components=["test"])
+        root = PurePosixPath("test")
         project, _ = project_service.open_project(root)
         assert project.coordinate_mode == "python"
         assert project.respect_gitignore is True
@@ -41,14 +41,14 @@ class TestOpenProject:
         assert project.check_all_files is True
 
     def test_accepts_custom_config(self, project_service) -> None:
-        root = Path(components=["test"])
+        root = PurePosixPath("test")
         config = TyProjectConfig(respect_gitignore=False, force_exclude=True)
         project, _ = project_service.open_project(root, config=config)
         assert project.respect_gitignore is False
         assert project.force_exclude is True
 
     def test_rejects_duplicate_open(self, project_service) -> None:
-        root = Path(components=["dup"])
+        root = PurePosixPath("dup")
         project_service.open_project(root)
         with pytest.raises(ValueError, match="already open"):
             project_service.open_project(root)
@@ -71,7 +71,7 @@ class TestOpenProject:
         pass
 
     def test_sets_opened_at(self, project_service) -> None:
-        root = Path(components=["ts"])
+        root = PurePosixPath("ts")
         before = datetime.now(UTC)
         project, _ = project_service.open_project(root)
         after = datetime.now(UTC)
@@ -82,7 +82,7 @@ class TestReloadProject:
     """ReloadProject rule tests."""
 
     def test_reloads_open_project(self, project_service) -> None:
-        root = Path(components=["test"])
+        root = PurePosixPath("test")
         project, _ = project_service.open_project(root)
         before = project.last_reloaded_at
         project_service.reload_project(project)
@@ -100,7 +100,7 @@ class TestCloseProject:
     """CloseProject rule tests."""
 
     def test_closes_open_project(self, project_service) -> None:
-        root = Path(components=["test"])
+        root = PurePosixPath("test")
         project, _ = project_service.open_project(root)
         project_service.close_project(project)
         assert project.status == ProjectStatus.CLOSED
@@ -115,7 +115,7 @@ class TestListFiles:
     """ListFiles rule tests."""
 
     def test_returns_empty_when_no_files(self, project_service) -> None:
-        root = Path(components=["empty"])
+        root = PurePosixPath("empty")
         project, _ = project_service.open_project(root)
         files = project_service.list_files(project)
         assert files == []

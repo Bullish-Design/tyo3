@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 import pytest
 
@@ -10,7 +11,6 @@ from tyo3.models.advanced import SemanticToken, SemanticTokenModifier, SemanticT
 from tyo3.models.analysis import Diagnostic, DiagnosticSeverity, Position, Range
 from tyo3.models.core import (
     FileCategory,
-    Path,
     ProjectFile,
     ProjectStatus,
     TyProject,
@@ -27,8 +27,8 @@ from tyo3.services.symbol_service import SymbolService
 # ── Fixture helpers ─────────────────────────────────────────────────────
 
 
-def make_path(components: list[str]) -> Path:
-    return Path(components=components)
+def make_path(components: list[str]) -> PurePosixPath:
+    return PurePosixPath("/".join(components))
 
 
 def make_project(
@@ -58,7 +58,7 @@ def make_file(
 
 
 @pytest.fixture
-def path() -> Path:
+def path() -> PurePosixPath:
     return make_path(["home", "user", "project"])
 
 
@@ -143,6 +143,7 @@ def diagnostic(open_project: TyProject, first_party_file: ProjectFile) -> Diagno
 @pytest.fixture
 def symbol(open_project: TyProject, first_party_file: ProjectFile) -> Symbol:
     from tyo3.models.analysis import FileRange, Position, Range
+
     return Symbol(
         name="MyClass",
         qualified_name="my_module.MyClass",

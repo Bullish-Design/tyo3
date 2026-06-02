@@ -5,27 +5,21 @@ DEPRECATED: Use tyo3.TyO3Session instead. This module will be removed in v0.2.
 
 from __future__ import annotations
 
-from tyo3.models.core import Path, ProjectFile, TyProject
+from tyo3.models.core import ProjectFile, TyProject
 from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
 
 
-def resolve_definition(
-    project: TyProject, file: ProjectFile, line: int, column: int
-) -> list[DefinitionTarget]:
+def resolve_definition(project: TyProject, file: ProjectFile, line: int, column: int) -> list[DefinitionTarget]:
     """Black-box: resolves definition location(s), using ty_ide::goto_definition."""
     return []
 
 
-def resolve_declaration(
-    project: TyProject, file: ProjectFile, line: int, column: int
-) -> list[DefinitionTarget]:
+def resolve_declaration(project: TyProject, file: ProjectFile, line: int, column: int) -> list[DefinitionTarget]:
     """Black-box: resolves declaration location(s), using ty_ide::goto_declaration."""
     return []
 
 
-def resolve_type_definition(
-    project: TyProject, file: ProjectFile, line: int, column: int
-) -> list[DefinitionTarget]:
+def resolve_type_definition(project: TyProject, file: ProjectFile, line: int, column: int) -> list[DefinitionTarget]:
     """Black-box: resolves type definition location(s), using ty_ide::goto_type_definition."""
     return []
 
@@ -41,9 +35,7 @@ def resolve_references(
     return []
 
 
-def resolve_hover(
-    project: TyProject, file: ProjectFile, line: int, column: int
-) -> dict | None:
+def resolve_hover(project: TyProject, file: ProjectFile, line: int, column: int) -> dict | None:
     """Black-box: returns structured hover content, using ty_ide::hover."""
     return None
 
@@ -75,25 +67,13 @@ class NavigationService:
         self._rust_projects[root_path] = rp
 
     @staticmethod
-    def _path_to_str(path: Path) -> str:
-        """Convert a Path model to a file-system path string.
-
-        Handles the root ``/`` component correctly (avoids ``//`` prefix).
-        """
-        components = path.components
-        if components and components[0] == "/":
-            return "/" + "/".join(components[1:])
-        return "/".join(components)
-
-    def _file_path_str(self, file: ProjectFile) -> str:
+    def _file_path_str(file: ProjectFile) -> str:
         """Convert a ProjectFile's path to a file-system path string."""
-        return self._path_to_str(file.path)
+        return str(file.path)
 
     # ── GotoDefinition ─────────────────────────────────────────────────
 
-    def goto_definition(
-        self, project: TyProject, file: ProjectFile, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def goto_definition(self, project: TyProject, file: ProjectFile, line: int, column: int) -> list[DefinitionTarget]:
         """GotoDefinition: validates preconditions, then resolves."""
         self._validate_common(project, file, line, column)
 
@@ -107,9 +87,7 @@ class NavigationService:
 
     # ── GotoDeclaration ────────────────────────────────────────────────
 
-    def goto_declaration(
-        self, project: TyProject, file: ProjectFile, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def goto_declaration(self, project: TyProject, file: ProjectFile, line: int, column: int) -> list[DefinitionTarget]:
         """GotoDeclaration: validates preconditions, then resolves."""
         self._validate_common(project, file, line, column)
 
@@ -160,9 +138,7 @@ class NavigationService:
 
     # ── GetHover ───────────────────────────────────────────────────────
 
-    def get_hover(
-        self, project: TyProject, file: ProjectFile, line: int, column: int
-    ) -> HoverResult | None:
+    def get_hover(self, project: TyProject, file: ProjectFile, line: int, column: int) -> HoverResult | None:
         """GetHover: validates preconditions, then resolves."""
         self._validate_common(project, file, line, column)
 
@@ -194,9 +170,7 @@ class NavigationService:
     # ── Validation ─────────────────────────────────────────────────────
 
     @staticmethod
-    def _validate_common(
-        project: TyProject, file: ProjectFile, line: int, column: int
-    ) -> None:
+    def _validate_common(project: TyProject, file: ProjectFile, line: int, column: int) -> None:
         if not project.is_open:
             raise ValueError("Project is not open")
         if file.project.root != project.root:

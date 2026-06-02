@@ -9,6 +9,7 @@ Obligation groups:
 """
 
 from datetime import UTC
+from pathlib import PurePosixPath
 
 import pytest
 
@@ -35,15 +36,15 @@ class TestGotoDefinition:
     def test_rejects_file_not_in_project(self, navigation_service, open_project) -> None:
         from datetime import datetime
 
-        from tyo3.models.core import Path, ProjectStatus, TyProject
+        from tyo3.models.core import ProjectStatus, TyProject
 
         other = TyProject(
-            root=Path(components=["other"]),
+            root=PurePosixPath("other"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
-            path=Path(components=["other", "f.py"]),
+            path=PurePosixPath("other/f.py"),
             project=other,
             file_category="first_party",
         )

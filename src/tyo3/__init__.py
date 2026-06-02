@@ -13,6 +13,7 @@ __all__ = ["TyO3Session"]
 # silently and TyProject is not available at the package level.
 try:
     from tyo3._native_impl import TyProject as _NativeTyProject  # noqa: F401
+
     _HAS_NATIVE = True
 except ImportError:
     _HAS_NATIVE = False

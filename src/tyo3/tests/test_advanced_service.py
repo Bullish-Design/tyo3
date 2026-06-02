@@ -7,10 +7,11 @@ Obligation groups:
 """
 
 from datetime import UTC
+from pathlib import PurePosixPath
 
 import pytest
 
-from tyo3.models.core import FileCategory, Path, ProjectFile
+from tyo3.models.core import FileCategory, ProjectFile
 
 
 class TestGetSemanticTokens:
@@ -26,12 +27,12 @@ class TestGetSemanticTokens:
         from tyo3.models.core import ProjectStatus, TyProject
 
         other = TyProject(
-            root=Path(components=["other"]),
+            root=PurePosixPath("other"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
-            path=Path(components=["other", "f.py"]),
+            path=PurePosixPath("other/f.py"),
             project=other,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -53,16 +54,12 @@ class TestExploreTypeHierarchy:
         assert result["subtype_count"] == 0
 
     def test_directional_supertypes(self, advanced_service, open_project, first_party_file) -> None:
-        result = advanced_service.explore_type_hierarchy(
-            open_project, first_party_file, 1, 1, direction="supertypes"
-        )
+        result = advanced_service.explore_type_hierarchy(open_project, first_party_file, 1, 1, direction="supertypes")
         assert result["supertype_count"] == 0
         assert result["subtype_count"] == 0
 
     def test_directional_subtypes(self, advanced_service, open_project, first_party_file) -> None:
-        result = advanced_service.explore_type_hierarchy(
-            open_project, first_party_file, 1, 1, direction="subtypes"
-        )
+        result = advanced_service.explore_type_hierarchy(open_project, first_party_file, 1, 1, direction="subtypes")
         assert result["supertype_count"] == 0
         assert result["subtype_count"] == 0
 

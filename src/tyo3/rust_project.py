@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path as StdPath
+from pathlib import PurePosixPath
 
 from tyo3.exceptions import (
     AnalysisError,
@@ -41,7 +42,6 @@ from tyo3.models.analysis import (
 from tyo3.models.analysis import (
     FileRange as ModelFileRange,
 )
-from tyo3.models.core import Path as TyPath
 from tyo3.models.navigation import (
     DefinitionTarget,
     HoverContent,
@@ -93,10 +93,9 @@ except ImportError:
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-def _string_path_to_typath(path_str: str) -> TyPath:
-    """Convert a file-system path string into a :class:`TyPath` model."""
-    p = StdPath(path_str)
-    return TyPath(components=list(p.parts))
+def _string_path_to_typath(path_str: str) -> PurePosixPath:
+    """Convert a file-system path string into a :class:`PurePosixPath`."""
+    return PurePosixPath(path_str)
 
 
 def _json_position_to_model(pos_data: dict) -> Position:
@@ -124,8 +123,7 @@ class RustProject:
     def __init__(self, root: str | StdPath) -> None:
         if _native is None:
             raise ProjectOpenError(
-                "Rust native extension is not built. "
-                "Run `maturin develop` inside the devenv shell first."
+                "Rust native extension is not built. Run `maturin develop` inside the devenv shell first."
             )
         root_str = str(root)
         try:
@@ -209,31 +207,23 @@ class RustProject:
 
     # ── Goto Definition ──────────────────────────────────────────────
 
-    def goto_definition(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def goto_definition(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the definition of the symbol at *(line, column)*."""
         return self._goto("goto_definition", path, line, column)
 
     # ── Goto Declaration ─────────────────────────────────────────────
 
-    def goto_declaration(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def goto_declaration(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the declaration of the symbol at *(line, column)*."""
         return self._goto("goto_declaration", path, line, column)
 
     # ── Goto Type Definition ─────────────────────────────────────────
 
-    def goto_type_definition(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def goto_type_definition(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the type definition of the symbol at *(line, column)*."""
         return self._goto("goto_type_definition", path, line, column)
 
-    def _goto(
-        self, method: str, path: str | StdPath, line: int, column: int
-    ) -> list[DefinitionTarget]:
+    def _goto(self, method: str, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Shared implementation for all goto-* methods."""
         try:
             raw_json: str = getattr(self._inner, method)(str(path), line, column)
@@ -257,9 +247,7 @@ class RustProject:
     ) -> list[Reference]:
         """Find all references to the symbol at *(line, column)*."""
         try:
-            raw_json: str = self._inner.find_references(
-                str(path), line, column, include_declaration
-            )
+            raw_json: str = self._inner.find_references(str(path), line, column, include_declaration)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -279,9 +267,7 @@ class RustProject:
 
     # ── Hover ────────────────────────────────────────────────────────
 
-    def hover(
-        self, path: str | StdPath, line: int, column: int
-    ) -> HoverResult | None:
+    def hover(self, path: str | StdPath, line: int, column: int) -> HoverResult | None:
         """Get hover information for the symbol at *(line, column)*.
 
         Returns ``None`` when no hover information is available.
@@ -323,11 +309,7 @@ class RustProject:
             path=_string_path_to_typath(location_data["path"]),
             range=_json_range_to_model(location_data["range"]),
         )
-        sel_range = (
-            _json_range_to_model(s["selection_range"])
-            if s.get("selection_range")
-            else None
-        )
+        sel_range = _json_range_to_model(s["selection_range"]) if s.get("selection_range") else None
         return Symbol(
             name=s["name"],
             qualified_name=s.get("qualified_name"),
@@ -340,11 +322,7 @@ class RustProject:
 
     def _parse_definition_target(self, t: dict) -> DefinitionTarget:
         """Parse a DefinitionTargetDto JSON dict into a DefinitionTarget model."""
-        sel_range = (
-            _json_range_to_model(t["selection_range"])
-            if t.get("selection_range")
-            else None
-        )
+        sel_range = _json_range_to_model(t["selection_range"]) if t.get("selection_range") else None
         symbol = self._parse_symbol(t["symbol"]) if t.get("symbol") else None
 
         return DefinitionTarget(

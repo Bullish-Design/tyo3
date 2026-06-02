@@ -6,6 +6,8 @@ Obligation groups:
 - Entity tests (Diagnostic with optional fields)
 """
 
+from pathlib import PurePosixPath
+
 from tyo3.models.analysis import (
     CheckResult,
     Diagnostic,
@@ -14,7 +16,6 @@ from tyo3.models.analysis import (
     Position,
     Range,
 )
-from tyo3.models.core import Path
 
 
 class TestPosition:
@@ -45,7 +46,7 @@ class TestFileRange:
     """FileRange value type: range within a file."""
 
     def test_creation(self) -> None:
-        path = Path(components=["src", "main.py"])
+        path = PurePosixPath("src/main.py")
         r = Range(start=Position(line=1, column=1), end=Position(line=5, column=1))
         fr = FileRange(path=path, range=r)
         assert fr.path == path
@@ -78,9 +79,13 @@ class TestDiagnosticSeverity:
         assert DiagnosticSeverity.HINT == "hint"
 
     def test_ordering_by_severity(self) -> None:
-        severe = [DiagnosticSeverity.FATAL, DiagnosticSeverity.ERROR,
-                  DiagnosticSeverity.WARNING, DiagnosticSeverity.INFORMATION,
-                  DiagnosticSeverity.HINT]
+        severe = [
+            DiagnosticSeverity.FATAL,
+            DiagnosticSeverity.ERROR,
+            DiagnosticSeverity.WARNING,
+            DiagnosticSeverity.INFORMATION,
+            DiagnosticSeverity.HINT,
+        ]
         assert len(severe) == 5
 
 
@@ -105,16 +110,16 @@ class TestDiagnostic:
             severity=DiagnosticSeverity.WARNING,
             code="unused-import",
             message="Unused import",
-            details={"os"},
+            details=["os"],
         )
         assert d.file == first_party_file
         assert d.range == range_
         assert d.severity == DiagnosticSeverity.WARNING
         assert "os" in d.details
 
-    def test_details_set(self, open_project) -> None:
+    def test_details_list(self, open_project) -> None:
         d = Diagnostic(
             message="test",
-            details={"a", "b"},
+            details=["a", "b"],
         )
         assert set(d.details) == {"a", "b"}

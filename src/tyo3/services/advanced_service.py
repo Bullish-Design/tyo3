@@ -10,9 +10,7 @@ from tyo3.models.analysis import Range
 from tyo3.models.core import ProjectFile, TyProject
 
 
-def classify_tokens(
-    project: TyProject, file: ProjectFile, range: Range | None = None
-) -> list[SemanticToken]:
+def classify_tokens(project: TyProject, file: ProjectFile, range: Range | None = None) -> list[SemanticToken]:
     """Black-box: returns typed tokens using ty_ide::semantic_tokens.
 
     When range is None, returns tokens for the entire file.
@@ -20,9 +18,7 @@ def classify_tokens(
     return []
 
 
-def prepare_hierarchy(
-    project: TyProject, file: ProjectFile, line: int, column: int
-) -> dict | None:
+def prepare_hierarchy(project: TyProject, file: ProjectFile, line: int, column: int) -> dict | None:
     """Black-box: initialises a type hierarchy query using ty_ide::prepare_type_hierarchy."""
     return None
 
@@ -100,16 +96,8 @@ class AdvancedService:
                 "subtype_count": 0,
             }
 
-        supertypes = (
-            resolve_supertypes(project, prepared)
-            if direction in (None, "supertypes")
-            else []
-        )
-        subtypes = (
-            resolve_subtypes(project, prepared)
-            if direction in (None, "subtypes")
-            else []
-        )
+        supertypes = resolve_supertypes(project, prepared) if direction in (None, "supertypes") else []
+        subtypes = resolve_subtypes(project, prepared) if direction in (None, "subtypes") else []
 
         return {
             "item_name": prepared.get("name"),

@@ -6,11 +6,11 @@ Derived from tyo3-navigation.allium
 from __future__ import annotations
 
 from enum import StrEnum
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel
 
 from tyo3.models.analysis import FileRange, Range
-from tyo3.models.core import Path
 from tyo3.models.symbols import Symbol
 
 # ── Enums ────────────────────────────────────────────────────────────────
@@ -18,6 +18,7 @@ from tyo3.models.symbols import Symbol
 
 class ReferenceKind(StrEnum):
     """Classification of a reference occurrence."""
+
     READ = "read"
     WRITE = "write"
     OTHER = "other"
@@ -28,6 +29,7 @@ class HoverContentKind(StrEnum):
 
     Maps to :class:`tyo3.rust_backend.HoverContentKindDto` variants.
     """
+
     TYPE = "type"
     SIGNATURE = "signature"
     DOCSTRING = "docstring"
@@ -41,7 +43,8 @@ class HoverContentKind(StrEnum):
 
 class DefinitionTarget(BaseModel):
     """A navigation target produced by goto-definition-like operations."""
-    path: Path
+
+    path: PurePosixPath
     range: Range
     selection_range: Range | None = None
     symbol: Symbol | None = None
@@ -50,18 +53,21 @@ class DefinitionTarget(BaseModel):
 
 class Reference(BaseModel):
     """A reference occurrence within a project file."""
-    path: Path
+
+    path: PurePosixPath
     range: Range
     kind: ReferenceKind
 
 
 class HoverContent(BaseModel):
     """A single piece of structured hover information."""
+
     kind: HoverContentKind
     value: str
 
 
 class HoverResult(BaseModel):
     """Structured hover information for a symbol location."""
+
     location: FileRange
     contents: list[HoverContent]

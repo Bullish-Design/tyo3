@@ -70,9 +70,19 @@ class TestSymbol:
 
     def test_all_symbol_kinds_creatable(self, open_project, first_party_file) -> None:
         for kind_name in [
-            "module", "class_", "function", "method", "constructor",
-            "variable", "constant", "field", "parameter", "property",
-            "type_parameter", "import_", "unknown",
+            "module",
+            "class_",
+            "function",
+            "method",
+            "constructor",
+            "variable",
+            "constant",
+            "field",
+            "parameter",
+            "property",
+            "type_parameter",
+            "import_",
+            "unknown",
         ]:
             sym = Symbol(
                 name="sym",

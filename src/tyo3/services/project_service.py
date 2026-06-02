@@ -6,11 +6,11 @@ DEPRECATED: Use tyo3.TyO3Session instead. This module will be removed in v0.2.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 from tyo3.models.core import (
     BackendInfo,
     FileCategory,
-    Path,
     ProjectFile,
     ProjectStatus,
     TyProject,
@@ -20,7 +20,7 @@ from tyo3.models.core import (
 # ── Black-box stubs (used when `use_rust=False`) ────────────────────────
 
 
-def project_files(root: Path, config: TyProjectConfig) -> list[Path]:
+def project_files(root: PurePosixPath, config: TyProjectConfig) -> list[PurePosixPath]:
     """Black-box: discover Python files belonging to a project root.
 
     In production the real implementation calls ty's native file discovery.
@@ -29,27 +29,27 @@ def project_files(root: Path, config: TyProjectConfig) -> list[Path]:
     return []
 
 
-def is_directory(path: Path) -> bool:
+def is_directory(path: PurePosixPath) -> bool:
     """Black-box: returns True if the path is a directory on disk."""
     return True
 
 
-def is_first_party(path: Path) -> bool:
+def is_first_party(path: PurePosixPath) -> bool:
     """Black-box: returns True if the file is a first-party project file."""
     return True
 
 
-def is_vendored(path: Path) -> bool:
+def is_vendored(path: PurePosixPath) -> bool:
     """Black-box: returns True if the file is vendored."""
     return False
 
 
-def is_stub(path: Path) -> bool:
+def is_stub(path: PurePosixPath) -> bool:
     """Black-box: returns True if the file is a type stub (.pyi)."""
     return False
 
 
-def is_dependency(path: Path) -> bool:
+def is_dependency(path: PurePosixPath) -> bool:
     """Black-box: returns True if the file is a dependency."""
     return False
 
@@ -76,28 +76,28 @@ class ProjectService:
 
     # ── Rust backend access ──────────────────────────────────────────
 
-    def _get_rust_project(self, root: Path) -> object | None:
+    def _get_rust_project(self, root: PurePosixPath) -> object | None:
         """Return the RustProject for *root*, or ``None``."""
         key = str(root)
         return self._rust_projects.get(key)
 
-    def _register_rust_project(self, root: Path, rp: object) -> None:
+    def _register_rust_project(self, root: PurePosixPath, rp: object) -> None:
         """Store a RustProject instance keyed by root."""
         self._rust_projects[str(root)] = rp
 
-    def _remove_rust_project(self, root: Path) -> None:
+    def _remove_rust_project(self, root: PurePosixPath) -> None:
         """Remove the stored RustProject for *root*."""
         self._rust_projects.pop(str(root), None)
 
     # ── Query helpers ──────────────────────────────────────────────────
 
-    def find_open_project(self, root: Path) -> TyProject | None:
+    def find_open_project(self, root: PurePosixPath) -> TyProject | None:
         for p in self._projects:
             if p.root == root and p.is_open:
                 return p
         return None
 
-    def find_project(self, root: Path) -> TyProject | None:
+    def find_project(self, root: PurePosixPath) -> TyProject | None:
         for p in self._projects:
             if p.root == root:
                 return p
@@ -110,7 +110,7 @@ class ProjectService:
     # ── OpenProject ────────────────────────────────────────────────────
 
     def open_project(
-        self, root: Path, config: TyProjectConfig | None = None
+        self, root: PurePosixPath, config: TyProjectConfig | None = None
     ) -> tuple[TyProject, list[ProjectFile]]:
         """OpenProject: requires root is a directory and no open project exists for root."""
         # ── Precondition: path is a directory ──
@@ -127,18 +127,15 @@ class ProjectService:
 
         # ── Open Rust backend (if available) ──
         if self._use_rust:
-            from pathlib import Path as StdPath
-
             from tyo3.rust_project import RustProject
 
-            real_path = StdPath(*root.components)  # type: ignore[arg-type]
-            rp = RustProject(real_path)
+            rp = RustProject(str(root))
             self._register_rust_project(root, rp)
 
             # Use Rust for file discovery
-            discovered_paths: list[Path] = []
+            discovered_paths: list[PurePosixPath] = []
             for f in rp.files():
-                discovered_paths.append(Path(components=StdPath(f).parts))  # type: ignore[arg-type]
+                discovered_paths.append(PurePosixPath(f))
         else:
             discovered_paths = project_files(root, effective)
 
@@ -166,9 +163,7 @@ class ProjectService:
                 cat = FileCategory.STUB
             else:
                 cat = FileCategory.DEPENDENCY
-            files.append(
-                ProjectFile(path=path, project=project, file_category=cat)
-            )
+            files.append(ProjectFile(path=path, project=project, file_category=cat))
 
         return project, files
 
@@ -214,11 +209,9 @@ class ProjectService:
         if rp is not None:
             result: list[ProjectFile] = []
             for f in rp.files():  # type: ignore[union-attr]
-                from pathlib import Path as StdPath
-                p = StdPath(f)
                 result.append(
                     ProjectFile(
-                        path=Path(components=list(p.parts)),  # type: ignore[arg-type]
+                        path=PurePosixPath(f),
                         project=project,
                         file_category=FileCategory.FIRST_PARTY,
                     )
@@ -227,16 +220,10 @@ class ProjectService:
 
         return [f for f in self._get_all_files() if f.project.root == project.root]
 
-    def filter_files_by_category(
-        self, project: TyProject, category: str
-    ) -> list[ProjectFile]:
+    def filter_files_by_category(self, project: TyProject, category: str) -> list[ProjectFile]:
         if not project.is_open:
             raise ValueError("Project is not open")
-        return [
-            f
-            for f in self._get_all_files()
-            if f.project.root == project.root and f.file_category == category
-        ]
+        return [f for f in self._get_all_files() if f.project.root == project.root and f.file_category == category]
 
     def _get_all_files(self) -> list[ProjectFile]:
         """Return all files across all projects. Stub-mode only."""

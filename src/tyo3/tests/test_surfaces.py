@@ -61,15 +61,11 @@ class TestTypeCheckingSurface:
         with pytest.raises(ValueError, match="not open"):
             analysis_service.check_file(closed_project, first_party_file)
 
-    def test_filter_by_severity_requires_open(
-        self, analysis_service, closed_project
-    ) -> None:
+    def test_filter_by_severity_requires_open(self, analysis_service, closed_project) -> None:
         with pytest.raises(ValueError, match="not open"):
             analysis_service.filter_by_severity(closed_project, "error")
 
-    def test_filter_by_code_requires_open(
-        self, analysis_service, closed_project
-    ) -> None:
+    def test_filter_by_code_requires_open(self, analysis_service, closed_project) -> None:
         with pytest.raises(ValueError, match="not open"):
             analysis_service.filter_by_code(closed_project, "type-arg")
 
@@ -77,21 +73,15 @@ class TestTypeCheckingSurface:
 class TestSymbolQuerySurface:
     """SymbolQuery surface provides tests."""
 
-    def test_document_symbols_requires_open(
-        self, symbol_service, closed_project, first_party_file
-    ) -> None:
+    def test_document_symbols_requires_open(self, symbol_service, closed_project, first_party_file) -> None:
         with pytest.raises(ValueError, match="not open"):
             symbol_service.get_document_symbols(closed_project, first_party_file)
 
-    def test_workspace_symbols_requires_open(
-        self, symbol_service, closed_project
-    ) -> None:
+    def test_workspace_symbols_requires_open(self, symbol_service, closed_project) -> None:
         with pytest.raises(ValueError, match="not open"):
             symbol_service.search_workspace_symbols(closed_project, "test")
 
-    def test_all_symbols_requires_open(
-        self, symbol_service, closed_project
-    ) -> None:
+    def test_all_symbols_requires_open(self, symbol_service, closed_project) -> None:
         with pytest.raises(ValueError, match="not open"):
             symbol_service.search_all_symbols(closed_project, "test")
 
@@ -99,33 +89,23 @@ class TestSymbolQuerySurface:
 class TestCodeNavigationSurface:
     """CodeNavigation surface provides tests."""
 
-    def test_goto_definition_requires_open(
-        self, navigation_service, closed_project, first_party_file
-    ) -> None:
+    def test_goto_definition_requires_open(self, navigation_service, closed_project, first_party_file) -> None:
         with pytest.raises(ValueError, match="not open"):
             navigation_service.goto_definition(closed_project, first_party_file, 1, 1)
 
-    def test_goto_declaration_requires_open(
-        self, navigation_service, closed_project, first_party_file
-    ) -> None:
+    def test_goto_declaration_requires_open(self, navigation_service, closed_project, first_party_file) -> None:
         with pytest.raises(ValueError, match="not open"):
             navigation_service.goto_declaration(closed_project, first_party_file, 1, 1)
 
-    def test_goto_type_definition_requires_open(
-        self, navigation_service, closed_project, first_party_file
-    ) -> None:
+    def test_goto_type_definition_requires_open(self, navigation_service, closed_project, first_party_file) -> None:
         with pytest.raises(ValueError, match="not open"):
             navigation_service.goto_type_definition(closed_project, first_party_file, 1, 1)
 
-    def test_find_references_requires_open(
-        self, navigation_service, closed_project, first_party_file
-    ) -> None:
+    def test_find_references_requires_open(self, navigation_service, closed_project, first_party_file) -> None:
         with pytest.raises(ValueError, match="not open"):
             navigation_service.find_references(closed_project, first_party_file, 1, 1)
 
-    def test_hover_requires_open(
-        self, navigation_service, closed_project, first_party_file
-    ) -> None:
+    def test_hover_requires_open(self, navigation_service, closed_project, first_party_file) -> None:
         with pytest.raises(ValueError, match="not open"):
             navigation_service.get_hover(closed_project, first_party_file, 1, 1)
 
@@ -133,14 +113,10 @@ class TestCodeNavigationSurface:
 class TestAdvancedSemanticsSurface:
     """AdvancedSemantics surface provides tests."""
 
-    def test_semantic_tokens_requires_open(
-        self, advanced_service, closed_project, first_party_file
-    ) -> None:
+    def test_semantic_tokens_requires_open(self, advanced_service, closed_project, first_party_file) -> None:
         with pytest.raises(ValueError, match="not open"):
             advanced_service.get_semantic_tokens(closed_project, first_party_file)
 
-    def test_type_hierarchy_requires_open(
-        self, advanced_service, closed_project, first_party_file
-    ) -> None:
+    def test_type_hierarchy_requires_open(self, advanced_service, closed_project, first_party_file) -> None:
         with pytest.raises(ValueError, match="not open"):
             advanced_service.explore_type_hierarchy(closed_project, first_party_file, 1, 1)

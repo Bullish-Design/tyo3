@@ -17,6 +17,7 @@ from tyo3.models.core import ProjectFile
 
 class SemanticTokenType(StrEnum):
     """Classification of a semantic token."""
+
     NAMESPACE = "namespace"
     CLASS_ = "class_"
     PARAMETER = "parameter"
@@ -36,6 +37,7 @@ class SemanticTokenType(StrEnum):
 
 class SemanticTokenModifier(StrEnum):
     """Modifier attribute for a semantic token."""
+
     DEFINITION = "definition"
     READONLY = "readonly"
     ASYNC_ = "async_"
@@ -47,6 +49,7 @@ class SemanticTokenModifier(StrEnum):
 
 class SemanticToken(BaseModel):
     """A classified semantic token within a project file."""
+
     file: ProjectFile
     range: Range
     token_type: SemanticTokenType

@@ -8,11 +8,12 @@ Obligation groups:
 """
 
 from datetime import UTC
+from pathlib import PurePosixPath
 
 import pytest
 
 from tyo3.models.analysis import DiagnosticSeverity
-from tyo3.models.core import FileCategory, Path
+from tyo3.models.core import FileCategory
 
 
 class TestCheckProject:
@@ -44,15 +45,16 @@ class TestCheckFile:
         from tyo3.models.core import ProjectStatus, TyProject
 
         other_project = TyProject(
-            root=Path(components=["other"]),
+            root=PurePosixPath("other"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
-        other_file = type('obj', (object,), {'path': Path(components=["x"]), 'project': other_project})()
+        other_file = type("obj", (object,), {"path": PurePosixPath("x"), "project": other_project})()
         # We need a real ProjectFile for this
         from tyo3.models.core import ProjectFile
+
         other_file = ProjectFile(
-            path=Path(components=["other", "f.py"]),
+            path=PurePosixPath("other/f.py"),
             project=other_project,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -101,10 +103,10 @@ class TestClearDiagnosticsOnReload:
     def test_does_not_clear_other_projects(self, analysis_service, open_project) -> None:
         from datetime import datetime
 
-        from tyo3.models.core import Path, ProjectStatus, TyProject
+        from tyo3.models.core import ProjectStatus, TyProject
 
         other = TyProject(
-            root=Path(components=["other"]),
+            root=PurePosixPath("other"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )

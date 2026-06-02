@@ -9,11 +9,11 @@ Obligation groups:
 """
 
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 from tyo3.models.core import (
     BackendInfo,
     FileCategory,
-    Path,
     ProjectFile,
     ProjectStatus,
     TyProject,
@@ -21,22 +21,27 @@ from tyo3.models.core import (
 )
 
 
-class TestPath:
-    """Path value type tests."""
+class TestPurePosixPathIntegration:
+    """Path value type tests — now uses stdlib PurePosixPath."""
 
-    def test_components_field(self) -> None:
-        p = Path(components=["home", "user", "project"])
-        assert p.components == ["home", "user", "project"]
+    def test_construction(self) -> None:
+        p = PurePosixPath("home/user/project")
+        assert str(p) == "home/user/project"
 
     def test_equality(self) -> None:
-        a = Path(components=["a", "b"])
-        b = Path(components=["a", "b"])
-        c = Path(components=["a", "c"])
+        a = PurePosixPath("a/b")
+        b = PurePosixPath("a/b")
+        c = PurePosixPath("a/c")
         assert a == b
         assert a != c
         # Hashable for set membership
         s = {a, b, c}
         assert len(s) == 2  # a and b are equal
+
+    def test_absolute_path(self) -> None:
+        p = PurePosixPath("/home/user/project")
+        assert p.is_absolute()
+        assert str(p) == "/home/user/project"
 
 
 class TestTyProjectConfig:
@@ -64,7 +69,7 @@ class TestTyProjectConfig:
         assert config.check_all_files is False
 
     def test_extra_search_paths(self) -> None:
-        p = Path(components=["extras"])
+        p = PurePosixPath("extras")
         config = TyProjectConfig(extra_search_paths={p})
         assert p in config.extra_search_paths
 
@@ -125,7 +130,7 @@ class TestTyProject:
 
     def test_creation(self) -> None:
         now = datetime.now(UTC)
-        root = Path(components=["home", "user", "proj"])
+        root = PurePosixPath("home/user/proj")
         project = TyProject(
             root=root,
             status=ProjectStatus.OPEN,
@@ -139,7 +144,7 @@ class TestTyProject:
 
     def test_derived_is_open_true(self) -> None:
         project = TyProject(
-            root=Path(components=["r"]),
+            root=PurePosixPath("r"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
@@ -148,7 +153,7 @@ class TestTyProject:
 
     def test_derived_is_open_false_when_closed(self) -> None:
         project = TyProject(
-            root=Path(components=["r"]),
+            root=PurePosixPath("r"),
             status=ProjectStatus.CLOSED,
             opened_at=datetime.now(UTC),
         )
@@ -156,7 +161,7 @@ class TestTyProject:
 
     def test_derived_has_error_true(self) -> None:
         project = TyProject(
-            root=Path(components=["r"]),
+            root=PurePosixPath("r"),
             status=ProjectStatus.ERROR,
             opened_at=datetime.now(UTC),
         )
@@ -165,7 +170,7 @@ class TestTyProject:
 
     def test_optional_fields(self) -> None:
         project = TyProject(
-            root=Path(components=["r"]),
+            root=PurePosixPath("r"),
             status=ProjectStatus.OPEN,
             python_version="3.13",
             opened_at=datetime.now(UTC),
@@ -174,7 +179,7 @@ class TestTyProject:
 
     def test_optional_fields_null(self) -> None:
         project = TyProject(
-            root=Path(components=["r"]),
+            root=PurePosixPath("r"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
@@ -183,10 +188,10 @@ class TestTyProject:
         assert project.last_reloaded_at is None
 
     def test_set_field_types(self) -> None:
-        p1 = Path(components=["a"])
-        p2 = Path(components=["b"])
+        p1 = PurePosixPath("a")
+        p2 = PurePosixPath("b")
         project = TyProject(
-            root=Path(components=["r"]),
+            root=PurePosixPath("r"),
             status=ProjectStatus.OPEN,
             extra_search_paths={p1, p2},
             opened_at=datetime.now(UTC),
@@ -198,13 +203,13 @@ class TestProjectFile:
     """ProjectFile entity tests."""
 
     def test_creation(self) -> None:
-        root = Path(components=["r"])
+        root = PurePosixPath("r")
         project = TyProject(
             root=root,
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
-        file_path = Path(components=["r", "main.py"])
+        file_path = PurePosixPath("r/main.py")
         pf = ProjectFile(
             path=file_path,
             project=project,
@@ -217,12 +222,12 @@ class TestProjectFile:
 
     def test_relationship_to_project(self) -> None:
         project = TyProject(
-            root=Path(components=["r"]),
+            root=PurePosixPath("r"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
         pf = ProjectFile(
-            path=Path(components=["r", "f.py"]),
+            path=PurePosixPath("r/f.py"),
             project=project,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -231,13 +236,13 @@ class TestProjectFile:
 
     def test_all_categories(self) -> None:
         project = TyProject(
-            root=Path(components=["r"]),
+            root=PurePosixPath("r"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
         for cat in [FileCategory.FIRST_PARTY, FileCategory.VENDORED, FileCategory.STUB, FileCategory.DEPENDENCY]:
             pf = ProjectFile(
-                path=Path(components=["r", "f"]),
+                path=PurePosixPath("r/f"),
                 project=project,
                 file_category=cat,
             )

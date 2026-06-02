@@ -5,7 +5,7 @@ DEPRECATED: Use tyo3.TyO3Session instead. This module will be removed in v0.2.
 
 from __future__ import annotations
 
-from tyo3.models.core import Path, ProjectFile, TyProject
+from tyo3.models.core import ProjectFile, TyProject
 from tyo3.models.symbols import Symbol
 
 
@@ -25,9 +25,7 @@ def workspace_symbols(project: TyProject, query: str) -> list[Symbol]:
     return []
 
 
-def all_symbols(
-    project: TyProject, query: str, context_file: ProjectFile
-) -> list[Symbol]:
+def all_symbols(project: TyProject, query: str, context_file: ProjectFile) -> list[Symbol]:
     """Black-box: searches all importable symbols matching query.
 
     Uses ty_ide::all_symbols.
@@ -59,14 +57,6 @@ class SymbolService:
 
     # ── Rust backend access ─────────────────────────────────────────
 
-    @staticmethod
-    def _path_to_str(path: Path) -> str:
-        """Convert a Path model to a file-system path string."""
-        components = path.components
-        if components and components[0] == "/":
-            return "/" + "/".join(components[1:])
-        return "/".join(components)
-
     def _get_rust_project(self, root_path: str) -> object | None:
         """Return the RustProject for *root_path*, or ``None``."""
         return self._rust_projects.get(root_path)
@@ -81,9 +71,7 @@ class SymbolService:
 
     # ── GetDocumentSymbols ─────────────────────────────────────────────
 
-    def get_document_symbols(
-        self, project: TyProject, file: ProjectFile
-    ) -> list[Symbol]:
+    def get_document_symbols(self, project: TyProject, file: ProjectFile) -> list[Symbol]:
         """GetDocumentSymbols: requires project.is_open and file.project == project."""
         if not project.is_open:
             raise ValueError("Project is not open")
@@ -92,7 +80,7 @@ class SymbolService:
 
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
-            file_path = self._path_to_str(file.path)
+            file_path = str(file.path)
             symbols = rp.document_symbols(file_path)  # type: ignore[union-attr]
             self._symbols.extend(symbols)
             return symbols
@@ -103,9 +91,7 @@ class SymbolService:
 
     # ── SearchWorkspaceSymbols ─────────────────────────────────────────
 
-    def search_workspace_symbols(
-        self, project: TyProject, query: str
-    ) -> list[Symbol]:
+    def search_workspace_symbols(self, project: TyProject, query: str) -> list[Symbol]:
         """SearchWorkspaceSymbols: requires project.is_open and len(query) >= 1."""
         if not project.is_open:
             raise ValueError("Project is not open")

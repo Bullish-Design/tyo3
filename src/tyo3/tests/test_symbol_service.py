@@ -7,10 +7,11 @@ Obligation groups:
 """
 
 from datetime import UTC
+from pathlib import PurePosixPath
 
 import pytest
 
-from tyo3.models.core import FileCategory, Path, ProjectFile
+from tyo3.models.core import FileCategory, ProjectFile
 
 
 class TestGetDocumentSymbols:
@@ -26,12 +27,12 @@ class TestGetDocumentSymbols:
         from tyo3.models.core import ProjectStatus, TyProject
 
         other = TyProject(
-            root=Path(components=["other"]),
+            root=PurePosixPath("other"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
-            path=Path(components=["other", "f.py"]),
+            path=PurePosixPath("other/f.py"),
             project=other,
             file_category=FileCategory.FIRST_PARTY,
         )
@@ -84,12 +85,12 @@ class TestSearchAllSymbols:
         from tyo3.models.core import ProjectStatus, TyProject
 
         other = TyProject(
-            root=Path(components=["other"]),
+            root=PurePosixPath("other"),
             status=ProjectStatus.OPEN,
             opened_at=datetime.now(UTC),
         )
         other_file = ProjectFile(
-            path=Path(components=["other", "f.py"]),
+            path=PurePosixPath("other/f.py"),
             project=other,
             file_category=FileCategory.FIRST_PARTY,
         )

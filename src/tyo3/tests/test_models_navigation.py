@@ -5,6 +5,8 @@ Obligation groups:
 - Entity tests (DefinitionTarget, Reference)
 """
 
+from pathlib import PurePosixPath
+
 from tyo3.models.navigation import DefinitionTarget, Reference, ReferenceKind
 
 
@@ -25,10 +27,9 @@ class TestDefinitionTarget:
 
     def test_required_fields(self, open_project) -> None:
         from tyo3.models.analysis import Position, Range
-        from tyo3.models.core import Path
 
         target = DefinitionTarget(
-            path=Path(components=["src", "main.py"]),
+            path=PurePosixPath("src/main.py"),
             range=Range(start=Position(line=1, column=1), end=Position(line=5, column=1)),
         )
         assert target.module_name is None
@@ -37,10 +38,9 @@ class TestDefinitionTarget:
 
     def test_with_optional_fields(self, open_project, symbol) -> None:
         from tyo3.models.analysis import Position, Range
-        from tyo3.models.core import Path
 
         target = DefinitionTarget(
-            path=Path(components=["src", "main.py"]),
+            path=PurePosixPath("src/main.py"),
             range=Range(start=Position(line=1, column=1), end=Position(line=5, column=1)),
             selection_range=Range(start=Position(line=2, column=1), end=Position(line=2, column=10)),
             symbol=symbol,
@@ -55,10 +55,9 @@ class TestReference:
 
     def test_creation(self, open_project) -> None:
         from tyo3.models.analysis import Position, Range
-        from tyo3.models.core import Path
 
         ref = Reference(
-            path=Path(components=["src", "main.py"]),
+            path=PurePosixPath("src/main.py"),
             range=Range(start=Position(line=10, column=5), end=Position(line=10, column=15)),
             kind=ReferenceKind.READ,
         )
@@ -66,9 +65,8 @@ class TestReference:
 
     def test_all_reference_kinds(self, open_project) -> None:
         from tyo3.models.analysis import Position, Range
-        from tyo3.models.core import Path
 
         r = Range(start=Position(line=1, column=1), end=Position(line=1, column=2))
         for kind in [ReferenceKind.READ, ReferenceKind.WRITE, ReferenceKind.OTHER]:
-            ref = Reference(path=Path(components=["f.py"]), range=r, kind=kind)
+            ref = Reference(path=PurePosixPath("f.py"), range=r, kind=kind)
             assert ref.kind == kind

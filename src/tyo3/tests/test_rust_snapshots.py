@@ -19,6 +19,7 @@ import pytest
 # Check if native extension is available
 try:
     from tyo3.rust_project import RustProject
+
     _HAS_NATIVE = True
 except ImportError:
     _HAS_NATIVE = False
@@ -39,7 +40,6 @@ def fixture_path(name: str) -> str:
 
 needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
@@ -51,7 +51,7 @@ def symbol_to_dict(symbol: Symbol) -> dict:
         "kind": symbol.kind,
         "container_name": symbol.container_name,
         "deprecated": symbol.deprecated,
-        "location_path": "/".join(symbol.location.path.components),
+        "location_path": str(symbol.location.path),
         "start_line": symbol.location.range.start.line,
         "start_column": symbol.location.range.start.column,
         "end_line": symbol.location.range.end.line,
@@ -66,6 +66,7 @@ def symbol_to_dict(symbol: Symbol) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 # Snapshot Tests
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @needs_native
 class TestSnapshotSimplePackage:

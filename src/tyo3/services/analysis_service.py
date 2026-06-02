@@ -9,7 +9,7 @@ from tyo3.models.analysis import (
     CheckResult,
     Diagnostic,
 )
-from tyo3.models.core import Path, ProjectFile, TyProject
+from tyo3.models.core import ProjectFile, TyProject
 
 
 def run_ty_check(project: TyProject) -> CheckResult:
@@ -45,14 +45,6 @@ class AnalysisService:
         self._rust_projects: dict[str, object] = {}
 
     # ── Rust backend access ─────────────────────────────────────────
-
-    @staticmethod
-    def _path_to_str(path: Path) -> str:
-        """Convert a Path model to a file-system path string."""
-        components = path.components
-        if components and components[0] == "/":
-            return "/" + "/".join(components[1:])
-        return "/".join(components)
 
     def _get_rust_project(self, root_path: str) -> object | None:
         """Return the RustProject for *root_path*, or ``None``."""
@@ -119,10 +111,7 @@ class AnalysisService:
         rp = self._get_rust_project(str(project.root))
         if rp is not None and self._use_rust:
             full_result = rp.check()  # type: ignore[union-attr]
-            file_diagnostics = [
-                d for d in full_result.diagnostics
-                if d.file is not None
-            ]
+            file_diagnostics = [d for d in full_result.diagnostics if d.file is not None]
             self._diagnostics_by_project[key].extend(file_diagnostics)
             return CheckResult(
                 diagnostics=file_diagnostics,
@@ -131,11 +120,7 @@ class AnalysisService:
             )
 
         all_results = run_ty_check(project)
-        file_diagnostics = [
-            d
-            for d in all_results.diagnostics
-            if d.file is not None and d.file.path == file.path
-        ]
+        file_diagnostics = [d for d in all_results.diagnostics if d.file is not None and d.file.path == file.path]
         for d in file_diagnostics:
             diagnostic = Diagnostic(
                 file=file,
@@ -147,15 +132,11 @@ class AnalysisService:
             )
             self._diagnostics_by_project[key].append(diagnostic)
 
-        return CheckResult(
-            diagnostics=file_diagnostics, files_checked=1, elapsed_ms=check_duration()
-        )
+        return CheckResult(diagnostics=file_diagnostics, files_checked=1, elapsed_ms=check_duration())
 
     # ── FilterBySeverity / FilterByCode ────────────────────────────────
 
-    def filter_by_severity(
-        self, project: TyProject, severity: str
-    ) -> CheckResult:
+    def filter_by_severity(self, project: TyProject, severity: str) -> CheckResult:
         if not project.is_open:
             raise ValueError("Project is not open")
 

@@ -7,34 +7,27 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel, Field
 
 # ── Value Types ──────────────────────────────────────────────────────────
 
 
-class Path(BaseModel):
-    """A filesystem path represented as component segments."""
-    components: list[str]
-
-    def __hash__(self) -> int:
-        return hash(tuple(self.components))
-
-
 class TyProjectConfig(BaseModel):
     """Configuration for opening a TyO3 project."""
+
     python_version: str | None = None
-    config_path: Path | None = None
-    extra_search_paths: set[Path] = Field(default_factory=set)
+    config_path: PurePosixPath | None = None
+    extra_search_paths: set[PurePosixPath] = Field(default_factory=set)
     respect_gitignore: bool = True
     force_exclude: bool = False
     check_all_files: bool = True
 
-    model_config = {"arbitrary_types_allowed": True}
-
 
 class BackendInfo(BaseModel):
     """Metadata about the ty backend."""
+
     tyo3_version: str
     ty_version: str
     ty_commit: str
@@ -47,6 +40,7 @@ class BackendInfo(BaseModel):
 
 class ProjectStatus(StrEnum):
     """Lifecycle status of a TyO3 project."""
+
     CLOSED = "closed"
     OPEN = "open"
     ERROR = "error"
@@ -54,6 +48,7 @@ class ProjectStatus(StrEnum):
 
 class FileCategory(StrEnum):
     """Classification of a project file."""
+
     FIRST_PARTY = "first_party"
     VENDORED = "vendored"
     STUB = "stub"
@@ -65,19 +60,18 @@ class FileCategory(StrEnum):
 
 class TyProject(BaseModel):
     """A TyO3 project session — the root object owned by one project root."""
-    root: Path
+
+    root: PurePosixPath
     status: ProjectStatus
     coordinate_mode: str = "python"
     python_version: str | None = None
-    config_path: Path | None = None
-    extra_search_paths: set[Path] = Field(default_factory=set)
+    config_path: PurePosixPath | None = None
+    extra_search_paths: set[PurePosixPath] = Field(default_factory=set)
     respect_gitignore: bool = True
     force_exclude: bool = False
     check_all_files: bool = True
     opened_at: datetime
     last_reloaded_at: datetime | None = None
-
-    model_config = {"arbitrary_types_allowed": True}
 
     # Derived properties
     @property
@@ -91,7 +85,8 @@ class TyProject(BaseModel):
 
 class ProjectFile(BaseModel):
     """A discovered Python file belonging to a TyO3 project."""
-    path: Path
+
+    path: PurePosixPath
     project: TyProject
     file_category: FileCategory
     last_checked_at: datetime | None = None
