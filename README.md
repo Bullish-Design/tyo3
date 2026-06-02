@@ -32,18 +32,6 @@ devenv shell
 build
 ```
 
-### Manual install with maturin
-
-```bash
-pip install maturin
-cd rust && maturin develop && cd ..
-```
-
-### From wheel
-
-```bash
-pip install tyo3-*.whl
-```
 
 ## Quick Start
 
