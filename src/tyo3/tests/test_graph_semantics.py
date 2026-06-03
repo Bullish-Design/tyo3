@@ -11,46 +11,7 @@ from tyo3.graph.models import ReferenceRole
 from tyo3.models.analysis import Range
 from tyo3.models.symbols import SymbolKind
 from tyo3.tests.conftest import needs_native, get_graph, get_session
-
-
-# ── Phase 0.1: Graph helper module for tests ─────────────────────────────
-
-
-def find_one(
-    graph: CodeGraph,
-    *,
-    file_suffix: str,
-    name: str,
-    kind: SymbolKind,
-) -> SymbolNode:
-    """Find exactly one symbol matching the given criteria in the graph.
-
-    Uses ``file.endswith(file_suffix)`` to keep tests working while
-    paths are still absolute.  After path normalization, update these
-    to use exact relative paths.
-    """
-    matches = [
-        node
-        for node in graph.symbols_of_kind(kind)
-        if node.file.endswith(file_suffix) and node.name == name and not node.external
-    ]
-    assert len(matches) == 1, (
-        f"Expected exactly one {kind} named {name!r} in {file_suffix}, "
-        f"got {[m.symbol_id for m in matches]}"
-    )
-    return matches[0]
-
-
-def edges_of_kind(graph: CodeGraph, kind: EdgeKind) -> list[tuple[str, str]]:
-    """Return all edges of *kind* as ``(source_symbol_id, target_symbol_id)`` pairs."""
-    result: list[tuple[str, str]] = []
-    for edge_idx in graph.graph.edge_indices():
-        data = graph.graph.get_edge_data_by_index(edge_idx)
-        if data.kind != kind:
-            continue
-        src, tgt = graph.graph.get_edge_endpoints_by_index(edge_idx)
-        result.append((graph.graph[src].symbol_id, graph.graph[tgt].symbol_id))
-    return result
+from tyo3.tests.graph_helpers import find_one, edges_of_kind
 
 
 # ── Phase 0.2: References attach to functions, not modules ───────────────
