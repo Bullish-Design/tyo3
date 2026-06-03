@@ -117,18 +117,20 @@ class TestImportCycles:
         self._add_import_edge(graph, "c.py", "d.py")
         assert graph.import_cycles() == []
 
-    def test_references_edges_also_detected(self) -> None:
+    def test_references_edges_alone_do_not_create_cycles(self) -> None:
+        """Plain REFERENCES edges (without IMPORTS) must not create import cycles."""
         graph = CodeGraph()
         self._make_module_node(graph, "x.py", "x")
         self._make_module_node(graph, "y.py", "y")
-        src_id = "x.py::<module>"
-        tgt_id = "y.py::<module>"
+        # Create non-module nodes so REFERENCES edges attach to them
+        self._make_data_node(graph, "x.py::f", "x.py")
+        self._make_data_node(graph, "y.py::g", "y.py")
         edge_a = EdgeData(kind=EdgeKind.REFERENCES, file="x.py")
         edge_b = EdgeData(kind=EdgeKind.REFERENCES, file="y.py")
-        graph._add_edge(src_id, tgt_id, edge_a, "x.py")
-        graph._add_edge(tgt_id, src_id, edge_b, "y.py")
+        graph._add_edge("x.py::f", "y.py::g", edge_a, "x.py")
+        graph._add_edge("y.py::g", "x.py::f", edge_b, "y.py")
         cycles = graph.import_cycles()
-        assert len(cycles) == 1
+        assert cycles == []
 
 
 class TestImportCycleGroups:
@@ -228,6 +230,51 @@ class TestImportCycleGroups:
         assert graph.import_cycle_groups() == []
 
 
+    def test_references_do_not_create_import_cycles(self) -> None:
+        """A cross-file REFERENCES edge does not imply an import relationship."""
+        graph = CodeGraph()
+
+        mod_a = SymbolNode(
+            symbol_id="a.py::<module>", name="a", qualified_name="<module>",
+            kind=SymbolKind.MODULE, file="a.py",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1},
+                 "end": {"line": 1, "column": 1}}
+            ),
+        )
+        mod_b = SymbolNode(
+            symbol_id="b.py::<module>", name="b", qualified_name="<module>",
+            kind=SymbolKind.MODULE, file="b.py",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1},
+                 "end": {"line": 1, "column": 1}}
+            ),
+        )
+        func_a = SymbolNode(
+            symbol_id="a.py::f", name="f", qualified_name="f",
+            kind=SymbolKind.FUNCTION, file="a.py",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1},
+                 "end": {"line": 1, "column": 1}}
+            ),
+        )
+        func_b = SymbolNode(
+            symbol_id="b.py::g", name="g", qualified_name="g",
+            kind=SymbolKind.FUNCTION, file="b.py",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1},
+                 "end": {"line": 1, "column": 1}}
+            ),
+        )
+        for node in [mod_a, mod_b, func_a, func_b]:
+            graph._add_node(node)
+        # Cross-file REFERENCES edges in both directions — but no IMPORTS
+        graph._add_edge("a.py::f", "b.py::g", EdgeData(kind=EdgeKind.REFERENCES), "a.py")
+        graph._add_edge("b.py::g", "a.py::f", EdgeData(kind=EdgeKind.REFERENCES), "b.py")
+
+        assert graph.import_cycles() == []
+
+
 @needs_native
 class TestImportCyclesIntegration:
     """Integration tests for import cycles on real fixtures."""
@@ -248,6 +295,21 @@ class TestImportCyclesIntegration:
         graph = get_graph("graph_test")
         cycles = graph.import_cycles()
         assert isinstance(cycles, list)
+
+    def test_circular_imports_detected_from_import_edges(self) -> None:
+        graph = get_graph("circular_imports")
+        cycles = graph.import_cycles()
+        assert cycles, (
+            f"Expected at least one import cycle in circular_imports fixture"
+        )
+        # Verify the cycle contains both modules
+        all_sids_in_cycles = {sid for cycle in cycles for sid in cycle}
+        assert any(
+            sid.endswith("module_a.py::<module>") for sid in all_sids_in_cycles
+        ), f"Cycle(s) missing module_a: {cycles}"
+        assert any(
+            sid.endswith("module_b.py::<module>") for sid in all_sids_in_cycles
+        ), f"Cycle(s) missing module_b: {cycles}"
 
     def test_cycle_groups_no_false_positives(self) -> None:
         graph = get_graph("simple_package")

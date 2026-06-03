@@ -420,6 +420,51 @@ class CodeGraph:
             )
             self._add_edge(enclosing_id, target_sid, edge, file_str)
 
+            # Add module-level IMPORTS edge for any cross-file reference.
+            # The Rust file_occurrences API reports import role occurrences
+            # but does not yet resolve their targets (target_file is None).
+            # As a pragmatic bridge, every resolved cross-file reference
+            # implies a module-level import dependency.
+            if target_file and target_file != file_str:
+                self._add_import_edge(
+                    file_str, target_file, occ.range, project_files
+                )
+
+    def _add_import_edge(
+        self,
+        source_file: str,
+        target_file: str,
+        range: Range,
+        project_files: set[str],
+    ) -> None:
+        """Add a module-level IMPORTS edge between two files."""
+        source_module = f"{source_file}::<module>"
+        target_module = f"{target_file}::<module>"
+
+        if source_module not in self._id_to_index:
+            return
+
+        if target_module not in self._id_to_index:
+            if target_file in project_files:
+                return  # Project file without a module node — skip
+            package = self._infer_package(target_file) or "unknown"
+            target_module = f"{package}::<module>"
+            if target_module not in self._id_to_index:
+                self._add_stub_node(
+                    symbol_id=target_module,
+                    name=package,
+                    qualified_name="<module>",
+                    kind=SymbolKind.MODULE,
+                    package=package,
+                )
+
+        self._add_edge(
+            source_module,
+            target_module,
+            EdgeData(kind=EdgeKind.IMPORTS, file=source_file, range=range),
+            source_file,
+        )
+
     def _ensure_target_node_simple(
         self,
         target_file: str,
@@ -1070,27 +1115,28 @@ class CodeGraph:
 
     # ── Graph algorithms ──────────────────────────────────────
 
-    def import_cycles(self) -> list[list[str]]:
-        """Detect circular import chains in the module dependency graph.
+    def _build_module_graph(self) -> tuple[rx.PyDiGraph, dict[str, int]]:
+        """Build a module-level graph from IMPORTS edges.
 
-        Builds a module-level dependency graph by aggregating all
-        inter-file edges (IMPORTS, REFERENCES).  Two modules are
-        adjacent if any symbol in module *A* references a symbol in
-        module *B*.
-
-        Returns a list of cycles, where each cycle is a list of
-        module symbol_ids in order.
+        Returns ``(module_graph, sid_to_index)`` where *module_graph*
+        nodes are module ``symbol_id`` strings and *sid_to_index*
+        maps ``symbol_id`` → node index in the module graph.
         """
-        module_indices: list[int] = []
-        for i in self._graph.node_indices():
-            node = self._graph[i]
-            if node.kind == SymbolKind.MODULE:
-                module_indices.append(i)
+        module_indices = [
+            i for i in self._graph.node_indices()
+            if self._graph[i].kind == SymbolKind.MODULE
+        ]
         if len(module_indices) < 2:
-            return []
+            return rx.PyDiGraph(), {}
 
-        # Map every node index to the MODULE node for its file.
-        # This lets us aggregate per-symbol edges into module-level deps.
+        mod_graph = rx.PyDiGraph()
+        sid_to_midx: dict[str, int] = {}
+        for i in module_indices:
+            sid = self._graph[i].symbol_id
+            midx = mod_graph.add_node(sid)
+            sid_to_midx[sid] = midx
+
+        # Map every node to its module for aggregation
         node_to_module: dict[int, str] = {}
         for mi in module_indices:
             module_sid = self._graph[mi].symbol_id
@@ -1098,27 +1144,42 @@ class CodeGraph:
             for ni in self._file_to_nodes.get(file, []):
                 node_to_module[ni] = module_sid
 
-        dep_kinds = {EdgeKind.IMPORTS, EdgeKind.REFERENCES}
-        adj: dict[str, set[str]] = {
-            self._graph[i].symbol_id: set() for i in module_indices
-        }
-
         for edge_idx in self._graph.edge_indices():
-            try:
-                data: EdgeData = self._graph.get_edge_data_by_index(
-                    edge_idx
-                )
-            except Exception:
-                continue
-            if data.kind not in dep_kinds:
+            data = self._graph.get_edge_data_by_index(edge_idx)
+            if getattr(data, "kind", None) != EdgeKind.IMPORTS:
                 continue
             src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
             src_mod = node_to_module.get(src)
             tgt_mod = node_to_module.get(tgt)
-            if src_mod is None or tgt_mod is None:
-                continue
-            if src_mod != tgt_mod:
-                adj[src_mod].add(tgt_mod)
+            if src_mod and tgt_mod and src_mod != tgt_mod:
+                mi_src = sid_to_midx.get(src_mod)
+                mi_tgt = sid_to_midx.get(tgt_mod)
+                if mi_src is not None and mi_tgt is not None:
+                    mod_graph.add_edge(mi_src, mi_tgt, None)
+
+        return mod_graph, sid_to_midx
+
+    def import_cycles(self) -> list[list[str]]:
+        """Detect circular import chains in the module dependency graph.
+
+        Builds a module-level dependency graph from IMPORTS edges only.
+        Two modules are adjacent if one imports the other.
+
+        Returns a list of cycles, where each cycle is a list of
+        module symbol_ids in order.
+        """
+        mod_graph, _sid_to_midx = self._build_module_graph()
+        if mod_graph.num_nodes() < 2:
+            return []
+
+        # Build adjacency dict from the module graph
+        adj: dict[str, set[str]] = {
+            mod_graph[i]: set() for i in mod_graph.node_indices()
+        }
+
+        for edge_idx in mod_graph.edge_indices():
+            src, tgt = mod_graph.get_edge_endpoints_by_index(edge_idx)
+            adj[mod_graph[src]].add(mod_graph[tgt])
 
         # DFS-based cycle detection
         WHITE, GRAY, BLACK = 0, 1, 2
@@ -1179,60 +1240,15 @@ class CodeGraph:
         Unlike :meth:`import_cycles`, which enumerates every cycle path,
         this returns connected components in the module dependency graph —
         each group contains all modules that are reachable from each other
-        through import/reference edges.
+        through import edges.
 
         Returns a list of sets of module symbol_ids (one set per SCC
         with more than one module).  Singles (files with no cross-file
         deps) are excluded.
         """
-        module_indices: list[int] = []
-        for i in self._graph.node_indices():
-            node = self._graph[i]
-            if node.kind == SymbolKind.MODULE:
-                module_indices.append(i)
-        if len(module_indices) < 2:
+        mod_graph, _sid_to_midx = self._build_module_graph()
+        if mod_graph.num_nodes() < 2:
             return []
-
-        # Map every node index to the MODULE node for its file
-        node_to_module: dict[int, str] = {}
-        for mi in module_indices:
-            module_sid = self._graph[mi].symbol_id
-            file = file_from_symbol_id(module_sid)
-            for ni in self._file_to_nodes.get(file, []):
-                node_to_module[ni] = module_sid
-
-        # Build a module-level directed graph
-        # module_sid -> index in the temporary module graph
-        sid_to_midx: dict[str, int] = {
-            self._graph[i].symbol_id: j
-            for j, i in enumerate(module_indices)
-        }
-        mod_graph = rx.PyDiGraph()
-        mod_graph.add_nodes_from(
-            [self._graph[i].symbol_id for i in module_indices]
-        )
-
-        dep_kinds = {EdgeKind.IMPORTS, EdgeKind.REFERENCES}
-        for edge_idx in self._graph.edge_indices():
-            try:
-                data: EdgeData = self._graph.get_edge_data_by_index(
-                    edge_idx
-                )
-            except Exception:
-                continue
-            if data.kind not in dep_kinds:
-                continue
-            src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
-            src_mod = node_to_module.get(src)
-            tgt_mod = node_to_module.get(tgt)
-            if src_mod is None or tgt_mod is None:
-                continue
-            if src_mod == tgt_mod:
-                continue
-            mi_src = sid_to_midx.get(src_mod)
-            mi_tgt = sid_to_midx.get(tgt_mod)
-            if mi_src is not None and mi_tgt is not None:
-                mod_graph.add_edge(mi_src, mi_tgt, None)
 
         sccs = rx.strongly_connected_components(mod_graph)
         return [
