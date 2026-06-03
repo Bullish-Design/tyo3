@@ -8,6 +8,8 @@ from pathlib import PurePosixPath
 
 import pytest
 
+import pytest
+
 from tyo3.models.advanced import SemanticToken, SemanticTokenModifier, SemanticTokenType
 from tyo3.models.analysis import Diagnostic, DiagnosticSeverity, Position, Range
 from tyo3.models.core import (
@@ -19,6 +21,18 @@ from tyo3.models.core import (
 )
 from tyo3.models.navigation import DefinitionTarget, Reference, ReferenceKind
 from tyo3.models.symbols import Symbol, SymbolKind
+
+# ── Native extension detection ──────────────────────────────────────────
+
+try:
+    from tyo3 import _HAS_NATIVE
+except ImportError:
+    _HAS_NATIVE = False
+
+needs_native = pytest.mark.skipif(
+    not _HAS_NATIVE, reason="Rust native extension not built"
+)
+
 
 # ── Shared caches (session-scoped, shared across all test modules) ─────
 
@@ -80,6 +94,16 @@ def shared_session(fixture_name: str):
     if fixture_name not in _shared_session_cache:
         shared_graph(fixture_name)  # builds both session and graph
     return _shared_session_cache[fixture_name]
+
+
+def get_graph(fixture_name: str):
+    """Alias for shared_graph — get a cached CodeGraph."""
+    return shared_graph(fixture_name)
+
+
+def get_session(fixture_name: str):
+    """Alias for shared_session — get a cached TyO3Session."""
+    return shared_session(fixture_name)
 
 
 # ── Fixture helpers ─────────────────────────────────────────────────────

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from collections import defaultdict, deque
 from pathlib import PurePosixPath
 from typing import Any
@@ -32,6 +31,15 @@ class CodeGraph:
         self._id_to_index: dict[str, int] = {}
         self._file_to_nodes: dict[str, list[int]] = defaultdict(list)
         self._file_to_edges: dict[str, list[int]] = defaultdict(list)
+
+        # Pre-materialized range cache for _find_enclosing_symbol (B1)
+        #   file_str -> list of (start_line, start_col, end_line, end_col, symbol_id)
+        #   sorted by range size ascending (smallest first)
+        self._file_node_ranges: dict[str, list[tuple[int, int, int, int, str]]] = {}
+
+        # Secondary index for fast name@line lookups (B4)
+        #   (file, name_prefix) -> symbol_id
+        self._name_prefix_index: dict[tuple[str, str], str] = {}
 
         # Diagnostics (separate from graph)
         self._diagnostics: dict[str, list[Diagnostic]] = {}
@@ -67,7 +75,7 @@ class CodeGraph:
             logger.warning("Failed to get symbols for %s, skipping", file_str)
             return
 
-        # Create MODULE node for the file
+        # ── Phase 1: Collect all new nodes (module + symbols) ──
         module_id = f"{file_str}::<module>"
         module_node = SymbolNode(
             symbol_id=module_id,
@@ -79,11 +87,48 @@ class CodeGraph:
                 {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
             ),
         )
-        self._add_node(module_node)
 
-        # Add symbol nodes and containment edges
+        new_nodes: list[SymbolNode] = []
+        if module_id not in self._id_to_index:
+            new_nodes.append(module_node)
+
+        node_to_symbol: dict[str, Symbol] = {}  # symbol_id -> original Symbol
         for symbol in symbols:
-            self._add_symbol_node(file_str, symbol, module_id)
+            sid = symbol_id_from_symbol(file_str, symbol)
+            if sid not in self._id_to_index:
+                node = SymbolNode(
+                    symbol_id=sid,
+                    name=symbol.name,
+                    qualified_name=symbol.qualified_name or symbol.name,
+                    kind=symbol.kind,
+                    file=file_str,
+                    range=symbol.location.range,
+                    selection_range=symbol.selection_range,
+                )
+                new_nodes.append(node)
+            node_to_symbol[sid] = symbol
+
+        # ── Phase 2: Batch-add all new nodes in a single FFI call ──
+        if new_nodes:
+            indices = self._graph.add_nodes_from(new_nodes)
+            for node, idx in zip(new_nodes, indices):
+                self._id_to_index[node.symbol_id] = idx
+                self._file_to_nodes[node.file].append(idx)
+                # Index for fast name@line lookups (B4)
+                if "@" in node.symbol_id:
+                    parts = node.symbol_id.split("::", 1)
+                    if len(parts) == 2:
+                        name_part = parts[1].split("@", 1)[0]
+                        self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
+
+        # ── Phase 3: Add containment edges ──
+        for symbol in symbols:
+            sid = symbol_id_from_symbol(file_str, symbol)
+            parent_id = self._resolve_parent_id(file_str, symbol, module_id)
+            if parent_id and parent_id in self._id_to_index:
+                edge_kind = EdgeKind.DEFINES if parent_id == module_id else EdgeKind.CONTAINS
+                edge = EdgeData(kind=edge_kind)
+                self._add_edge(parent_id, sid, edge, file_str)
 
         # 2. Build reference edges using the batch occurrence API
         #    (Phase 5: single Rust call per file, O(1) FFI instead of O(tokens))
@@ -99,32 +144,18 @@ class CodeGraph:
         # 4. Resolve inheritance for CLASS nodes
         self._resolve_inheritance(session, file_str, symbols)
 
-    def _add_symbol_node(
-        self,
-        file_str: str,
-        symbol: Symbol,
-        module_id: str,
-    ) -> None:
-        """Create a SymbolNode from a TyO3 Symbol and add it to the graph."""
-        sid = symbol_id_from_symbol(file_str, symbol)
-
-        node = SymbolNode(
-            symbol_id=sid,
-            name=symbol.name,
-            qualified_name=symbol.qualified_name or symbol.name,
-            kind=symbol.kind,
-            file=file_str,
-            range=symbol.location.range,
-            selection_range=symbol.selection_range,
+        # 5. Pre-materialize range cache for _find_enclosing_symbol (B1)
+        self._file_node_ranges[file_str] = sorted(
+            [
+                (node.range.start.line, node.range.start.column,
+                 node.range.end.line, node.range.end.column,
+                 node.symbol_id)
+                for idx in self._file_to_nodes[file_str]
+                for node in [self._graph[idx]]
+                if node.kind != SymbolKind.MODULE
+            ],
+            key=lambda t: (t[2] - t[0], t[3] - t[1]),  # sort by range size ascending
         )
-        self._add_node(node)
-
-        # Containment edge: determine parent
-        parent_id = self._resolve_parent_id(file_str, symbol, module_id)
-        if parent_id and parent_id in self._id_to_index:
-            edge_kind = EdgeKind.DEFINES if parent_id == module_id else EdgeKind.CONTAINS
-            edge = EdgeData(kind=edge_kind)
-            self._add_edge(parent_id, sid, edge, file_str)
 
     def _resolve_parent_id(
         self,
@@ -147,21 +178,20 @@ class CodeGraph:
     def _find_symbol_in_file(self, file_path: str, name: str) -> str | None:
         """Find a symbol ID for *name* in *file_path*.
 
-        Tries exact match first, then matches by extracting the
-        name portion from symbol IDs that use ``name@line`` format,
-        then falls back to matching by ``node.name`` within the file.
+        Tries exact match first, then uses the ``_name_prefix_index``
+        for fast ``name@line`` lookups (B4), then falls back to
+        matching by ``node.name`` within the file.
         """
         exact = f"{file_path}::{name}"
         if exact in self._id_to_index:
             return exact
-        # Try matching any symbol_id that starts with file::name@
-        prefix = f"{file_path}::{name}@"
-        for sid in self._id_to_index:
-            if sid.startswith(prefix):
-                return sid
+        # Fast name@line lookup via secondary index (B4)
+        cached = self._name_prefix_index.get((file_path, name))
+        if cached is not None:
+            return cached
         # Fallback: search by short name within the file's nodes.
         # Handles qualified-name mismatches where the SID is
-        # e.g. "models.py::models.User" but we only have "User".
+        # e.g. "models.py::Models" but we only have "User".
         for idx in self._file_to_nodes.get(file_path, []):
             node: SymbolNode = self._graph[idx]
             if node.name == name:
@@ -530,10 +560,9 @@ class CodeGraph:
             queue: deque[str] = deque([sid])
             while queue:
                 current_sid = queue.popleft()
-                for succ_idx in self._graph.neighbors(self._id_to_index[current_sid]):
-                    for edge_data in self._graph.get_all_edge_data(self._id_to_index[current_sid], succ_idx):
-                        if edge_data.kind != EdgeKind.INHERITS:
-                            continue
+                for _src, succ_idx, edge_data in self._graph.out_edges(self._id_to_index[current_sid]):
+                    if edge_data.kind != EdgeKind.INHERITS:
+                        continue
                         parent_sid = self._graph[succ_idx].symbol_id
                         if parent_sid not in visited:
                             visited.add(parent_sid)
@@ -553,34 +582,25 @@ class CodeGraph:
     def _find_enclosing_symbol(self, file_str: str, range: Range) -> str | None:
         """Find the innermost symbol in file_str that contains the given range.
 
-        Returns the symbol_id, or the module node if no enclosing symbol is found.
+        Uses the pre-materialized range cache (B1) to avoid per-node
+        FFI calls.  The cache is sorted by range size ascending, so the
+        first containment match is the smallest enclosing symbol.
+
+        Returns the symbol_id, or the module node if no enclosing symbol
+        is found.
         """
-        node_indices = self._file_to_nodes.get(file_str, [])
-        best_id: str | None = None
-        best_size: int = sys.maxsize
+        cached = self._file_node_ranges.get(file_str, [])
+        for start_line, start_col, end_line, end_col, sid in cached:
+            # Check containment: node range must fully contain the target range
+            if (start_line, start_col) <= (range.start.line, range.start.column) and \
+               (end_line, end_col) >= (range.end.line, range.end.column):
+                return sid  # First match is smallest due to sort order
 
-        for idx in node_indices:
-            node: SymbolNode = self._graph[idx]
-            if node.kind == SymbolKind.MODULE:
-                continue
-            nr = node.range
-            # Check if node's range contains the reference range
-            if (
-                (nr.start.line, nr.start.column) <= (range.start.line, range.start.column)
-                and (nr.end.line, nr.end.column) >= (range.end.line, range.end.column)
-            ):
-                size = (nr.end.line - nr.start.line) * 10000 + (nr.end.column - nr.start.column)
-                if size < best_size:
-                    best_size = size
-                    best_id = node.symbol_id
-
-        if best_id is None:
-            # Fall back to module node
-            module_id = f"{file_str}::<module>"
-            if module_id in self._id_to_index:
-                return module_id
-
-        return best_id
+        # Fall back to module node
+        module_id = f"{file_str}::<module>"
+        if module_id in self._id_to_index:
+            return module_id
+        return None
 
     # ── Internal graph mutation ───────────────────────────────
 
@@ -591,6 +611,12 @@ class CodeGraph:
         idx = self._graph.add_node(node)
         self._id_to_index[node.symbol_id] = idx
         self._file_to_nodes[node.file].append(idx)
+        # Index for fast name@line lookups (B4)
+        if "@" in node.symbol_id:
+            parts = node.symbol_id.split("::", 1)
+            if len(parts) == 2:
+                name_part = parts[1].split("@", 1)[0]
+                self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
         return idx
 
     def _add_edge(
@@ -604,6 +630,45 @@ class CodeGraph:
         edge_idx = self._graph.add_edge(src_idx, tgt_idx, data)
         self._file_to_edges[file].append(edge_idx)
         return edge_idx
+
+    def _rebuild_indexes(self) -> None:
+        """Reconstruct all secondary indexes from the graph's current state.
+
+        Call this after any bulk node/edge removal (e.g. remove_nodes_from)
+        since RustworkX's swap-and-pop invalidates stored indices.
+        """
+        self._id_to_index.clear()
+        self._file_to_nodes.clear()
+        self._file_to_edges.clear()
+        self._file_node_ranges.clear()
+        self._name_prefix_index.clear()
+        for idx in self._graph.node_indices():
+            node: SymbolNode = self._graph[idx]
+            self._id_to_index[node.symbol_id] = idx
+            self._file_to_nodes[node.file].append(idx)
+            # Rebuild name_prefix_index (B4)
+            if "@" in node.symbol_id:
+                parts = node.symbol_id.split("::", 1)
+                if len(parts) == 2:
+                    name_part = parts[1].split("@", 1)[0]
+                    self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
+        for edge_idx in self._graph.edge_indices():
+            data = self._graph.get_edge_data_by_index(edge_idx)
+            if data is not None and hasattr(data, 'file') and data.file is not None:
+                self._file_to_edges[data.file].append(edge_idx)
+        # Rebuild range cache (B1)
+        for file_str in self._file_to_nodes:
+            self._file_node_ranges[file_str] = sorted(
+                [
+                    (node.range.start.line, node.range.start.column,
+                     node.range.end.line, node.range.end.column,
+                     node.symbol_id)
+                    for idx in self._file_to_nodes[file_str]
+                    for node in [self._graph[idx]]
+                    if node.kind != SymbolKind.MODULE
+                ],
+                key=lambda t: (t[2] - t[0], t[3] - t[1]),
+            )
 
     def _add_stub_node(
         self,
@@ -687,11 +752,12 @@ class CodeGraph:
 
     def symbols_of_kind(self, kind: SymbolKind) -> list[SymbolNode]:
         """All symbols of a given kind."""
-        return [
-            self._graph[i]
-            for i in self._graph.node_indices()
-            if self._graph[i].kind == kind
-        ]
+        result: list[SymbolNode] = []
+        for i in self._graph.node_indices():
+            node = self._graph[i]
+            if node.kind == kind:
+                result.append(node)
+        return result
 
     # ── Reference queries ─────────────────────────────────────
 
@@ -790,10 +856,11 @@ class CodeGraph:
         Returns a list of cycles, where each cycle is a list of
         module symbol_ids in order.
         """
-        module_indices = [
-            i for i in self._graph.node_indices()
-            if self._graph[i].kind == SymbolKind.MODULE
-        ]
+        module_indices: list[int] = []
+        for i in self._graph.node_indices():
+            node = self._graph[i]
+            if node.kind == SymbolKind.MODULE:
+                module_indices.append(i)
         if len(module_indices) < 2:
             return []
 
@@ -803,9 +870,8 @@ class CodeGraph:
         for mi in module_indices:
             module_sid = self._graph[mi].symbol_id
             file = file_from_symbol_id(module_sid)
-            for ni in self._graph.node_indices():
-                if self._graph[ni].file == file:
-                    node_to_module[ni] = module_sid
+            for ni in self._file_to_nodes.get(file, []):
+                node_to_module[ni] = module_sid
 
         dep_kinds = {EdgeKind.IMPORTS, EdgeKind.REFERENCES}
         adj: dict[str, set[str]] = {
@@ -880,9 +946,110 @@ class CodeGraph:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_n]
 
+    def import_cycle_groups(self) -> list[set[str]]:
+        """Groups of mutually-dependent modules (strongly connected components).
+
+        Unlike :meth:`import_cycles`, which enumerates every cycle path,
+        this returns connected components in the module dependency graph —
+        each group contains all modules that are reachable from each other
+        through import/reference edges.
+
+        Returns a list of sets of module symbol_ids (one set per SCC
+        with more than one module).  Singles (files with no cross-file
+        deps) are excluded.
+        """
+        module_indices: list[int] = []
+        for i in self._graph.node_indices():
+            node = self._graph[i]
+            if node.kind == SymbolKind.MODULE:
+                module_indices.append(i)
+        if len(module_indices) < 2:
+            return []
+
+        # Map every node index to the MODULE node for its file
+        node_to_module: dict[int, str] = {}
+        for mi in module_indices:
+            module_sid = self._graph[mi].symbol_id
+            file = file_from_symbol_id(module_sid)
+            for ni in self._file_to_nodes.get(file, []):
+                node_to_module[ni] = module_sid
+
+        # Build a module-level directed graph
+        # module_sid -> index in the temporary module graph
+        sid_to_midx: dict[str, int] = {
+            self._graph[i].symbol_id: j for j, i in enumerate(module_indices)
+        }
+        mod_graph = rx.PyDiGraph()
+        mod_graph.add_nodes_from(
+            [self._graph[i].symbol_id for i in module_indices]
+        )
+
+        dep_kinds = {EdgeKind.IMPORTS, EdgeKind.REFERENCES}
+        for edge_idx in self._graph.edge_indices():
+            try:
+                data: EdgeData = self._graph.get_edge_data_by_index(edge_idx)
+            except Exception:
+                continue
+            if data.kind not in dep_kinds:
+                continue
+            src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
+            src_mod = node_to_module.get(src)
+            tgt_mod = node_to_module.get(tgt)
+            if src_mod is None or tgt_mod is None:
+                continue
+            if src_mod == tgt_mod:
+                continue
+            mi_src = sid_to_midx.get(src_mod)
+            mi_tgt = sid_to_midx.get(tgt_mod)
+            if mi_src is not None and mi_tgt is not None:
+                mod_graph.add_edge(mi_src, mi_tgt, None)
+
+        sccs = rx.strongly_connected_components(mod_graph)
+        return [
+            {mod_graph[i] for i in scc}
+            for scc in sccs if len(scc) > 1
+        ]
+
+    def is_reachable(self, from_sid: str, to_sid: str) -> bool:
+        """Check if there is a directed path from one symbol to another.
+
+        Uses RustworkX's ``has_path`` which performs BFS/DFS to determine
+        connectivity.
+        """
+        src = self._id_to_index.get(from_sid)
+        tgt = self._id_to_index.get(to_sid)
+        if src is None or tgt is None:
+            return False
+        return rx.has_path(self._graph, src, tgt, as_undirected=False)
+
+    @property
+    def has_cycles(self) -> bool:
+        """Quick check for any cycles in the graph.
+
+        Returns True if the graph contains at least one directed cycle.
+        Uses RustworkX's ``is_directed_acyclic_graph``.
+        """
+        return not rx.is_directed_acyclic_graph(self._graph)
+
+    def topological_order(self) -> list[str]:
+        """Return symbol IDs in dependency order.
+
+        Returns an empty list if the graph has cycles.
+        Uses RustworkX's ``topological_sort``.
+        """
+        try:
+            order = rx.topological_sort(self._graph)
+        except rx.DAGHasCycle:
+            return []
+        return [self._graph[i].symbol_id for i in order]
+
     def subgraph_for_file(self, file_path: str) -> rx.PyDiGraph:
         """Extract a subgraph containing all symbols defined in a file
         and their immediate reference neighbours (within the project).
+
+        Uses ``subgraph_with_nodemap`` (B2) for a single Rust call that
+        copies nodes and all edges between included nodes, replacing the
+        O(E_total) edge scan with Rust-side filtering.
 
         Returns a new PyDiGraph that can be queried, exported, or
         visualized independently of the main graph.
@@ -891,7 +1058,7 @@ class CodeGraph:
         if not core_indices:
             return rx.PyDiGraph()
 
-        # Include immediate neighbours (referenced symbols and referrers)
+        # Include immediate neighbours (1-hop)
         included = set(core_indices)
         for ci in core_indices:
             for succ in self._graph.neighbors(ci):
@@ -899,18 +1066,8 @@ class CodeGraph:
             for pred in self._graph.predecessor_indices(ci):
                 included.add(pred)
 
-        sub = rx.PyDiGraph()
-        old_to_new: dict[int, int] = {}
-        for idx in included:
-            new_idx = sub.add_node(self._graph[idx])
-            old_to_new[idx] = new_idx
-
-        for edge_idx in self._graph.edge_indices():
-            src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
-            if src in old_to_new and tgt in old_to_new:
-                data = self._graph.get_edge_data_by_index(edge_idx)
-                sub.add_edge(old_to_new[src], old_to_new[tgt], data)
-
+        # Single Rust call: copies nodes and all edges between included nodes
+        sub, _node_map = self._graph.subgraph_with_nodemap(sorted(included))
         return sub
 
     # ── Incremental updates ───────────────────────────────────
@@ -925,58 +1082,52 @@ class CodeGraph:
         :meth:`_resolve_references_via_occurrences` calls
         ``goto_definition`` / ``file_occurrences`` again.
         """
-        # 1. Remove all nodes defined in this file
-        old_indices = list(self._file_to_nodes.get(path, []))
-        old_ids = [self._graph[i].symbol_id for i in old_indices]
-        for idx in sorted(old_indices, reverse=True):
-            try:
-                self._graph.remove_node(idx)
-            except Exception:
-                pass
-        for sid in old_ids:
-            self._id_to_index.pop(sid, None)
-        self._file_to_nodes.pop(path, None)
-
-        # 2. Remove all edges originating from this file
-        old_edge_indices = list(self._file_to_edges.get(path, []))
-        for edge_idx in sorted(old_edge_indices, reverse=True):
-            try:
-                self._graph.remove_edge_from_index(edge_idx)
-            except Exception:
-                pass
-        self._file_to_edges.pop(path, None)
-
-        # 3. Remove diagnostics for this file
+        old_node_indices = list(self._file_to_nodes.get(path, []))
+        if old_node_indices:
+            # remove_nodes_from handles index compaction internally,
+            # automatically removes incident edges, and ignores invalid indices.
+            self._graph.remove_nodes_from(old_node_indices)
+            # Rebuild all secondary indexes since swap-and-pop invalidates them.
+            self._rebuild_indexes()
         self._diagnostics.pop(path, None)
-
-        # 4. Re-index
         self._index_file(session, path)
 
     # ── Previously implemented algorithms ─────────────────────
 
     def coupling_between(self, file_a: str, file_b: str) -> int:
-        """Count REFERENCES edges between two files."""
-        count = 0
+        """Count REFERENCES edges between two files.
+
+        Uses targeted ``out_edges()`` calls (B3) instead of scanning
+        all edges in the graph, reducing the operation from O(E_total)
+        to O(E_file_a + E_file_b).
+        """
         nodes_a = set(self._file_to_nodes.get(file_a, []))
         nodes_b = set(self._file_to_nodes.get(file_b, []))
-        for edge_idx in self._graph.edge_indices():
-            src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
-            data: EdgeData = self._graph.get_edge_data_by_index(edge_idx)
-            if data.kind != EdgeKind.REFERENCES:
-                continue
-            if (src in nodes_a and tgt in nodes_b) or (src in nodes_b and tgt in nodes_a):
-                count += 1
+        if not nodes_a or not nodes_b:
+            return 0
+        count = 0
+        # Count REFERENCES edges from A -> B
+        for idx in nodes_a:
+            for _src, tgt, data in self._graph.out_edges(idx):
+                if data.kind == EdgeKind.REFERENCES and tgt in nodes_b:
+                    count += 1
+        # Count REFERENCES edges from B -> A
+        for idx in nodes_b:
+            for _src, tgt, data in self._graph.out_edges(idx):
+                if data.kind == EdgeKind.REFERENCES and tgt in nodes_a:
+                    count += 1
         return count
 
     # ── External symbol resolution ───────────────────────────
 
     def external_symbols(self) -> list[SymbolNode]:
         """All stub nodes for external (dependency) symbols."""
-        return [
-            self._graph[i]
-            for i in self._graph.node_indices()
-            if self._graph[i].external
-        ]
+        result: list[SymbolNode] = []
+        for i in self._graph.node_indices():
+            node = self._graph[i]
+            if node.external:
+                result.append(node)
+        return result
 
     def external_symbols_by_package(self) -> dict[str, list[SymbolNode]]:
         """Group external symbol stub nodes by package."""

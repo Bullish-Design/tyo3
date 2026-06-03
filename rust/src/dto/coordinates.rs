@@ -1,9 +1,10 @@
 use pyo3::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tyo3_derive::PyFields;
 
-#[pyclass(name = "NativePosition", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativePosition", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct PositionDto {
     /// 1-based line number
     #[pyo3(get)]
@@ -35,8 +36,8 @@ impl PositionDto {
     }
 }
 
-#[pyclass(name = "NativeRange", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeRange", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct RangeDto {
     #[pyo3(get)]
     pub start: PositionDto,
@@ -69,8 +70,8 @@ impl RangeDto {
     }
 }
 
-#[pyclass(name = "NativeFileRange", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeFileRange", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct FileRangeDto {
     #[pyo3(get)]
     pub path: String,

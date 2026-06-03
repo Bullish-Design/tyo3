@@ -8,8 +8,11 @@ name = "_native_impl"
 crate-type = ["cdylib"]
 
 [dependencies]
+# ── TyO3 internal ────────────────────────────────────
+tyo3-derive = { path = "tyo3-derive" }
+
 # ── PyO3 ───────────────────────────────────────────────
-pyo3 = { version = "0.23", features = ["extension-module"] }
+pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods"] }
 
 # ── Serialisation ──────────────────────────────────────
 serde = { version = "1", features = ["derive"] }

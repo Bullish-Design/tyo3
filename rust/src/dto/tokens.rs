@@ -1,8 +1,9 @@
 use crate::dto::RangeDto;
 use pyo3::prelude::*;
+use tyo3_derive::PyFields;
 
 /// Semantic token type classification.
-#[pyclass(eq, name = "NativeSemanticTokenType", module = "tyo3._native_impl")]
+#[pyclass(eq, name = "NativeSemanticTokenType", from_py_object, module = "tyo3._native_impl")]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticTokenTypeDto {
@@ -51,7 +52,7 @@ impl SemanticTokenTypeDto {
 }
 
 /// Semantic token modifier.
-#[pyclass(eq, name = "NativeSemanticTokenModifier", module = "tyo3._native_impl")]
+#[pyclass(eq, name = "NativeSemanticTokenModifier", from_py_object, module = "tyo3._native_impl")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticTokenModifierDto {
@@ -78,8 +79,8 @@ impl SemanticTokenModifierDto {
 }
 
 /// A single classified semantic token.
-#[pyclass(name = "NativeSemanticToken", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeSemanticToken", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct SemanticTokenDto {
     #[pyo3(get)]
     pub range: RangeDto,

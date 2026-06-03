@@ -1,7 +1,8 @@
 use crate::dto::FileRangeDto;
 use pyo3::prelude::*;
+use tyo3_derive::PyFields;
 
-#[pyclass(eq, name = "NativeHoverContentKind", module = "tyo3._native_impl")]
+#[pyclass(eq, name = "NativeHoverContentKind", from_py_object, module = "tyo3._native_impl")]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HoverContentKindDto {
@@ -31,8 +32,8 @@ impl HoverContentKindDto {
     }
 }
 
-#[pyclass(name = "NativeHoverContent", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeHoverContent", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct HoverContentDto {
     #[pyo3(get)]
     pub kind: HoverContentKindDto,
@@ -56,8 +57,8 @@ impl HoverContentDto {
     }
 }
 
-#[pyclass(name = "NativeHover", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeHover", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct HoverDto {
     #[pyo3(get)]
     pub location: FileRangeDto,

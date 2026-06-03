@@ -8,7 +8,9 @@ from pathlib import Path
 
 import rustworkx as rx
 
-from tyo3.graph.models import SymbolNode
+from typing import Any
+
+from tyo3.graph.models import EdgeData, EdgeKind, SymbolNode
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +48,12 @@ class DependencyGraph:
 
     def symbols_of_kind(self, kind: str) -> list[SymbolNode]:
         """All symbols of a given kind in this dependency."""
-        return [
-            self.graph[i]
-            for i in self.graph.node_indices()
-            if self.graph[i].kind == kind
-        ]
+        result: list[SymbolNode] = []
+        for i in self.graph.node_indices():
+            node = self.graph[i]
+            if node.kind == kind:
+                result.append(node)
+        return result
 
     def all_symbols(self) -> list[SymbolNode]:
         """All symbols in this dependency graph."""
@@ -74,7 +77,19 @@ class DependencyGraph:
         edges = []
         for edge_idx in self.graph.edge_indices():
             src, tgt = self.graph.get_edge_endpoints_by_index(edge_idx)
-            edges.append({"src": src, "tgt": tgt})
+            raw = self.graph.get_edge_data_by_index(edge_idx)
+            edge_dict: dict[str, Any] = {
+                "src_id": self.graph[src].symbol_id,
+                "tgt_id": self.graph[tgt].symbol_id,
+            }
+            if raw is not None:
+                edge_data_dict: dict[str, str] = {"kind": raw.kind.value}
+                if raw.file:
+                    edge_data_dict["file"] = raw.file
+                if raw.role:
+                    edge_data_dict["role"] = raw.role.value
+                edge_dict["data"] = edge_data_dict
+            edges.append(edge_dict)
 
         data = {
             "package": self.package,
@@ -107,9 +122,28 @@ class DependencyGraph:
                 idx = graph.add_node(node)
                 id_to_index[node.symbol_id] = idx
 
-            for edge_data in data["edges"]:
-                if edge_data["src"] < graph.num_nodes() and edge_data["tgt"] < graph.num_nodes():
-                    graph.add_edge(edge_data["src"], edge_data["tgt"], None)
+            for edge_data in data.get("edges", []):
+                # New format: symbol_id-based
+                src_idx = id_to_index.get(edge_data.get("src_id"))
+                tgt_idx = id_to_index.get(edge_data.get("tgt_id"))
+                if src_idx is not None and tgt_idx is not None:
+                    raw_edge = edge_data.get("data")
+                    if raw_edge is not None:
+                        edge_obj = EdgeData(
+                            kind=EdgeKind(raw_edge["kind"]),
+                            file=raw_edge.get("file"),
+                            role=raw_edge.get("role"),
+                        )
+                    else:
+                        edge_obj = None
+                    graph.add_edge(src_idx, tgt_idx, edge_obj)
+                    continue
+
+                # Fallback for old format ("src"/"tgt" with integer values)
+                if "src_id" not in edge_data and "src" in edge_data:
+                    src_val, tgt_val = edge_data["src"], edge_data["tgt"]
+                    if src_val < graph.num_nodes() and tgt_val < graph.num_nodes():
+                        graph.add_edge(src_val, tgt_val, None)
 
             return cls(package, version, graph, id_to_index)
         except Exception:

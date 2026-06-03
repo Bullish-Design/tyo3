@@ -1,7 +1,8 @@
 use crate::dto::RangeDto;
 use pyo3::prelude::*;
+use tyo3_derive::PyFields;
 
-#[pyclass(eq, name = "NativeSeverity", module = "tyo3._native_impl")]
+#[pyclass(eq, name = "NativeSeverity", from_py_object, module = "tyo3._native_impl")]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SeverityDto {
@@ -29,8 +30,8 @@ impl SeverityDto {
     }
 }
 
-#[pyclass(name = "NativeDiagnostic", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeDiagnostic", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct DiagnosticDto {
     #[pyo3(get)]
     pub file: Option<String>,

@@ -1,8 +1,9 @@
 use crate::dto::{RangeDto, SymbolDto};
 use pyo3::prelude::*;
+use tyo3_derive::PyFields;
 
-#[pyclass(name = "NativeDefinitionTarget", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeDefinitionTarget", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct DefinitionTargetDto {
     #[pyo3(get)]
     pub path: String,
@@ -44,7 +45,7 @@ impl DefinitionTargetDto {
     }
 }
 
-#[pyclass(eq, name = "NativeReferenceKind", module = "tyo3._native_impl")]
+#[pyclass(eq, name = "NativeReferenceKind", from_py_object, module = "tyo3._native_impl")]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReferenceKindDto {
@@ -68,8 +69,8 @@ impl ReferenceKindDto {
     }
 }
 
-#[pyclass(name = "NativeReference", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeReference", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct ReferenceDto {
     #[pyo3(get)]
     pub path: String,

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-03
 **Scope:** All RustworkX call sites across `graph.py`, `dependency.py`, `export.py`, plus the Python bridge layer (`rust_project.py`) and domain model concerns.
-**Sources:** Intern's initial audit (GRAPH_CODE_REVIEW.md, GRAPH_OPTIMIZATION_OVERVIEW.md), independent code review, and RustworkX API verification against our installed rustworkx 0.16+.
+**Sources:** Initial audit (GRAPH_CODE_REVIEW.md, GRAPH_OPTIMIZATION_OVERVIEW.md), independent code review, and RustworkX API verification against our installed rustworkx 0.16+.
 
 ---
 

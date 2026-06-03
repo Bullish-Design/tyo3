@@ -16,63 +16,47 @@ from tyo3.graph.models import EdgeData, EdgeKind, SymbolNode
 def to_dot(graph: Any, *, max_nodes: int | None = None) -> str:
     """Export the graph in DOT format for Graphviz visualization.
 
+    Uses RustworkX's built-in ``to_dot()`` generator, which handles
+    escaping, formatting, and edge deduplication correctly.
+
     Args:
         graph: A ``CodeGraph`` instance.
-        max_nodes: If set, limit output to the first *max_nodes* nodes.
-                   Useful for large graphs where the full DOT would be
-                   unwieldy.
+        max_nodes: If set, limit output to the first *max_nodes* nodes
+                   by taking a subgraph before DOT generation.
 
     Returns a DOT-format string suitable for ``dot``, ``neato``, etc.
     """
     g = graph.graph
-    lines = ["digraph CodeGraph {", "  rankdir=LR;", "  node [shape=box];"]
+    if max_nodes is not None:
+        indices = list(g.node_indices())[:max_nodes]
+        g, _ = g.subgraph_with_nodemap(indices)
 
-    count = 0
-    for idx in g.node_indices():
-        if max_nodes is not None and count >= max_nodes:
-            break
-        count += 1
-        node: SymbolNode = g[idx]
-        label = _dot_label(node)
-        color = _kind_color(str(node.kind.value))
-        style = "dashed" if node.external else "solid"
-        escaped_label = label.replace('"', '\\"')
-        lines.append(
-            f'  n{idx} [label="{escaped_label}", '
-            f'color="{color}", style="{style}", fontname="monospace"];'
-        )
-
-    count = 0
-    for edge_idx in g.edge_indices():
-        if max_nodes is not None and count >= max_nodes * 3:
-            break
-        count += 1
-        src, tgt = g.get_edge_endpoints_by_index(edge_idx)
-        if max_nodes is not None and (src >= max_nodes or tgt >= max_nodes):
-            continue
-        data: EdgeData = g.get_edge_data_by_index(edge_idx)
-        kind = data.kind.value
-        style, color = _edge_style(kind)
-        label = kind if kind != "references" else ""
-        attr = f'label="{label}" color="{color}" style="{style}"'
-        lines.append(f"  n{src} -> n{tgt} [{attr}];")
-
-    lines.append("}")
-    return "\n".join(lines)
+    return g.to_dot(
+        node_attr=lambda node: {
+            "label": _dot_label(node),
+            "color": _kind_color(str(node.kind.value)),
+            "style": "dashed" if node.external else "solid",
+            "fontname": "monospace",
+            "shape": "box",
+        },
+        edge_attr=lambda edge: {
+            "label": "" if edge.kind == EdgeKind.REFERENCES else edge.kind.value,
+            "color": _edge_style(edge.kind.value)[1],
+            "style": _edge_style(edge.kind.value)[0],
+        },
+        graph_attr={"rankdir": "LR"},
+    )
 
 
 def _dot_label(node: SymbolNode) -> str:
     """Build a human-readable DOT label for a symbol node."""
     suffix = ""
     if node.signature:
-        suffix = f"\\n{_escape_dot(node.signature)}"
+        # Newlines in labels use \\n per DOT spec; RustworkX's to_dot()
+        # handles escaping of special characters (quotes, braces, etc.).
+        suffix = f"\\n{node.signature}"
     prefix = f"[{node.package}] " if node.external and node.package else ""
     return f"{prefix}{node.name}{suffix}"
-
-
-def _escape_dot(text: str) -> str:
-    """Escape characters that DOT treats specially."""
-    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _kind_color(kind: str) -> str:

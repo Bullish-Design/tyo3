@@ -1,8 +1,9 @@
 use crate::dto::RangeDto;
 use pyo3::prelude::*;
+use tyo3_derive::PyFields;
 
 /// Reference role classification matching Python-side ReferenceRole.
-#[pyclass(eq, name = "NativeReferenceRole", module = "tyo3._native_impl")]
+#[pyclass(eq, name = "NativeReferenceRole", from_py_object, module = "tyo3._native_impl")]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ReferenceRoleDto {
     Read,
@@ -34,8 +35,8 @@ impl ReferenceRoleDto {
 /// Each occurrence records where a name appears (range), what symbol it
 /// resolves to (target_file / target_name / target_qualified_name), and
 /// the reference role (read, write, import, or definition).
-#[pyclass(name = "NativeNameOccurrence", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeNameOccurrence", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct NameOccurrenceDto {
     /// The source range where this name appears.
     #[pyo3(get)]

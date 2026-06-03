@@ -1,7 +1,8 @@
 use crate::dto::{FileRangeDto, RangeDto};
 use pyo3::prelude::*;
+use tyo3_derive::PyFields;
 
-#[pyclass(eq, name = "NativeSymbolKind", module = "tyo3._native_impl")]
+#[pyclass(eq, name = "NativeSymbolKind", from_py_object, module = "tyo3._native_impl")]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKindDto {
@@ -47,8 +48,8 @@ impl SymbolKindDto {
     }
 }
 
-#[pyclass(name = "NativeSymbol", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeSymbol", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct SymbolDto {
     #[pyo3(get)]
     pub name: String,

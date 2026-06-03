@@ -47,6 +47,19 @@ fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<dto::ReferenceRoleDto>()?;
     m.add_class::<dto::NameOccurrenceDto>()?;
 
+    // Enum type registry — Python uses this to identify PyO3 enum variants
+    // for str() conversion instead of dir()-based introspection.
+    // When adding a new PyO3 enum, add it here too.
+    m.add("_TYO3_ENUM_TYPES", vec![
+        m.getattr("NativeSymbolKind")?,
+        m.getattr("NativeSeverity")?,
+        m.getattr("NativeReferenceKind")?,
+        m.getattr("NativeReferenceRole")?,
+        m.getattr("NativeSemanticTokenType")?,
+        m.getattr("NativeSemanticTokenModifier")?,
+        m.getattr("NativeHoverContentKind")?,
+    ])?;
+
     // Exception types
     m.add("ProjectClosedError", m.py().get_type::<ProjectClosedError>())?;
     m.add("PathResolutionError", m.py().get_type::<PathResolutionError>())?;

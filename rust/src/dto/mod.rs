@@ -16,21 +16,10 @@ pub use hover::*;
 pub use tokens::*;
 
 use pyo3::prelude::*;
+use tyo3_derive::PyFields;
 
-// Spec-anticipation: not yet wired to a Python-accessible endpoint.
-// Kept for the spec shape; will be promoted when a backend_info() method exists.
-#[allow(dead_code)]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BackendInfoDto {
-    pub tyo3_version: String,
-    pub ty_version: Option<String>,
-    pub ty_commit: Option<String>,
-    pub ruff_submodule_commit: Option<String>,
-    pub backend_source: Option<String>,
-}
-
-#[pyclass(name = "NativeCheckResult", frozen, module = "tyo3._native_impl")]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[pyclass(name = "NativeCheckResult", frozen, from_py_object, module = "tyo3._native_impl")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PyFields)]
 pub struct CheckResultDto {
     #[pyo3(get)]
     pub diagnostics: Vec<DiagnosticDto>,
