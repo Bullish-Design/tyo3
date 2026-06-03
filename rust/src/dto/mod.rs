@@ -3,11 +3,15 @@ mod diagnostics;
 mod symbols;
 mod navigation;
 mod hover;
+mod hierarchy;
+mod tokens;
 pub use coordinates::*;
 pub use diagnostics::*;
+pub use hierarchy::*;
 pub use symbols::*;
 pub use navigation::*;
 pub use hover::*;
+pub use tokens::*;
 
 use pyo3::prelude::*;
 

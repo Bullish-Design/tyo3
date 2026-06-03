@@ -478,6 +478,70 @@ impl PyTyProject {
         Ok(references)
     }
 
+    // ── Semantic Tokens ─────────────────────────────────────────
+
+    /// Return semantic tokens for a file.
+    fn semantic_tokens(&self, path: &str) -> PyResult<Vec<dto::SemanticTokenDto>> {
+        let guard = lock_state(&self.inner, "semantic_tokens")?;
+        let state = guard.as_ref().unwrap();
+
+        let (file, source_str) = resolve_file_and_source(state, path)?;
+        let line_index = LineIndex::from_source_text(&source_str);
+
+        let tokens = ty_ide::semantic_tokens(&state.db, file, None);
+
+        Ok(convert::tokens::convert_semantic_tokens(
+            &source_str,
+            &line_index,
+            &tokens,
+        ))
+    }
+
+    // ── Type Hierarchy ──────────────────────────────────────────
+
+    /// Query type hierarchy at a position: returns the item with supertypes and subtypes.
+    fn type_hierarchy(
+        &self,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Option<dto::TypeHierarchyDto>> {
+        let guard = lock_state(&self.inner, "type_hierarchy")?;
+        let state = guard.as_ref().unwrap();
+
+        let (file, source_str) = resolve_file_and_source(state, path)?;
+        let line_index = LineIndex::from_source_text(&source_str);
+        let offset = coordinates::position_to_offset_with_index(
+            &source_str, &line_index, line, column,
+        )
+        .map_err(|e| PositionError::new_err(e))?;
+
+        // Step 1: Prepare the hierarchy item at this position
+        let prepared = ty_ide::prepare_type_hierarchy(&state.db, file, offset);
+        let item = match prepared {
+            Some(item) => item,
+            None => return Ok(None),
+        };
+
+        // Step 2: Resolve supertypes and subtypes using the prepared item
+        let supertypes = ty_ide::type_hierarchy_supertypes(
+            &state.db, item.file, item.selection_range.start(),
+        );
+        let subtypes = ty_ide::type_hierarchy_subtypes(
+            &state.db, item.file, item.selection_range.start(),
+        );
+
+        let item_dto = convert::hierarchy::convert_hierarchy_item(&state.db, &item);
+        let supertypes_dto = convert::hierarchy::convert_hierarchy_items(&state.db, &supertypes);
+        let subtypes_dto = convert::hierarchy::convert_hierarchy_items(&state.db, &subtypes);
+
+        Ok(Some(dto::TypeHierarchyDto {
+            item: item_dto,
+            supertypes: supertypes_dto,
+            subtypes: subtypes_dto,
+        }))
+    }
+
     // ── Hover ────────────────────────────────────────────────────────
 
     /// Get hover information for the symbol at the given position.

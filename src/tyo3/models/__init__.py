@@ -27,6 +27,8 @@ from tyo3.models.navigation import (
     HoverResult,
     Reference,
     ReferenceKind,
+    TypeHierarchy,
+    TypeHierarchyItem,
 )
 from tyo3.models.symbols import Symbol, SymbolKind
 
@@ -59,6 +61,8 @@ __all__ = [  # noqa: F405
     "Reference",
     "HoverContent",
     "HoverResult",
+    "TypeHierarchyItem",
+    "TypeHierarchy",
     # Advanced
     "SemanticTokenType",
     "SemanticTokenModifier",

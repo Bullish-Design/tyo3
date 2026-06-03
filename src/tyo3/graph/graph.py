@@ -78,11 +78,9 @@ class CodeGraph:
         for symbol in symbols:
             self._add_symbol_node(file_str, symbol, module_id)
 
-        # 2. Build reference edges using find_references per symbol
-        #    This is the slow path — O(symbols) cursor calls per file.
-        #    Phase 2 replaces this with semantic tokens.
-        for symbol in symbols:
-            self._resolve_references_for_symbol(session, file_str, symbol)
+        # 2. Build reference edges using semantic tokens + goto_definition
+        #    (Phase 2: replaces the slow per-symbol find_references loop)
+        self._resolve_references_via_tokens(session, file_str)
 
         # 3. Get diagnostics
         try:
@@ -90,6 +88,9 @@ class CodeGraph:
             self._diagnostics[file_str] = result.diagnostics
         except Exception:
             logger.warning("Failed to check %s, skipping diagnostics", file_str)
+
+        # 4. Resolve inheritance for CLASS nodes
+        self._resolve_inheritance(session, file_str, symbols)
 
     def _add_symbol_node(
         self,
@@ -130,11 +131,27 @@ class CodeGraph:
         Falls back to the module node for top-level symbols.
         """
         if symbol.container_name:
-            # Try to find a node matching the container name
-            candidate_id = f"{file_str}::{symbol.container_name}"
-            if candidate_id in self._id_to_index:
+            # Use flexible lookup to handle both "name" and "name@line" formats
+            candidate_id = self._find_symbol_in_file(file_str, symbol.container_name)
+            if candidate_id is not None:
                 return candidate_id
         return module_id
+
+    def _find_symbol_in_file(self, file_path: str, name: str) -> str | None:
+        """Find a symbol ID for *name* in *file_path*.
+
+        Tries exact match first, then matches by extracting the
+        name portion from symbol IDs that use ``name@line`` format.
+        """
+        exact = f"{file_path}::{name}"
+        if exact in self._id_to_index:
+            return exact
+        # Try matching any symbol_id that starts with file::name@
+        prefix = f"{file_path}::{name}@"
+        for sid in self._id_to_index:
+            if sid.startswith(prefix):
+                return sid
+        return None
 
     def _resolve_references_for_symbol(
         self,
@@ -178,6 +195,162 @@ class CodeGraph:
                 role=role,
             )
             self._add_edge(enclosing_id, sid, edge, ref_file)
+
+    def _resolve_references_via_tokens(
+        self, session: TyO3Session, file_str: str
+    ) -> None:
+        """Resolve references using semantic tokens + goto_definition.
+
+        For each name-like token in the file, call goto_definition to
+        find what symbol it refers to. Create a REFERENCES edge from
+        the enclosing symbol to the target symbol.
+        """
+        try:
+            tokens = session.semantic_tokens(file_str)
+        except Exception:
+            logger.warning("Failed to get semantic tokens for %s", file_str)
+            return
+
+        # Filter to name-like tokens (not keywords, strings, numbers)
+        from tyo3.models.advanced import SemanticTokenType, SemanticTokenModifier
+
+        NAME_TYPES = {
+            SemanticTokenType.NAMESPACE,
+            SemanticTokenType.CLASS_,
+            SemanticTokenType.PARAMETER,
+            SemanticTokenType.SELF_PARAMETER,
+            SemanticTokenType.CLS_PARAMETER,
+            SemanticTokenType.VARIABLE,
+            SemanticTokenType.PROPERTY,
+            SemanticTokenType.FUNCTION,
+            SemanticTokenType.METHOD,
+            SemanticTokenType.DECORATOR,
+            SemanticTokenType.BUILTIN_CONSTANT,
+            SemanticTokenType.TYPE_PARAMETER,
+        }
+
+        for token in tokens:
+            if token.token_type not in NAME_TYPES:
+                continue
+
+            start = token.range.start
+            try:
+                targets = session.goto_definition(file_str, start.line, start.column)
+            except Exception:
+                continue
+
+            if not targets:
+                continue
+
+            target = targets[0]
+            target_file = str(target.path)
+
+            # Build the target's symbol_id
+            if target.symbol and target.symbol.qualified_name:
+                target_sid = f"{target_file}::{target.symbol.qualified_name}"
+            elif target.symbol:
+                target_sid = f"{target_file}::{target.symbol.name}@{target.range.start.line}"
+            else:
+                # No symbol info — skip this reference
+                continue
+
+            # Ensure the target node exists (may be in another file or external)
+            if target_sid not in self._id_to_index:
+                continue
+
+            # Determine the enclosing symbol at this token's location
+            enclosing_id = self._find_enclosing_symbol(file_str, token.range)
+            if enclosing_id is None:
+                continue
+
+            # Don't create self-references for definition sites
+            if enclosing_id == target_sid:
+                continue
+
+            # Determine role from token modifiers
+            role = ReferenceRole.READ
+            if SemanticTokenModifier.DEFINITION in token.modifiers:
+                role = ReferenceRole.DEFINITION
+
+            edge = EdgeData(
+                kind=EdgeKind.REFERENCES,
+                file=file_str,
+                range=token.range,
+                role=role,
+            )
+            self._add_edge(enclosing_id, target_sid, edge, file_str)
+
+    def _resolve_inheritance(
+        self,
+        session: TyO3Session,
+        file_str: str,
+        symbols: list[Symbol],
+    ) -> None:
+        """Add INHERITS and OVERRIDES edges for class symbols."""
+        for symbol in symbols:
+            if symbol.kind not in (SymbolKind.CLASS, SymbolKind.CLASS_):
+                continue
+
+            start = symbol.selection_range.start if symbol.selection_range else symbol.location.range.start
+            try:
+                hierarchy = session.type_hierarchy(file_str, start.line, start.column)
+            except Exception:
+                continue
+
+            if hierarchy is None:
+                continue
+
+            sid = symbol_id_from_symbol(file_str, symbol)
+
+            # Add INHERITS edges to supertypes
+            for supertype in hierarchy.supertypes:
+                super_file = str(supertype.path)
+                super_sid = self._find_symbol_in_file(super_file, supertype.name)
+
+                if super_sid is None:
+                    continue
+
+                edge = EdgeData(kind=EdgeKind.INHERITS)
+                self._add_edge(sid, super_sid, edge, file_str)
+
+            # Derive OVERRIDES: collect methods from the child class,
+            # then walk the full supertype chain to find overridden methods.
+            METHOD_KINDS = {SymbolKind.METHOD, SymbolKind.CONSTRUCTOR}
+            child_methods = [
+                s for s in symbols
+                if s.kind in METHOD_KINDS
+                and s.container_name == symbol.name
+            ]
+            if not child_methods:
+                continue
+
+            # Collect ancestor methods by walking the INHERITS chain
+            ancestor_methods: dict[str, str] = {}  # name -> symbol_id
+            visited: set[str] = set()
+            queue: list[str] = [sid]
+            while queue:
+                current_sid = queue.pop(0)
+                for succ_idx in self._graph.neighbors(self._id_to_index[current_sid]):
+                    try:
+                        edge_data = self._graph.get_edge_data(self._id_to_index[current_sid], succ_idx)
+                    except Exception:
+                        continue
+                    if edge_data is not None and edge_data.kind == EdgeKind.INHERITS:
+                        parent_sid = self._graph[succ_idx].symbol_id
+                        if parent_sid not in visited:
+                            visited.add(parent_sid)
+                            queue.append(parent_sid)
+                        # Collect this parent's methods
+                        for c in self.children(parent_sid):
+                            if c.kind in METHOD_KINDS and c.name not in ancestor_methods:
+                                ancestor_methods[c.name] = c.symbol_id
+
+            for method in child_methods:
+                if method.name in ancestor_methods:
+                    method_sid = symbol_id_from_symbol(file_str, method)
+                    parent_method_sid = ancestor_methods[method.name]
+                    edge = EdgeData(kind=EdgeKind.OVERRIDES)
+                    self._add_edge(method_sid, parent_method_sid, edge, file_str)
 
     def _find_enclosing_symbol(self, file_str: str, range: Range) -> str | None:
         """Find the innermost symbol in file_str that contains the given range.

@@ -39,6 +39,11 @@ fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<dto::HoverContentDto>()?;
     m.add_class::<dto::HoverDto>()?;
     m.add_class::<dto::CheckResultDto>()?;
+    m.add_class::<dto::SemanticTokenTypeDto>()?;
+    m.add_class::<dto::SemanticTokenModifierDto>()?;
+    m.add_class::<dto::SemanticTokenDto>()?;
+    m.add_class::<dto::TypeHierarchyItemDto>()?;
+    m.add_class::<dto::TypeHierarchyDto>()?;
 
     // Exception types
     m.add("ProjectClosedError", m.py().get_type::<ProjectClosedError>())?;

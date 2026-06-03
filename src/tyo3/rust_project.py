@@ -34,8 +34,9 @@ from tyo3.exceptions import (
     ProjectClosedError,
     ProjectOpenError,
 )
+from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult
-from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
+from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference, TypeHierarchy
 from tyo3.models.symbols import Symbol
 
 # The PyO3 extension module — must match
@@ -98,8 +99,14 @@ def _build_enum_cache() -> None:
     for name in dir(_native):
         if name.startswith("_"):
             continue
-        # PyO3 enums have names ending in 'Kind' or are NativeSeverity
-        if name.endswith("Kind") or name == "NativeSeverity":
+        # PyO3 enums have names ending in 'Kind', 'Type', 'Modifier',
+        # or are NativeSeverity
+        if (
+            name.endswith("Kind")
+            or name.endswith("Type")
+            or name.endswith("Modifier")
+            or name == "NativeSeverity"
+        ):
             obj = getattr(_native, name)
             if isinstance(obj, type):
                 _ENUM_TYPES.add(obj)
@@ -313,6 +320,28 @@ class RustProject:
 
         return [Reference.model_validate(_to_python(r)) for r in native_refs]
 
+    # ── Semantic Tokens ──────────────────────────────────────────
+
+    def semantic_tokens(self, path: str | StdPath) -> list[SemanticToken]:
+        """Return semantic tokens for a file."""
+        self._check_open()
+        try:
+            native_result = self._inner.semantic_tokens(str(path))
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in semantic_tokens(): {e}") from e
+
+        path_posix = PurePosixPath(str(path))
+        result = []
+        for t in native_result:
+            d = _to_python(t)
+            d["file"] = path_posix
+            result.append(SemanticToken.model_validate(d))
+        return result
+
     # ── Hover ────────────────────────────────────────────────────────
 
     def hover(self, path: str | StdPath, line: int, column: int) -> HoverResult | None:
@@ -334,6 +363,30 @@ class RustProject:
             return None
 
         return HoverResult.model_validate(_to_python(native_hover))
+
+    # ── Type Hierarchy ───────────────────────────────────────────
+
+    def type_hierarchy(
+        self, path: str | StdPath, line: int, column: int
+    ) -> TypeHierarchy | None:
+        """Query type hierarchy at a position."""
+        self._check_open()
+        try:
+            native_result = self._inner.type_hierarchy(str(path), line, column)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in type_hierarchy(): {e}") from e
+
+        if native_result is None:
+            return None
+        return TypeHierarchy.model_validate(_to_python(native_result))
 
     # ── Lifecycle ────────────────────────────────────────────────────
 

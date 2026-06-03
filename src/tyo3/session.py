@@ -10,8 +10,9 @@ from pathlib import Path as StdPath
 from pathlib import PurePosixPath
 
 from tyo3.exceptions import PositionError
+from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult
-from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
+from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference, TypeHierarchy
 from tyo3.models.symbols import Symbol
 from tyo3.rust_project import RustProject
 
@@ -116,6 +117,21 @@ class TyO3Session:
         """Get hover information for the symbol at (line, column)."""
         self._validate_position(line, column)
         return self._rp.hover(path, line, column)
+
+    # ── Type Hierarchy ───────────────────────────────────────
+
+    def type_hierarchy(
+        self, path: str | StdPath, line: int, column: int
+    ) -> TypeHierarchy | None:
+        """Query type hierarchy at a position."""
+        self._validate_position(line, column)
+        return self._rp.type_hierarchy(path, line, column)
+
+    # ── Semantic Tokens ───────────────────────────────────────
+
+    def semantic_tokens(self, path: str | StdPath) -> list[SemanticToken]:
+        """Return semantic tokens for a file."""
+        return self._rp.semantic_tokens(path)
 
     # ── Validation ───────────────────────────────────────────
 

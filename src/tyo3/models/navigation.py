@@ -80,6 +80,29 @@ class HoverResult(BaseModel):
     location: FileRange
     contents: list[HoverContent]
 
+
+class TypeHierarchyItem(BaseModel):
+    """An item in a type hierarchy (class with its supertypes/subtypes)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    detail: str | None = None
+    path: PurePosixPath
+    full_range: Range
+    selection_range: Range
+
+
+class TypeHierarchy(BaseModel):
+    """Result of a type hierarchy query."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    item: TypeHierarchyItem
+    supertypes: list[TypeHierarchyItem] = []
+    subtypes: list[TypeHierarchyItem] = []
+
+
 __all__ = [
     "ReferenceKind",
     "HoverContentKind",
@@ -87,4 +110,6 @@ __all__ = [
     "Reference",
     "HoverContent",
     "HoverResult",
+    "TypeHierarchyItem",
+    "TypeHierarchy",
 ]
