@@ -26,9 +26,9 @@ from tyo3.models.navigation import (
     HoverContentKind,
     HoverResult,
     NameOccurrence,
-    OccurrenceRole,
     Reference,
     ReferenceKind,
+    ReferenceRole,
     TypeHierarchy,
     TypeHierarchyItem,
 )
@@ -70,6 +70,6 @@ __all__ = [  # noqa: F405
     "SemanticTokenModifier",
     "SemanticToken",
     # Occurrences
-    "OccurrenceRole",
+    "ReferenceRole",
     "NameOccurrence",
 ]

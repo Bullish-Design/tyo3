@@ -24,17 +24,14 @@ class ReferenceKind(StrEnum):
     OTHER = "other"
 
 
-class OccurrenceRole(StrEnum):
-    """How a name occurrence is used at a reference site.
+class ReferenceRole(StrEnum):
+    """How a symbol is used at a reference site."""
 
-    Mirrors :class:`tyo3.graph.models.ReferenceRole`.
-    """
-
-    READ = "Read"
-    WRITE = "Write"
-    IMPORT = "Import"
-    DEFINITION = "Definition"
-    OTHER = "Other"
+    READ = "read"
+    WRITE = "write"
+    IMPORT = "import"
+    DEFINITION = "definition"
+    OTHER = "other"
 
 
 class NameOccurrence(BaseModel):
@@ -50,7 +47,8 @@ class NameOccurrence(BaseModel):
     range: Range
     target_file: str | None = None
     target_name: str | None = None
-    role: OccurrenceRole
+    target_qualified_name: str | None = None
+    role: ReferenceRole
 
 
 class HoverContentKind(StrEnum):
@@ -134,7 +132,7 @@ class TypeHierarchy(BaseModel):
 
 __all__ = [
     "ReferenceKind",
-    "OccurrenceRole",
+    "ReferenceRole",
     "NameOccurrence",
     "HoverContentKind",
     "DefinitionTarget",

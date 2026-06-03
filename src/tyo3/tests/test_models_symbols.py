@@ -21,7 +21,7 @@ class TestSymbolKind:
 
     def test_values(self) -> None:
         assert SymbolKind.MODULE == "module"
-        assert SymbolKind.CLASS_ == "class_"
+        assert SymbolKind.CLASS == "class_"
         assert SymbolKind.FUNCTION == "function"
         assert SymbolKind.METHOD == "method"
         assert SymbolKind.CONSTRUCTOR == "constructor"
@@ -31,11 +31,11 @@ class TestSymbolKind:
         assert SymbolKind.PARAMETER == "parameter"
         assert SymbolKind.PROPERTY == "property"
         assert SymbolKind.TYPE_PARAMETER == "type_parameter"
-        assert SymbolKind.IMPORT_ == "import_"
+        assert SymbolKind.IMPORT == "import_"
         assert SymbolKind.UNKNOWN == "unknown"
 
     def test_variants_are_distinct(self) -> None:
-        kinds = {SymbolKind.MODULE, SymbolKind.CLASS_, SymbolKind.FUNCTION}
+        kinds = {SymbolKind.MODULE, SymbolKind.CLASS, SymbolKind.FUNCTION}
         assert len(kinds) == 3
 
 
@@ -59,7 +59,7 @@ class TestSymbol:
         sym = Symbol(
             name="MyClass",
             qualified_name="pkg.module.MyClass",
-            kind=SymbolKind.CLASS_,
+            kind=SymbolKind.CLASS,
             location=_file_range(first_party_file.path),
             container_name="module",
             deprecated=True,

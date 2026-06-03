@@ -90,7 +90,6 @@ def _kind_color(kind: str) -> str:
         "constructor": "#d62728",  # red
         "enum_member": "#17becf",  # cyan
         "interface": "#e377c2",    # pink
-        "module": "#1f77b4",       # blue (dup)
     }
     return colors.get(kind, "#333333")
 
@@ -156,8 +155,6 @@ def to_json(graph: Any) -> dict[str, Any]:
 
 def _edge_to_dict(edge: EdgeData) -> dict[str, Any]:
     """Convert an EdgeData to a JSON-safe dict."""
-    from tyo3.models.analysis import Range
-
     d: dict[str, Any] = {"kind": edge.kind.value}
     if edge.file is not None:
         d["file"] = edge.file

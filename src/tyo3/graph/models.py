@@ -8,6 +8,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict
 
 from tyo3.models.analysis import Range
+from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import SymbolKind
 
 
@@ -47,16 +48,6 @@ class EdgeKind(StrEnum):
     TYPE_OF = "type_of"
     RETURNS = "returns"
     INSTANTIATES = "instantiates"
-
-
-class ReferenceRole(StrEnum):
-    """How a symbol is used at a reference site."""
-
-    READ = "read"
-    WRITE = "write"
-    IMPORT = "import"
-    DEFINITION = "definition"
-    OTHER = "other"
 
 
 @dataclass(frozen=True, slots=True)

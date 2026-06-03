@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
+import sys
+from collections import defaultdict, deque
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -11,9 +12,10 @@ import rustworkx as rx
 
 from tyo3.graph.dependency import DependencyGraph
 from tyo3.graph.identity import file_from_symbol_id, symbol_id_from_symbol
-from tyo3.graph.models import EdgeData, EdgeKind, ReferenceRole, SymbolNode
+from tyo3.graph.models import EdgeData, EdgeKind, SymbolNode
+from tyo3.models.advanced import SemanticTokenType, SemanticTokenModifier
 from tyo3.models.analysis import Diagnostic, Range
-from tyo3.models.navigation import NameOccurrence, OccurrenceRole
+from tyo3.models.navigation import NameOccurrence, ReferenceRole
 from tyo3.models.symbols import Symbol, SymbolKind
 from tyo3.session import TyO3Session
 
@@ -146,7 +148,8 @@ class CodeGraph:
         """Find a symbol ID for *name* in *file_path*.
 
         Tries exact match first, then matches by extracting the
-        name portion from symbol IDs that use ``name@line`` format.
+        name portion from symbol IDs that use ``name@line`` format,
+        then falls back to matching by ``node.name`` within the file.
         """
         exact = f"{file_path}::{name}"
         if exact in self._id_to_index:
@@ -156,6 +159,13 @@ class CodeGraph:
         for sid in self._id_to_index:
             if sid.startswith(prefix):
                 return sid
+        # Fallback: search by short name within the file's nodes.
+        # Handles qualified-name mismatches where the SID is
+        # e.g. "models.py::models.User" but we only have "User".
+        for idx in self._file_to_nodes.get(file_path, []):
+            node: SymbolNode = self._graph[idx]
+            if node.name == name:
+                return node.symbol_id
         return None
 
     def _resolve_references_for_symbol(
@@ -209,6 +219,12 @@ class CodeGraph:
         Makes a single Rust call per file that resolves every name-like
         token to its definition target. Replaces the per-token
         ``goto_definition`` approach with O(1) FFI calls.
+
+        Uses ``target_qualified_name`` from Rust when available to
+        construct the correct symbol_id (e.g. ``models.py::User.save``
+        instead of ``models.py::save``).  Falls back to short-name
+        lookup within the target file when the qualified name is
+        unavailable.
         """
         try:
             occurrences = session.file_occurrences(file_str)
@@ -227,17 +243,32 @@ class CodeGraph:
             target_file = occ.target_file
             target_name = occ.target_name
 
-            # Build the target's symbol_id
-            target_sid = f"{target_file}::{target_name}"
+            # Build the target's symbol_id.
+            # Prefer the qualified name from Rust (e.g. "User.save") which
+            # matches the SID format produced by document_symbols:
+            #   file::qualified_name  →  "models.py::User.save"
+            # Fall back to short name for top-level symbols where
+            # qualified_name is None (same as short name).
+            if occ.target_qualified_name:
+                target_sid = f"{target_file}::{occ.target_qualified_name}"
+            else:
+                target_sid = f"{target_file}::{target_name}"
 
             # Ensure the target node exists — create a stub if external
             if target_sid not in self._id_to_index:
-                target_sid_ensured = self._ensure_target_node_simple(
-                    target_file, target_sid, target_name
-                )
-                if target_sid_ensured is None:
-                    continue
-                target_sid = target_sid_ensured
+                # Try flexible lookup by short name within the target file.
+                # Handles qualified-name mismatches (e.g. Rust returns "User"
+                # but the node is stored as "models.py::models.User").
+                found = self._find_symbol_in_file(target_file, target_name)
+                if found:
+                    target_sid = found
+                else:
+                    target_sid_ensured = self._ensure_target_node_simple(
+                        target_file, target_sid, target_name
+                    )
+                    if target_sid_ensured is None:
+                        continue
+                    target_sid = target_sid_ensured
 
             # Determine the enclosing symbol at this occurrence's location
             enclosing_id = self._find_enclosing_symbol(file_str, occ.range)
@@ -248,15 +279,7 @@ class CodeGraph:
             if enclosing_id == target_sid:
                 continue
 
-            # Map OccurrenceRole to ReferenceRole
-            role_map = {
-                OccurrenceRole.READ: ReferenceRole.READ,
-                OccurrenceRole.WRITE: ReferenceRole.WRITE,
-                OccurrenceRole.IMPORT: ReferenceRole.IMPORT,
-                OccurrenceRole.DEFINITION: ReferenceRole.DEFINITION,
-                OccurrenceRole.OTHER: ReferenceRole.OTHER,
-            }
-            role = role_map.get(occ.role, ReferenceRole.OTHER)
+            role = occ.role  # Already a ReferenceRole
 
             edge = EdgeData(
                 kind=EdgeKind.REFERENCES,
@@ -310,8 +333,6 @@ class CodeGraph:
             return
 
         # Filter to name-like tokens (not keywords, strings, numbers)
-        from tyo3.models.advanced import SemanticTokenType, SemanticTokenModifier
-
         NAME_TYPES = {
             SemanticTokenType.NAMESPACE,
             SemanticTokenType.CLASS_,
@@ -449,7 +470,7 @@ class CodeGraph:
     ) -> None:
         """Add INHERITS and OVERRIDES edges for class symbols."""
         for symbol in symbols:
-            if symbol.kind not in (SymbolKind.CLASS, SymbolKind.CLASS_):
+            if symbol.kind != SymbolKind.CLASS:
                 continue
 
             start = symbol.selection_range.start if symbol.selection_range else symbol.location.range.start
@@ -506,9 +527,9 @@ class CodeGraph:
             # Collect ancestor methods by walking the INHERITS chain
             ancestor_methods: dict[str, str] = {}  # name -> symbol_id
             visited: set[str] = set()
-            queue: list[str] = [sid]
+            queue: deque[str] = deque([sid])
             while queue:
-                current_sid = queue.pop(0)
+                current_sid = queue.popleft()
                 for succ_idx in self._graph.neighbors(self._id_to_index[current_sid]):
                     try:
                         edge_data = self._graph.get_edge_data(self._id_to_index[current_sid], succ_idx)
@@ -538,7 +559,7 @@ class CodeGraph:
         """
         node_indices = self._file_to_nodes.get(file_str, [])
         best_id: str | None = None
-        best_size: int = float("inf")  # type: ignore[assignment]
+        best_size: int = sys.maxsize
 
         for idx in node_indices:
             node: SymbolNode = self._graph[idx]

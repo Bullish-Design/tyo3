@@ -18,7 +18,7 @@ class SymbolKind(StrEnum):
     """Classification of a code symbol."""
 
     MODULE = "module"
-    CLASS_ = "class_"
+    CLASS = "class_"
     FUNCTION = "function"
     METHOD = "method"
     CONSTRUCTOR = "constructor"
@@ -28,14 +28,8 @@ class SymbolKind(StrEnum):
     PARAMETER = "parameter"
     PROPERTY = "property"
     TYPE_PARAMETER = "type_parameter"
-    IMPORT_ = "import_"
+    IMPORT = "import_"
     UNKNOWN = "unknown"
-
-
-# Aliases for convenience — avoid trailing underscore for non-keyword contexts.
-# Users can write SymbolKind.CLASS instead of SymbolKind.CLASS_.
-SymbolKind.CLASS = SymbolKind.CLASS_  # type: ignore[attr-defined]
-SymbolKind.IMPORT = SymbolKind.IMPORT_  # type: ignore[attr-defined]
 
 
 # ── Entities ─────────────────────────────────────────────────────────────

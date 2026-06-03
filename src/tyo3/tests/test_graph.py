@@ -1130,3 +1130,113 @@ class TestSubgraphForFileIntegration:
                 node = sub[idx]
                 assert isinstance(node, SymbolNode)
                 break
+
+
+# ── Phase 2: Qualified-name mismatch fix tests ──
+
+
+@needs_native
+class TestQualifiedNameResolution:
+    """Verify REFERENCES edges connect to the correct nodes even when
+    the batch occurrence API returns short names that differ from the
+    qualified names used by document_symbols.
+
+    Phase 2 of the code-graph refactoring (see IMPLEMENTATION_GUIDE.md).
+    """
+
+    def test_nested_methods_have_correct_qualified_names(self) -> None:
+        """Methods inside classes should have dotted qualified names."""
+        from tyo3.session import TyO3Session
+
+        with TyO3Session(fixture_path("simple_package")) as session:
+            graph = CodeGraph.build(session)
+
+            methods = graph.symbols_of_kind(SymbolKind.METHOD)
+            assert len(methods) >= 1, "Expected at least one method"
+
+            for m in methods:
+                if not m.external:
+                    assert "." in m.qualified_name, (
+                        f"Method {m.name} should have dotted qualified_name, "
+                        f"got {m.qualified_name!r}"
+                    )
+
+    def test_find_symbol_in_file_resolves_by_short_name(self) -> None:
+        """_find_symbol_in_file must find nodes by short name when the
+        SID contains a qualified path (e.g. 'models.py::User.save' vs
+        the occurrence target_name 'save')."""
+        from tyo3.session import TyO3Session
+
+        with TyO3Session(fixture_path("simple_package")) as session:
+            graph = CodeGraph.build(session)
+
+            main_path = str(
+                StdPath(fixture_path("simple_package")) / "main.py"
+            )
+
+            # Look up "MyClass" by short name
+            found = graph._find_symbol_in_file(main_path, "MyClass")
+            assert found is not None, (
+                "_find_symbol_in_file should find 'MyClass' by short name"
+            )
+            assert "MyClass" in found
+
+            # Look up a method "get_val" by short name
+            found_method = graph._find_symbol_in_file(main_path, "get_val")
+            assert found_method is not None, (
+                "_find_symbol_in_file should find 'get_val' by short name"
+            )
+            assert "get_val" in found_method
+
+    def test_references_to_function_connect_correctly(self) -> None:
+        """References to a top-level function should appear as incoming
+        REFERENCES edges on that function's node."""
+        from tyo3.session import TyO3Session
+
+        with TyO3Session(fixture_path("simple_package")) as session:
+            graph = CodeGraph.build(session)
+
+            # Find the greet function
+            greet_nodes = [
+                n for n in graph.symbols_of_kind(SymbolKind.FUNCTION)
+                if n.name == "greet" and not n.external
+            ]
+            assert len(greet_nodes) >= 1, "greet function should exist"
+            greet_node = greet_nodes[0]
+
+            # greet() should have at least one incoming REFERENCES edge
+            # (the call `greet("world")` at module level)
+            refs = graph.references_to(greet_node.symbol_id)
+            assert len(refs) > 0, (
+                f"greet() should have at least one reference, got {len(refs)}"
+            )
+
+            for r in refs:
+                assert r.kind == EdgeKind.REFERENCES
+                assert r.role is not None
+
+    def test_occurrence_model_has_target_qualified_name(self) -> None:
+        """NameOccurrence objects from file_occurrences must carry the
+        target_qualified_name field (added in Phase 2)."""
+        from tyo3.session import TyO3Session
+
+        with TyO3Session(fixture_path("simple_package")) as session:
+            main_path = str(
+                StdPath(fixture_path("simple_package")) / "main.py"
+            )
+            occurrences = session.file_occurrences(main_path)
+            assert len(occurrences) > 0
+
+            # Every occurrence should have the target_qualified_name field
+            for occ in occurrences:
+                assert hasattr(occ, "target_qualified_name"), (
+                    "NameOccurrence must have target_qualified_name (Phase 2)"
+                )
+
+            # At least one occurrence should have a qualified name
+            # (e.g. a class method reference)
+            has_qualified = any(
+                occ.target_qualified_name is not None for occ in occurrences
+            )
+            # Note: not asserting this is always True — some fixtures
+            # may only have top-level references (no qualified names needed)

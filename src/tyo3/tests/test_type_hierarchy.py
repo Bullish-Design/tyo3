@@ -47,7 +47,7 @@ class TestTypeHierarchy:
             files = rp.files()
             symbols = rp.document_symbols(str(files[0]))
             # Find a class symbol that inherits from something
-            classes = [s for s in symbols if s.kind == SymbolKind.CLASS_
+            classes = [s for s in symbols if s.kind == SymbolKind.CLASS
                        and s.selection_range is not None
                        and s.name != "Animal"]
             if classes:

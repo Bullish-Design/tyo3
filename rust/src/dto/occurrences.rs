@@ -16,11 +16,11 @@ pub enum ReferenceRoleDto {
 impl ReferenceRoleDto {
     fn __str__(&self) -> &'static str {
         match self {
-            ReferenceRoleDto::Read => "Read",
-            ReferenceRoleDto::Write => "Write",
-            ReferenceRoleDto::Import => "Import",
-            ReferenceRoleDto::Definition => "Definition",
-            ReferenceRoleDto::Other => "Other",
+            ReferenceRoleDto::Read => "read",
+            ReferenceRoleDto::Write => "write",
+            ReferenceRoleDto::Import => "import",
+            ReferenceRoleDto::Definition => "definition",
+            ReferenceRoleDto::Other => "other",
         }
     }
 
@@ -32,8 +32,8 @@ impl ReferenceRoleDto {
 /// A single resolved name occurrence in a file.
 ///
 /// Each occurrence records where a name appears (range), what symbol it
-/// resolves to (target_file / target_name), and the reference role
-/// (read, write, import, or definition).
+/// resolves to (target_file / target_name / target_qualified_name), and
+/// the reference role (read, write, import, or definition).
 #[pyclass(name = "NativeNameOccurrence", frozen, module = "tyo3._native_impl")]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NameOccurrenceDto {
@@ -46,6 +46,11 @@ pub struct NameOccurrenceDto {
     /// The short name of the referenced symbol (None if unresolved).
     #[pyo3(get)]
     pub target_name: Option<String>,
+    /// The dotted qualified name of the referenced symbol, e.g. "User.save"
+    /// for a method, or None for top-level symbols where the short name
+    /// suffices.  Built by walking the definition's scope chain.
+    #[pyo3(get)]
+    pub target_qualified_name: Option<String>,
     /// How this name is used: read, write, import, definition, or other.
     #[pyo3(get)]
     pub role: ReferenceRoleDto,

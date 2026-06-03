@@ -142,7 +142,7 @@ def symbol(open_project: TyProject, first_party_file: ProjectFile) -> Symbol:
     return Symbol(
         name="MyClass",
         qualified_name="my_module.MyClass",
-        kind=SymbolKind.CLASS_,
+        kind=SymbolKind.CLASS,
         location=FileRange(
             path=first_party_file.path,
             range=Range(start=Position(line=1, column=1), end=Position(line=10, column=1)),

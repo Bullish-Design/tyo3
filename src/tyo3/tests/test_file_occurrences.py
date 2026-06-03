@@ -6,7 +6,7 @@ from pathlib import Path as StdPath
 
 import pytest
 
-from tyo3.models.navigation import OccurrenceRole
+from tyo3.graph.models import ReferenceRole
 
 try:
     from tyo3 import _HAS_NATIVE
@@ -49,7 +49,7 @@ class TestFileOccurrences:
             assert len(occs) > 0, "Expected at least one occurrence"
             for occ in occs:
                 assert occ.range is not None
-                assert occ.role in OccurrenceRole
+                assert occ.role in ReferenceRole
         finally:
             rp.close()
 
@@ -85,7 +85,7 @@ class TestFileOccurrences:
             assert len(app_file) == 1
 
             occs = rp.file_occurrences(app_file[0])
-            imports = [o for o in occs if o.role == OccurrenceRole.IMPORT]
+            imports = [o for o in occs if o.role == ReferenceRole.IMPORT]
             # app.py has `from models import MAX_USERS, User`
             assert len(imports) >= 1, (
                 f"Expected Import role occurrences, got roles: "
@@ -105,7 +105,7 @@ class TestFileOccurrences:
             assert len(models_file) == 1
 
             occs = rp.file_occurrences(models_file[0])
-            definitions = [o for o in occs if o.role == OccurrenceRole.DEFINITION]
+            definitions = [o for o in occs if o.role == ReferenceRole.DEFINITION]
             # models.py defines Base, User, __init__, save, MAX_USERS
             assert len(definitions) >= 3, (
                 f"Expected Definition role occurrences, got {len(definitions)}: "

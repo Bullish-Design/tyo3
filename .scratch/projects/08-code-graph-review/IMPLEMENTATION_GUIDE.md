@@ -369,7 +369,9 @@ def _edges_of_kind(
 
 **Performance note:** This iterates all edges, which is O(E). For Phase 4, we can optimize using `_file_to_edges` or RustworkX's incident edge APIs. For now, correctness first.
 
-**Alternative (better performance):** Use RustworkX's `in_edges` / `out_edges` if available, or iterate only the node's incident edges:
+**Alternative (better performance):** Use RustworkX's `in_edges` / `out_edges`.  
+
+**Fallback (*only* if RustworkX's in/out edges fail):** Iterate only the node's incident edges:
 
 ```python
 def _edges_of_kind(
