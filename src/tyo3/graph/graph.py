@@ -35,6 +35,16 @@ def _range_size(t: tuple[int, int, int, int, str]) -> tuple[int, int]:
 
 _METHOD_KINDS = frozenset({SymbolKind.METHOD, SymbolKind.CONSTRUCTOR})
 
+DEPENDENCY_EDGE_KINDS: frozenset[EdgeKind] = frozenset({
+    EdgeKind.REFERENCES,
+    EdgeKind.IMPORTS,
+    EdgeKind.INHERITS,
+    EdgeKind.OVERRIDES,
+    EdgeKind.TYPE_OF,
+    EdgeKind.RETURNS,
+    EdgeKind.INSTANTIATES,
+})
+
 
 class CodeGraph:
     """A semantic code intelligence graph for a Python project."""
@@ -983,40 +993,79 @@ class CodeGraph:
 
     # ── Dependency analysis ───────────────────────────────────
 
-    def dependencies(self, symbol_id: str) -> set[str]:
-        """All symbols this one directly depends on."""
-        idx = self._id_to_index.get(symbol_id)
-        if idx is None:
-            return set()
+    def _semantic_subgraph(self, kinds: frozenset[EdgeKind]) -> rx.PyDiGraph:
+        """Build a subgraph containing only edges of the given kinds.
+
+        Node indices are preserved (same as the main graph) so callers can
+        use ``self._id_to_index`` for lookups.
+        """
+        sub = self._graph.copy()
+        to_remove = [
+            sub.get_edge_endpoints_by_index(edge_idx)
+            for edge_idx in sub.edge_indices()
+            if sub.get_edge_data_by_index(edge_idx).kind not in kinds
+        ]
+        sub.remove_edges_from(to_remove)
+        return sub
+
+    def dependencies(
+        self,
+        symbol_id: str,
+        *,
+        kinds: frozenset[EdgeKind] | None = None,
+    ) -> set[str]:
+        """All symbols this one directly depends on (semantic edges only)."""
+        edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
         return {
-            self._graph[succ].symbol_id
-            for succ in self._graph.neighbors(idx)
+            self._graph[tgt_idx].symbol_id
+            for tgt_idx, _data in self._edges_of_kind(symbol_id, edge_kinds)
         }
 
-    def dependents(self, symbol_id: str) -> set[str]:
-        """All symbols that directly depend on this one."""
-        idx = self._id_to_index.get(symbol_id)
-        if idx is None:
-            return set()
+    def dependents(
+        self,
+        symbol_id: str,
+        *,
+        kinds: frozenset[EdgeKind] | None = None,
+    ) -> set[str]:
+        """All symbols that directly depend on this one (semantic edges only)."""
+        edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
         return {
-            self._graph[pred].symbol_id
-            for pred in self._graph.predecessor_indices(idx)
+            self._graph[src_idx].symbol_id
+            for src_idx, _data in self._edges_of_kind(
+                symbol_id, edge_kinds, incoming=True
+            )
         }
 
-    def transitive_dependencies(self, symbol_id: str) -> set[str]:
-        """All symbols reachable from this one."""
+    def transitive_dependencies(
+        self,
+        symbol_id: str,
+        *,
+        kinds: frozenset[EdgeKind] | None = None,
+    ) -> set[str]:
+        """All symbols reachable via semantic edges from this one."""
+        edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
+        filtered = self._semantic_subgraph(edge_kinds)
         idx = self._id_to_index.get(symbol_id)
         if idx is None:
             return set()
-        reachable = rx.descendants(self._graph, idx)
+        # filtered uses the same indices as the main graph
+        reachable = rx.descendants(filtered, idx)
         return {self._graph[i].symbol_id for i in reachable}
 
-    def transitive_dependents(self, symbol_id: str) -> set[str]:
-        """All symbols that transitively depend on this one."""
+    def transitive_dependents(
+        self,
+        symbol_id: str,
+        *,
+        kinds: frozenset[EdgeKind] | None = None,
+    ) -> set[str]:
+        """All symbols that transitively depend on this one (semantic edges only)."""
+        edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
+        filtered = self._semantic_subgraph(edge_kinds)
         idx = self._id_to_index.get(symbol_id)
         if idx is None:
             return set()
-        reachable = rx.ancestors(self._graph, idx)
+        # filtered uses the same indices as the main graph
+        reachable = rx.ancestors(filtered, idx)
         return {self._graph[i].symbol_id for i in reachable}
 
     # ── Graph algorithms ──────────────────────────────────────

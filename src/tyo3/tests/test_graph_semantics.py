@@ -156,3 +156,40 @@ def test_dependencies_do_not_include_defined_children() -> None:
         "dependencies() must exclude DEFINES edges; "
         f"got {graph.dependencies(module.symbol_id)}"
     )
+
+
+def test_dependencies_include_references() -> None:
+    """``dependencies()`` must include semantic REFERENCES edges."""
+    graph = CodeGraph()
+    f = SymbolNode(
+        symbol_id="a.py::f",
+        name="f",
+        qualified_name="f",
+        kind=SymbolKind.FUNCTION,
+        file="a.py",
+        range=_range(),
+    )
+    g = SymbolNode(
+        symbol_id="a.py::g",
+        name="g",
+        qualified_name="g",
+        kind=SymbolKind.FUNCTION,
+        file="a.py",
+        range=_range(),
+    )
+    graph._add_node(f)
+    graph._add_node(g)
+    graph._add_edge(
+        f.symbol_id, g.symbol_id,
+        EdgeData(kind=EdgeKind.REFERENCES),
+        "a.py",
+    )
+
+    assert graph.dependencies(f.symbol_id) == {g.symbol_id}, (
+        f"dependencies(f) should include REFERENCES target g, "
+        f"got {graph.dependencies(f.symbol_id)}"
+    )
+    assert graph.dependents(g.symbol_id) == {f.symbol_id}, (
+        f"dependents(g) should include REFERENCE source f, "
+        f"got {graph.dependents(g.symbol_id)}"
+    )
