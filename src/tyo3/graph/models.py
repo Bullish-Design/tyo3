@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from tyo3.models.analysis import Range
 from tyo3.models.navigation import ReferenceRole
@@ -58,3 +59,32 @@ class EdgeData:
     file: str | None = None
     range: Range | None = None
     role: ReferenceRole | None = None
+
+
+# ── Build report models ───────────────────────────────────────
+
+
+class GraphBuildFailure(BaseModel):
+    """A single failure recorded during graph construction."""
+
+    file: str
+    phase: Literal["symbols", "references", "diagnostics", "inheritance"]
+    error_type: str
+    message: str
+
+
+class GraphBuildReport(BaseModel):
+    """Report produced during graph construction.
+
+    Callers can inspect ``complete`` to determine whether the graph
+    was built without errors, or examine ``failures`` for details
+    about what went wrong.
+    """
+
+    files_indexed: int = 0
+    files_total: int = 0
+    failures: list[GraphBuildFailure] = Field(default_factory=list)
+
+    @property
+    def complete(self) -> bool:
+        return not self.failures

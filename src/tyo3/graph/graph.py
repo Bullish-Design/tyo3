@@ -11,7 +11,13 @@ import rustworkx as rx
 
 from tyo3.graph.dependency import DependencyGraph
 from tyo3.graph.identity import file_from_symbol_id, symbol_id_from_symbol
-from tyo3.graph.models import EdgeData, EdgeKind, SymbolNode
+from tyo3.graph.models import (
+    EdgeData,
+    EdgeKind,
+    GraphBuildFailure,
+    GraphBuildReport,
+    SymbolNode,
+)
 from tyo3.models.advanced import SemanticTokenType, SemanticTokenModifier
 from tyo3.models.analysis import Diagnostic, Range
 from tyo3.models.navigation import NameOccurrence, ReferenceRole
@@ -75,7 +81,12 @@ class CodeGraph:
     # ── Construction ──────────────────────────────────────────
 
     @classmethod
-    def build(cls, session: TyO3Session) -> CodeGraph:
+    def build(
+        cls,
+        session: TyO3Session,
+        *,
+        report: GraphBuildReport | None = None,
+    ) -> CodeGraph:
         """Build a complete code graph from a TyO3 session.
 
         Six-pass deterministic construction: all project nodes and all
@@ -83,17 +94,29 @@ class CodeGraph:
         guarantees references attach to innermost enclosing symbols
         (not module fallback) and project-local targets are never
         externalized because of file ordering.
+
+        If *report* is provided, failures are recorded on it so
+        callers can programmatically inspect whether the graph is
+        complete.
         """
         graph = cls()
         files = [str(file_path) for file_path in session.files()]
         project_files = set(files)
 
+        if report is not None:
+            report.files_total = len(files)
+
         # ── Pass 1: collect symbols ───────────────────────────
         symbols_by_file: dict[str, list[Symbol]] = {}
         for file_str in files:
-            symbols = graph._collect_symbols_for_file(session, file_str)
+            symbols = graph._collect_symbols_for_file(
+                session, file_str, report=report
+            )
             if symbols is not None:
                 symbols_by_file[file_str] = symbols
+
+        if report is not None:
+            report.files_indexed = len(symbols_by_file)
 
         # ── Pass 2: materialize all project nodes ─────────────
         for file_str, symbols in symbols_by_file.items():
@@ -107,22 +130,43 @@ class CodeGraph:
         # ── Pass 4: semantic references ───────────────────────
         for file_str in symbols_by_file:
             graph._resolve_references_via_occurrences(
-                session, file_str, project_files
+                session, file_str, project_files, report=report
             )
 
         # ── Pass 5: inheritance and overrides ─────────────────
         for file_str, symbols in symbols_by_file.items():
-            graph._resolve_inheritance(session, file_str, symbols)
+            graph._resolve_inheritance(
+                session, file_str, symbols, report=report
+            )
 
         # ── Pass 6: diagnostics (single check, distribute per-file)
-        graph._collect_all_diagnostics(session)
+        graph._collect_all_diagnostics(session, report=report)
 
         return graph
+
+    @classmethod
+    def build_with_report(
+        cls,
+        session: TyO3Session,
+    ) -> tuple[CodeGraph, GraphBuildReport]:
+        """Build a graph and return it alongside a build report.
+
+        Convenience wrapper around :meth:`build` that always returns
+        a report, so callers can inspect failures without threading
+        their own report instance.
+        """
+        report = GraphBuildReport()
+        graph = cls.build(session, report=report)
+        return graph, report
 
     # ── Pass helpers ──────────────────────────────────────────
 
     def _collect_symbols_for_file(
-        self, session: TyO3Session, file_str: str
+        self,
+        session: TyO3Session,
+        file_str: str,
+        *,
+        report: GraphBuildReport | None = None,
     ) -> list[Symbol] | None:
         """Collect symbols for one file from the session.
 
@@ -131,10 +175,19 @@ class CodeGraph:
         """
         try:
             return session.document_symbols(file_str)
-        except Exception:
+        except Exception as e:
             logger.warning(
                 "Failed to get symbols for %s, skipping", file_str
             )
+            if report is not None:
+                report.failures.append(
+                    GraphBuildFailure(
+                        file=file_str,
+                        phase="symbols",
+                        error_type=type(e).__name__,
+                        message=str(e),
+                    )
+                )
             return None
 
     def _materialize_file_nodes(
@@ -227,7 +280,12 @@ class CodeGraph:
             key=_range_size,
         )
 
-    def _collect_all_diagnostics(self, session: TyO3Session) -> None:
+    def _collect_all_diagnostics(
+        self,
+        session: TyO3Session,
+        *,
+        report: GraphBuildReport | None = None,
+    ) -> None:
         """Collect diagnostics with a single ``check()`` call, distribute per-file.
 
         Replaces the old per-file ``check_file()`` approach (N FFI
@@ -235,10 +293,19 @@ class CodeGraph:
         """
         try:
             result = session.check()
-        except Exception:
+        except Exception as e:
             logger.warning(
                 "Failed to run project check, skipping diagnostics"
             )
+            if report is not None:
+                report.failures.append(
+                    GraphBuildFailure(
+                        file="<project>",
+                        phase="diagnostics",
+                        error_type=type(e).__name__,
+                        message=str(e),
+                    )
+                )
             return
         for diagnostic in result.diagnostics:
             if diagnostic.file:
@@ -344,6 +411,8 @@ class CodeGraph:
         session: TyO3Session,
         file_str: str,
         project_files: set[str],
+        *,
+        report: GraphBuildReport | None = None,
     ) -> None:
         """Resolve references using the batch file_occurrences API.
 
@@ -357,11 +426,20 @@ class CodeGraph:
         """
         try:
             occurrences = session.file_occurrences(file_str)
-        except Exception:
+        except Exception as e:
             logger.warning(
                 "Failed to get file occurrences for %s, falling back",
                 file_str,
             )
+            if report is not None:
+                report.failures.append(
+                    GraphBuildFailure(
+                        file=file_str,
+                        phase="references",
+                        error_type=type(e).__name__,
+                        message=str(e),
+                    )
+                )
             # Fall back to the token-based approach
             self._resolve_references_via_tokens(session, file_str)
             return
@@ -667,6 +745,8 @@ class CodeGraph:
         session: TyO3Session,
         file_str: str,
         symbols: list[Symbol],
+        *,
+        report: GraphBuildReport | None = None,
     ) -> None:
         """Add INHERITS and OVERRIDES edges for class symbols."""
         for symbol in symbols:
@@ -682,7 +762,16 @@ class CodeGraph:
                 hierarchy = session.type_hierarchy(
                     file_str, start.line, start.column
                 )
-            except Exception:
+            except Exception as e:
+                if report is not None:
+                    report.failures.append(
+                        GraphBuildFailure(
+                            file=file_str,
+                            phase="inheritance",
+                            error_type=type(e).__name__,
+                            message=str(e),
+                        )
+                    )
                 continue
 
             if hierarchy is None:
