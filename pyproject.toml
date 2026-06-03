@@ -12,6 +12,7 @@ authors = [
 
 dependencies = [
   "pydantic>=2.12.5",
+  "rustworkx>=0.16.0",
 ]
 
 [project.optional-dependencies]
