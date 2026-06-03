@@ -12,6 +12,7 @@ Run with: PYTHONPATH=src pytest src/tyo3/tests/test_rust_snapshots.py -v
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path as StdPath
 
 import pytest
@@ -72,13 +73,11 @@ def symbol_to_dict(symbol: Symbol) -> dict:
 class TestSnapshotSimplePackage:
     """Snapshot tests for the simple_package fixture."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.rp = RustProject(fixture_path("simple_package"))
-
-    def teardown_method(self) -> None:
-        if hasattr(self, "rp"):
-            self.rp.close()
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self) -> Generator:
+        self.__class__.rp = RustProject(fixture_path("simple_package"))
+        yield
+        self.__class__.rp.close()
 
     def test_document_symbols_snapshot(self) -> None:
         """Snapshot the document_symbols output for simple_package/main.py."""
@@ -121,13 +120,11 @@ class TestSnapshotSimplePackage:
 class TestSnapshotClasses:
     """Snapshot tests for the classes fixture."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.rp = RustProject(fixture_path("classes"))
-
-    def teardown_method(self) -> None:
-        if hasattr(self, "rp"):
-            self.rp.close()
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self) -> Generator:
+        self.__class__.rp = RustProject(fixture_path("classes"))
+        yield
+        self.__class__.rp.close()
 
     def test_document_symbols_snapshot(self) -> None:
         """Snapshot the document_symbols output for classes/models.py."""
@@ -159,13 +156,11 @@ class TestSnapshotClasses:
 class TestSnapshotImports:
     """Snapshot tests for imports fixture."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.rp = RustProject(fixture_path("imports"))
-
-    def teardown_method(self) -> None:
-        if hasattr(self, "rp"):
-            self.rp.close()
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self) -> Generator:
+        self.__class__.rp = RustProject(fixture_path("imports"))
+        yield
+        self.__class__.rp.close()
 
     def test_document_symbols_main(self) -> None:
         symbols = self.rp.document_symbols("main.py")
@@ -185,13 +180,11 @@ class TestSnapshotImports:
 class TestSnapshotUnicode:
     """Snapshot tests for unicode fixture."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.rp = RustProject(fixture_path("unicode_positions"))
-
-    def teardown_method(self) -> None:
-        if hasattr(self, "rp"):
-            self.rp.close()
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self) -> Generator:
+        self.__class__.rp = RustProject(fixture_path("unicode_positions"))
+        yield
+        self.__class__.rp.close()
 
     def test_unicode_identifiers(self) -> None:
         """Verify that Unicode identifiers are discovered correctly."""
@@ -218,13 +211,11 @@ class TestSnapshotUnicode:
 class TestSnapshotStandalone:
     """Snapshot tests for standalone fixture."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.rp = RustProject(fixture_path("standalone"))
-
-    def teardown_method(self) -> None:
-        if hasattr(self, "rp"):
-            self.rp.close()
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self) -> Generator:
+        self.__class__.rp = RustProject(fixture_path("standalone"))
+        yield
+        self.__class__.rp.close()
 
     def test_document_symbols(self) -> None:
         symbols = self.rp.document_symbols("script.py")

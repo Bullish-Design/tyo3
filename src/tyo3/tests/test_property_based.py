@@ -54,6 +54,15 @@ def fixture_path(name: str) -> str:
     return str((FIXTURES_DIR / name).resolve())
 
 
+# ── Shared cache (session-scoped, via conftest) ──────────────────────────
+
+
+def get_project(fixture_name: str) -> RustProject:
+    from tyo3.tests.conftest import shared_project
+
+    return shared_project(fixture_name)
+
+
 # ── Skip marker ───────────────────────────────────────────────────────────
 
 needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
@@ -122,21 +131,15 @@ fixture_file_strategy = st.sampled_from(FIXTURE_FILE_PAIRS)
 def test_hover_never_panics(pair, line: int, column: int) -> None:
     """hover() with arbitrary inputs should never panic."""
     fixture_name, path = pair
-    rp = RustProject(fixture_path(fixture_name))
+    rp = get_project(fixture_name)
     try:
-        try:
-            hover = rp.hover(path, line, column)
-            if hover is not None:
-                assert isinstance(hover.contents, list)
-                assert hover.location.range.start.line >= 1
-                assert hover.location.range.start.column >= 1
-        except (PositionError, PathResolutionError, OverflowError):
-            pass
-    finally:
-        try:
-            rp.close()
-        except Exception:
-            pass
+        hover = rp.hover(path, line, column)
+        if hover is not None:
+            assert isinstance(hover.contents, list)
+            assert hover.location.range.start.line >= 1
+            assert hover.location.range.start.column >= 1
+    except (PositionError, PathResolutionError, OverflowError):
+        pass
 
 
 @needs_native
@@ -145,22 +148,16 @@ def test_hover_never_panics(pair, line: int, column: int) -> None:
 def test_goto_never_panics(pair, line: int, column: int) -> None:
     """goto_definition() with arbitrary inputs should never panic."""
     fixture_name, path = pair
-    rp = RustProject(fixture_path(fixture_name))
+    rp = get_project(fixture_name)
     try:
-        try:
-            targets = rp.goto_definition(path, line, column)
-            assert isinstance(targets, list)
-            for t in targets:
-                assert t.path is not None
-                assert t.range.start.line >= 1
-                assert t.range.start.column >= 1
-        except (PositionError, PathResolutionError, OverflowError):
-            pass
-    finally:
-        try:
-            rp.close()
-        except Exception:
-            pass
+        targets = rp.goto_definition(path, line, column)
+        assert isinstance(targets, list)
+        for t in targets:
+            assert t.path is not None
+            assert t.range.start.line >= 1
+            assert t.range.start.column >= 1
+    except (PositionError, PathResolutionError, OverflowError):
+        pass
 
 
 @needs_native
@@ -169,18 +166,12 @@ def test_goto_never_panics(pair, line: int, column: int) -> None:
 def test_find_references_never_panics(pair, line: int, column: int) -> None:
     """find_references() with arbitrary inputs should never panic."""
     fixture_name, path = pair
-    rp = RustProject(fixture_path(fixture_name))
+    rp = get_project(fixture_name)
     try:
-        try:
-            refs = rp.find_references(path, line, column)
-            assert isinstance(refs, list)
-        except (PositionError, PathResolutionError, OverflowError):
-            pass
-    finally:
-        try:
-            rp.close()
-        except Exception:
-            pass
+        refs = rp.find_references(path, line, column)
+        assert isinstance(refs, list)
+    except (PositionError, PathResolutionError, OverflowError):
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -194,32 +185,26 @@ def test_find_references_never_panics(pair, line: int, column: int) -> None:
 def test_symbols_have_valid_positions(data: st.DataObject) -> None:
     """Every symbol must have a name, kind, and valid 1-based position."""
     fixture_name = data.draw(st.sampled_from(NON_EMPTY_FIXTURES))
-    rp = RustProject(fixture_path(fixture_name))
-    try:
-        files = rp.files()
-        assume(len(files) > 0)
-        file_path = data.draw(st.sampled_from(files))
-        file_name = StdPath(file_path).name
-        assume(file_name.endswith(".py"))
+    rp = get_project(fixture_name)
+    files = rp.files()
+    assume(len(files) > 0)
+    file_path = data.draw(st.sampled_from(files))
+    file_name = StdPath(file_path).name
+    assume(file_name.endswith(".py"))
 
-        symbols = rp.document_symbols(file_name)
-        for s in symbols:
-            assert s.name, "Symbol with empty name"
-            assert s.kind, f"Symbol {s.name} has no kind"
+    symbols = rp.document_symbols(file_name)
+    for s in symbols:
+        assert s.name, "Symbol with empty name"
+        assert s.kind, f"Symbol {s.name} has no kind"
 
-            loc = s.location
-            assert loc.range.start.line >= 1, f"{s.name}: start line < 1"
-            assert loc.range.start.column >= 1, f"{s.name}: start column < 1"
-            assert loc.range.end.line >= 1, f"{s.name}: end line < 1"
+        loc = s.location
+        assert loc.range.start.line >= 1, f"{s.name}: start line < 1"
+        assert loc.range.start.column >= 1, f"{s.name}: start column < 1"
+        assert loc.range.end.line >= 1, f"{s.name}: end line < 1"
 
-            if s.selection_range:
-                assert s.selection_range.start.line >= 1
-                assert s.selection_range.start.column >= 1
-    finally:
-        try:
-            rp.close()
-        except Exception:
-            pass
+        if s.selection_range:
+            assert s.selection_range.start.line >= 1
+            assert s.selection_range.start.column >= 1
 
 
 @needs_native
@@ -228,27 +213,21 @@ def test_symbols_have_valid_positions(data: st.DataObject) -> None:
 def test_symbols_are_deterministic(data: st.DataObject) -> None:
     """document_symbols() returns identical results on repeated calls."""
     fixture_name = data.draw(st.sampled_from(NON_EMPTY_FIXTURES))
-    rp = RustProject(fixture_path(fixture_name))
-    try:
-        files = rp.files()
-        assume(len(files) > 0)
-        file_path = data.draw(st.sampled_from(files))
-        file_name = StdPath(file_path).name
-        assume(file_name.endswith(".py"))
+    rp = get_project(fixture_name)
+    files = rp.files()
+    assume(len(files) > 0)
+    file_path = data.draw(st.sampled_from(files))
+    file_name = StdPath(file_path).name
+    assume(file_name.endswith(".py"))
 
-        s1 = rp.document_symbols(file_name)
-        s2 = rp.document_symbols(file_name)
+    s1 = rp.document_symbols(file_name)
+    s2 = rp.document_symbols(file_name)
 
-        assert len(s1) == len(s2), f"Count mismatch: {len(s1)} vs {len(s2)}"
-        for a, b in zip(s1, s2, strict=True):
-            assert a.name == b.name
-            assert a.kind == b.kind
-            assert a.location.range.start.line == b.location.range.start.line
-    finally:
-        try:
-            rp.close()
-        except Exception:
-            pass
+    assert len(s1) == len(s2), f"Count mismatch: {len(s1)} vs {len(s2)}"
+    for a, b in zip(s1, s2, strict=True):
+        assert a.name == b.name
+        assert a.kind == b.kind
+        assert a.location.range.start.line == b.location.range.start.line
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -290,17 +269,14 @@ def test_all_operations_raise_after_close(fixture_name: str) -> None:
 @given(line=line_numbers, column=column_numbers)
 def test_empty_project_operations(line: int, column: int) -> None:
     """Empty project: files() empty, path ops raise clean errors."""
-    rp = RustProject(fixture_path("empty"))
-    try:
-        assert rp.files() == []
-        with pytest.raises((PathResolutionError, PositionError)):
-            rp.document_symbols("nonexistent.py")
-        with pytest.raises((PathResolutionError, PositionError)):
-            rp.goto_definition("nonexistent.py", line, column)
-        result = rp.check()
-        assert result.diagnostics == []
-    finally:
-        rp.close()
+    rp = get_project("empty")
+    assert rp.files() == []
+    with pytest.raises((PathResolutionError, PositionError)):
+        rp.document_symbols("nonexistent.py")
+    with pytest.raises((PathResolutionError, PositionError)):
+        rp.goto_definition("nonexistent.py", line, column)
+    result = rp.check()
+    assert result.diagnostics == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -313,12 +289,9 @@ def test_empty_project_operations(line: int, column: int) -> None:
 @given(fixture_name=st.sampled_from(NON_EMPTY_FIXTURES))
 def test_files_are_unique_and_absolute(fixture_name: str) -> None:
     """files() returns unique, absolute paths that exist on disk."""
-    rp = RustProject(fixture_path(fixture_name))
-    try:
-        files = rp.files()
-        assert len(files) == len(set(files)), "Duplicate file paths"
-        for f in files:
-            assert str(f).startswith("/"), f"Non-absolute: {f}"
-            assert StdPath(f).exists(), f"Missing on disk: {f}"
-    finally:
-        rp.close()
+    rp = get_project(fixture_name)
+    files = rp.files()
+    assert len(files) == len(set(files)), "Duplicate file paths"
+    for f in files:
+        assert str(f).startswith("/"), f"Non-absolute: {f}"
+        assert StdPath(f).exists(), f"Missing on disk: {f}"

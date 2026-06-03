@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path as StdPath
 from pathlib import PurePosixPath
 
 import pytest
@@ -18,6 +19,68 @@ from tyo3.models.core import (
 )
 from tyo3.models.navigation import DefinitionTarget, Reference, ReferenceKind
 from tyo3.models.symbols import Symbol, SymbolKind
+
+# ── Shared caches (session-scoped, shared across all test modules) ─────
+
+FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
+
+
+def _fixture_path(name: str) -> str:
+    return str((FIXTURES_DIR / name).resolve())
+
+
+# Session-scoped caches for expensive objects
+_shared_project_cache: dict[str, object] = {}
+_shared_session_cache: dict[str, object] = {}
+_shared_graph_cache: dict[str, object] = {}
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _shared_cache_cleanup():
+    """Clean up all shared caches at end of test session."""
+    yield
+    for session in _shared_session_cache.values():
+        try:
+            session.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
+    for rp in _shared_project_cache.values():
+        try:
+            rp.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
+    _shared_project_cache.clear()
+    _shared_session_cache.clear()
+    _shared_graph_cache.clear()
+
+
+def shared_project(fixture_name: str):
+    """Get or create a cached RustProject (session-scoped, read-only use only)."""
+    if fixture_name not in _shared_project_cache:
+        from tyo3.rust_project import RustProject
+
+        _shared_project_cache[fixture_name] = RustProject(_fixture_path(fixture_name))
+    return _shared_project_cache[fixture_name]
+
+
+def shared_graph(fixture_name: str):
+    """Get or create a cached CodeGraph (session-scoped, read-only use only)."""
+    if fixture_name not in _shared_graph_cache:
+        from tyo3.graph import CodeGraph
+        from tyo3.session import TyO3Session
+
+        session = TyO3Session(_fixture_path(fixture_name))
+        _shared_session_cache[fixture_name] = session
+        _shared_graph_cache[fixture_name] = CodeGraph.build(session)
+    return _shared_graph_cache[fixture_name]
+
+
+def shared_session(fixture_name: str):
+    """Get or create a cached TyO3Session (session-scoped, read-only use only)."""
+    if fixture_name not in _shared_session_cache:
+        shared_graph(fixture_name)  # builds both session and graph
+    return _shared_session_cache[fixture_name]
+
 
 # ── Fixture helpers ─────────────────────────────────────────────────────
 

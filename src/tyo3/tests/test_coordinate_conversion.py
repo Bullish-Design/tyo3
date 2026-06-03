@@ -16,6 +16,7 @@ Run with: PYTHONPATH=src pytest src/tyo3/tests/test_coordinate_conversion.py -v
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path as StdPath
 
 import pytest
@@ -99,13 +100,11 @@ class TestPositionValidation:
 class TestRustCoordinateConversion:
     """Test Rust coordinate conversion through the PyO3 boundary."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.rp = RustProject(fixture_path("simple_package"))
-
-    def teardown_method(self) -> None:
-        if hasattr(self, "rp"):
-            self.rp.close()
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self) -> Generator:
+        self.__class__.rp = RustProject(fixture_path("simple_package"))
+        yield
+        self.__class__.rp.close()
 
     def test_hover_at_start_of_file(self) -> None:
         """Position (1, 1) should work on a non-empty file."""
@@ -178,13 +177,11 @@ class TestRustCoordinateConversion:
 class TestUnicodeCoordinateConversion:
     """Test coordinate conversion with multi-byte UTF-8 characters."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.rp = RustProject(fixture_path("unicode_positions"))
-
-    def teardown_method(self) -> None:
-        if hasattr(self, "rp"):
-            self.rp.close()
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self) -> Generator:
+        self.__class__.rp = RustProject(fixture_path("unicode_positions"))
+        yield
+        self.__class__.rp.close()
 
     def test_hover_on_greek_identifier(self) -> None:
         """Hover on α (Greek alpha) at line 10."""
@@ -230,13 +227,11 @@ class TestUnicodeCoordinateConversion:
 class TestEmptyFileEdgeCases:
     """Test coordinate conversion for edge cases like empty files."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self) -> None:
-        self.rp = RustProject(fixture_path("empty"))
-
-    def teardown_method(self) -> None:
-        if hasattr(self, "rp"):
-            self.rp.close()
+    @pytest.fixture(autouse=True, scope="class")
+    def setup(self) -> Generator:
+        self.__class__.rp = RustProject(fixture_path("empty"))
+        yield
+        self.__class__.rp.close()
 
     def test_empty_project_files(self) -> None:
         """Empty project should return no files."""

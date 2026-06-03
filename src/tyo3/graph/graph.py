@@ -531,11 +531,9 @@ class CodeGraph:
             while queue:
                 current_sid = queue.popleft()
                 for succ_idx in self._graph.neighbors(self._id_to_index[current_sid]):
-                    try:
-                        edge_data = self._graph.get_edge_data(self._id_to_index[current_sid], succ_idx)
-                    except Exception:
-                        continue
-                    if edge_data is not None and edge_data.kind == EdgeKind.INHERITS:
+                    for edge_data in self._graph.get_all_edge_data(self._id_to_index[current_sid], succ_idx):
+                        if edge_data.kind != EdgeKind.INHERITS:
+                            continue
                         parent_sid = self._graph[succ_idx].symbol_id
                         if parent_sid not in visited:
                             visited.add(parent_sid)
@@ -630,6 +628,37 @@ class CodeGraph:
         )
         return self._add_node(node)
 
+    def _edges_of_kind(
+        self,
+        symbol_id: str,
+        kinds: set[EdgeKind],
+        *,
+        incoming: bool = False,
+    ) -> list[tuple[int, EdgeData]]:
+        """Return all edges matching *kinds* for a node.
+
+        When *incoming* is False (default), returns outgoing edges as
+        ``(target_index, edge_data)`` pairs.
+        When *incoming* is True, returns incoming edges as
+        ``(source_index, edge_data)`` pairs.
+
+        Uses RustworkX's ``in_edges`` / ``out_edges`` which return
+        all parallel edges in a single efficient Rust-side call.
+        """
+        idx = self._id_to_index.get(symbol_id)
+        if idx is None:
+            return []
+        result: list[tuple[int, EdgeData]] = []
+        if incoming:
+            for src, _tgt, data in self._graph.in_edges(idx):
+                if data.kind in kinds:
+                    result.append((src, data))
+        else:
+            for _src, tgt, data in self._graph.out_edges(idx):
+                if data.kind in kinds:
+                    result.append((tgt, data))
+        return result
+
     # ── Properties ────────────────────────────────────────────
 
     @property
@@ -668,64 +697,40 @@ class CodeGraph:
 
     def references_to(self, symbol_id: str) -> list[EdgeData]:
         """All incoming REFERENCES edges to a symbol."""
-        idx = self._id_to_index.get(symbol_id)
-        if idx is None:
-            return []
-        result = []
-        for pred_idx in self._graph.predecessor_indices(idx):
-            # Check all edges from pred to idx
-            try:
-                edge_data = self._graph.get_edge_data(pred_idx, idx)
-            except Exception:
-                continue
-            if edge_data is not None and edge_data.kind == EdgeKind.REFERENCES:
-                result.append(edge_data)
-        return result
+        return [data for _, data in self._edges_of_kind(
+            symbol_id, {EdgeKind.REFERENCES}, incoming=True
+        )]
 
     def references_from(self, symbol_id: str) -> list[tuple[SymbolNode, EdgeData]]:
         """All outgoing REFERENCES edges from a symbol."""
-        idx = self._id_to_index.get(symbol_id)
-        if idx is None:
-            return []
-        result = []
-        for succ_idx in self._graph.neighbors(idx):
-            try:
-                edge_data = self._graph.get_edge_data(idx, succ_idx)
-            except Exception:
-                continue
-            if edge_data is not None and edge_data.kind == EdgeKind.REFERENCES:
-                result.append((self._graph[succ_idx], edge_data))
-        return result
+        return [
+            (self._graph[tgt_idx], data)
+            for tgt_idx, data in self._edges_of_kind(
+                symbol_id, {EdgeKind.REFERENCES}
+            )
+        ]
 
     # ── Structural queries ────────────────────────────────────
 
     def children(self, symbol_id: str) -> list[SymbolNode]:
         """Direct children (outgoing DEFINES/CONTAINS edges)."""
-        idx = self._id_to_index.get(symbol_id)
-        if idx is None:
-            return []
-        result = []
-        for succ_idx in self._graph.neighbors(idx):
-            try:
-                edge_data = self._graph.get_edge_data(idx, succ_idx)
-            except Exception:
-                continue
-            if edge_data is not None and edge_data.kind in (EdgeKind.DEFINES, EdgeKind.CONTAINS):
-                result.append(self._graph[succ_idx])
+        seen: set[int] = set()
+        result: list[SymbolNode] = []
+        for tgt_idx, _ in self._edges_of_kind(
+            symbol_id, {EdgeKind.DEFINES, EdgeKind.CONTAINS}
+        ):
+            if tgt_idx not in seen:
+                seen.add(tgt_idx)
+                result.append(self._graph[tgt_idx])
         return result
 
     def parent(self, symbol_id: str) -> SymbolNode | None:
         """Enclosing symbol (incoming DEFINES/CONTAINS edge)."""
-        idx = self._id_to_index.get(symbol_id)
-        if idx is None:
-            return None
-        for pred_idx in self._graph.predecessor_indices(idx):
-            try:
-                edge_data = self._graph.get_edge_data(pred_idx, idx)
-            except Exception:
-                continue
-            if edge_data is not None and edge_data.kind in (EdgeKind.DEFINES, EdgeKind.CONTAINS):
-                return self._graph[pred_idx]
+        edges = self._edges_of_kind(
+            symbol_id, {EdgeKind.DEFINES, EdgeKind.CONTAINS}, incoming=True
+        )
+        if edges:
+            return self._graph[edges[0][0]]
         return None
 
     def module_for(self, symbol_id: str) -> SymbolNode | None:

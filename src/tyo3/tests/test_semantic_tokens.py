@@ -22,65 +22,54 @@ needs_native = pytest.mark.skipif(
     not _HAS_NATIVE, reason="Rust native extension not built"
 )
 
+# ── Shared cache (session-scoped, via conftest) ──────────────────────────
+
+
+def get_project(fixture_name: str):
+    from tyo3.tests.conftest import shared_project
+
+    return shared_project(fixture_name)
+
 
 @needs_native
 class TestSemanticTokens:
     def test_returns_list(self) -> None:
-        from tyo3.rust_project import RustProject
-
-        rp = RustProject(fixture_path("simple_package"))
-        try:
-            files = rp.files()
-            assert len(files) > 0
-            tokens = rp.semantic_tokens(str(files[0]))
-            assert isinstance(tokens, list)
-        finally:
-            rp.close()
+        rp = get_project("simple_package")
+        files = rp.files()
+        assert len(files) > 0
+        tokens = rp.semantic_tokens(str(files[0]))
+        assert isinstance(tokens, list)
 
     def test_tokens_have_range_and_type(self) -> None:
-        from tyo3.rust_project import RustProject
-
-        rp = RustProject(fixture_path("classes"))
-        try:
-            files = rp.files()
-            tokens = rp.semantic_tokens(str(files[0]))
-            if tokens:
-                t = tokens[0]
-                assert t.range is not None
-                assert t.token_type is not None
-                assert isinstance(t.modifiers, (set, list, frozenset))
-        finally:
-            rp.close()
+        rp = get_project("classes")
+        files = rp.files()
+        tokens = rp.semantic_tokens(str(files[0]))
+        if tokens:
+            t = tokens[0]
+            assert t.range is not None
+            assert t.token_type is not None
+            assert isinstance(t.modifiers, (set, list, frozenset))
 
     def test_classes_fixture_has_class_tokens(self) -> None:
-        from tyo3.models.advanced import SemanticTokenType
-        from tyo3.rust_project import RustProject
-
-        rp = RustProject(fixture_path("classes"))
-        try:
-            files = rp.files()
-            tokens = rp.semantic_tokens(str(files[0]))
-            token_types = {t.token_type for t in tokens}
-            # The classes fixture should have at least class or function tokens
-            assert len(token_types) > 1
-        finally:
-            rp.close()
+        rp = get_project("classes")
+        files = rp.files()
+        tokens = rp.semantic_tokens(str(files[0]))
+        token_types = {t.token_type for t in tokens}
+        # The classes fixture should have at least class or function tokens
+        assert len(token_types) > 1
 
     def test_bad_path_raises(self) -> None:
         from tyo3.exceptions import PathResolutionError
-        from tyo3.rust_project import RustProject
 
-        rp = RustProject(fixture_path("simple_package"))
-        try:
-            with pytest.raises(PathResolutionError):
-                rp.semantic_tokens("nonexistent.py")
-        finally:
-            rp.close()
+        rp = get_project("simple_package")
+        with pytest.raises(PathResolutionError):
+            rp.semantic_tokens("nonexistent.py")
 
     def test_after_close_raises(self) -> None:
         from tyo3.exceptions import ProjectClosedError
         from tyo3.rust_project import RustProject
 
+        # Needs own instance since it closes the project
         rp = RustProject(fixture_path("simple_package"))
         rp.close()
         with pytest.raises(ProjectClosedError):

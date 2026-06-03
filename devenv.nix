@@ -57,7 +57,7 @@
 
   # ── Test scripts ─────────────────────────────────────────────
 
-  scripts.test.exec = ''
+  scripts.tests.exec = ''
     echo "═══ Running all tests ═══"
     cd "$DEVENV_ROOT"
     PYTHONPATH=src python -m pytest src/tyo3/tests/ -v --tb=short --cov=tyo3 --cov-report=term-missing 2>&1

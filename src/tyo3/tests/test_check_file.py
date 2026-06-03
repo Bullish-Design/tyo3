@@ -37,6 +37,14 @@ def fixture_path(name: str) -> str:
 
 needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
+# ── Shared cache (session-scoped, via conftest) ──────────────────────────
+
+
+def get_project(fixture_name: str) -> RustProject:
+    from tyo3.tests.conftest import shared_project
+
+    return shared_project(fixture_name)
+
 
 def _make_diagnostic(file_path: str) -> Diagnostic:
     return Diagnostic(
@@ -110,37 +118,35 @@ class TestCheckFileIntegration:
 
     def test_check_file_returns_result(self) -> None:
         """check_file() should return a CheckResult for the target file."""
-        rp = RustProject(fixture_path("diagnostic_targets"))
+        rp = get_project("diagnostic_targets")
         result = rp.check_file("errors.py")
         assert result is not None
         assert isinstance(result.diagnostics, list)
         assert result.files_checked == 1
-        rp.close()
 
     def test_check_file_returns_only_target_diagnostics(self) -> None:
         """All diagnostics returned by check_file() should be for the target file."""
-        rp = RustProject(fixture_path("diagnostic_targets"))
+        rp = get_project("diagnostic_targets")
         result = rp.check_file("errors.py")
         for d in result.diagnostics:
             assert d.file is not None, f"Diagnostic has no file: {d.message}"
             assert "errors.py" in d.file, (
                 f"Diagnostic file '{d.file}' does not match 'errors.py'"
             )
-        rp.close()
 
     def test_check_file_on_multi_file_project(self) -> None:
         """check_file() on a multi-file project filters correctly."""
-        rp = RustProject(fixture_path("imports"))
+        rp = get_project("imports")
         # math_ops.py is a clean file — should have 0 diagnostics
         result = rp.check_file("math_ops.py")
         for d in result.diagnostics:
             assert "math_ops.py" in d.file, (
                 f"Got diagnostic for wrong file: {d.file} -> {d.message}"
             )
-        rp.close()
 
     def test_check_file_after_close_raises(self) -> None:
         """check_file() should raise ProjectClosedError after close()."""
+        # Needs own instance since it closes the project
         rp = RustProject(fixture_path("simple_package"))
         rp.close()
         with pytest.raises(ProjectClosedError):
@@ -150,14 +156,13 @@ class TestCheckFileIntegration:
         """check_file() should raise on a nonexistent file path."""
         from tyo3.exceptions import PathResolutionError
 
-        rp = RustProject(fixture_path("simple_package"))
+        rp = get_project("simple_package")
         with pytest.raises(PathResolutionError):
             rp.check_file("nonexistent.py")
-        rp.close()
 
     def test_check_file_vs_check_consistency(self) -> None:
         """check() should include all diagnostics that check_file() returns for any file."""
-        rp = RustProject(fixture_path("diagnostic_targets"))
+        rp = get_project("diagnostic_targets")
         full_result = rp.check()
         file_result = rp.check_file("errors.py")
 
@@ -167,4 +172,3 @@ class TestCheckFileIntegration:
             assert d.message in full_messages, (
                 f"check_file diagnostic not found in check: {d.message}"
             )
-        rp.close()

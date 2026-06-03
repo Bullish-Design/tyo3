@@ -28,6 +28,20 @@ needs_native = pytest.mark.skipif(
     not _HAS_NATIVE, reason="Rust native extension not built"
 )
 
+# ── Cached session/graph (session-scoped, shared via conftest) ──
+
+
+def get_graph(fixture_name: str) -> CodeGraph:
+    from tyo3.tests.conftest import shared_graph
+
+    return shared_graph(fixture_name)
+
+
+def get_session(fixture_name: str) -> object:
+    from tyo3.tests.conftest import shared_session
+
+    return shared_session(fixture_name)
+
 
 # ── Unit tests (no native required) ──
 
@@ -105,138 +119,103 @@ class TestEdgeKindEnum:
 @needs_native
 class TestGraphConstruction:
     def test_build_simple(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("simple_package")) as session:
-            graph = CodeGraph.build(session)
-            assert graph.node_count > 0
-            assert graph.edge_count >= 0
+        graph = get_graph("simple_package")
+        assert graph.node_count > 0
+        assert graph.edge_count >= 0
 
     def test_nodes_have_module(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("simple_package")) as session:
-            graph = CodeGraph.build(session)
-            modules = graph.symbols_of_kind(SymbolKind.MODULE)
-            assert len(modules) > 0
+        graph = get_graph("simple_package")
+        modules = graph.symbols_of_kind(SymbolKind.MODULE)
+        assert len(modules) > 0
 
     def test_containment_edges_exist(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("classes")) as session:
-            graph = CodeGraph.build(session)
-            # Verify that the MODULE node has children (containment edges)
-            modules = graph.symbols_of_kind(SymbolKind.MODULE)
-            assert len(modules) > 0
-            # At least one module should have children
-            modules_with_kids = [m for m in modules if len(graph.children(m.symbol_id)) > 0]
-            assert len(modules_with_kids) > 0, "At least one module should have children"
+        graph = get_graph("classes")
+        # Verify that the MODULE node has children (containment edges)
+        modules = graph.symbols_of_kind(SymbolKind.MODULE)
+        assert len(modules) > 0
+        # At least one module should have children
+        modules_with_kids = [m for m in modules if len(graph.children(m.symbol_id)) > 0]
+        assert len(modules_with_kids) > 0, "At least one module should have children"
 
     def test_parent_finds_module(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("classes")) as session:
-            graph = CodeGraph.build(session)
-            modules = graph.symbols_of_kind(SymbolKind.MODULE)
-            for m in modules:
-                kids = graph.children(m.symbol_id)
-                if kids:
-                    # A child should find its way back to the parent module
-                    parent = graph.parent(kids[0].symbol_id)
-                    assert parent is not None
-                    assert parent.kind == SymbolKind.MODULE
-                    break
+        graph = get_graph("classes")
+        modules = graph.symbols_of_kind(SymbolKind.MODULE)
+        for m in modules:
+            kids = graph.children(m.symbol_id)
+            if kids:
+                # A child should find its way back to the parent module
+                parent = graph.parent(kids[0].symbol_id)
+                assert parent is not None
+                assert parent.kind == SymbolKind.MODULE
+                break
 
     def test_diagnostics_collection_works(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            all_diags = graph.all_diagnostics()
-            assert isinstance(all_diags, list)
-            # bug.py has an unsuppressed type error
-            has_bug_diag = any("bug.py" in (d.file or "") for d in all_diags)
-            assert has_bug_diag, f"Expected diagnostics for bug.py, got {len(all_diags)} total"
+        graph = get_graph("graph_test")
+        all_diags = graph.all_diagnostics()
+        assert isinstance(all_diags, list)
+        # bug.py has an unsuppressed type error
+        has_bug_diag = any("bug.py" in (d.file or "") for d in all_diags)
+        assert has_bug_diag, f"Expected diagnostics for bug.py, got {len(all_diags)} total"
 
 
 @needs_native
 class TestGraphQueries:
     def test_symbol_lookup(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("classes")) as session:
-            graph = CodeGraph.build(session)
-            # Find a class by iterating all nodes
-            classes = graph.symbols_of_kind(SymbolKind.CLASS)
-            assert len(classes) > 0
-            # Look it up by ID
-            found = graph.symbol(classes[0].symbol_id)
-            assert found is not None
-            assert found.symbol_id == classes[0].symbol_id
+        graph = get_graph("classes")
+        # Find a class by iterating all nodes
+        classes = graph.symbols_of_kind(SymbolKind.CLASS)
+        assert len(classes) > 0
+        # Look it up by ID
+        found = graph.symbol(classes[0].symbol_id)
+        assert found is not None
+        assert found.symbol_id == classes[0].symbol_id
 
     def test_symbols_in_file(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("classes")) as session:
-            graph = CodeGraph.build(session)
-            files = session.files()
-            assert len(files) > 0
-            symbols = graph.symbols_in_file(str(files[0]))
-            assert len(symbols) > 0
+        graph = get_graph("classes")
+        session = get_session("classes")
+        files = session.files()  # type: ignore[union-attr]
+        assert len(files) > 0
+        symbols = graph.symbols_in_file(str(files[0]))
+        assert len(symbols) > 0
 
     def test_children(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("classes")) as session:
-            graph = CodeGraph.build(session)
-            modules = graph.symbols_of_kind(SymbolKind.MODULE)
-            if modules:
-                kids = graph.children(modules[0].symbol_id)
-                assert len(kids) > 0
+        graph = get_graph("classes")
+        modules = graph.symbols_of_kind(SymbolKind.MODULE)
+        if modules:
+            kids = graph.children(modules[0].symbol_id)
+            assert len(kids) > 0
 
     def test_transitive_dependencies_returns_set(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("imports")) as session:
-            graph = CodeGraph.build(session)
-            # Any symbol should have a non-None result (possibly empty set)
-            for idx in graph.graph.node_indices():
-                node = graph.graph[idx]
-                deps = graph.transitive_dependencies(node.symbol_id)
-                assert isinstance(deps, set)
-                break
+        graph = get_graph("imports")
+        # Any symbol should have a non-None result (possibly empty set)
+        for idx in graph.graph.node_indices():
+            node = graph.graph[idx]
+            deps = graph.transitive_dependencies(node.symbol_id)
+            assert isinstance(deps, set)
+            break
 
     def test_external_symbols_is_list(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            # external_symbols should always return a list (possibly empty)
-            result = graph.external_symbols()
-            assert isinstance(result, list)
-            for node in result:
-                assert node.external is True
+        graph = get_graph("graph_test")
+        # external_symbols should always return a list (possibly empty)
+        result = graph.external_symbols()
+        assert isinstance(result, list)
+        for node in result:
+            assert node.external is True
 
     def test_external_symbols_by_package_is_dict(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            result = graph.external_symbols_by_package()
-            assert isinstance(result, dict)
+        graph = get_graph("graph_test")
+        result = graph.external_symbols_by_package()
+        assert isinstance(result, dict)
 
     def test_inheritance_for_graph_test_classes(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            all_classes = graph.symbols_of_kind(SymbolKind.CLASS)
-            # Only check project-local classes (not external stub "object" etc.)
-            local_classes = [c for c in all_classes if not c.external]
-            assert len(local_classes) >= 2, f"Expected at least Base + User class, got {len(local_classes)}"
-            for cls in local_classes:
-                parent = graph.parent(cls.symbol_id)
-                assert parent is not None, f"Class {cls.name} has no parent"
+        graph = get_graph("graph_test")
+        all_classes = graph.symbols_of_kind(SymbolKind.CLASS)
+        # Only check project-local classes (not external stub "object" etc.)
+        local_classes = [c for c in all_classes if not c.external]
+        assert len(local_classes) >= 2, f"Expected at least Base + User class, got {len(local_classes)}"
+        for cls in local_classes:
+            parent = graph.parent(cls.symbol_id)
+            assert parent is not None, f"Class {cls.name} has no parent"
 
 
 # ── DependencyGraph unit tests (no native required) ──
@@ -962,63 +941,165 @@ class TestExport:
         assert edge_data["range"]["start"]["line"] == 5
 
 
+# ── Phase 3: Parallel edges ──────────────────────────────────
+
+
+class TestParallelEdges:
+    """Verify that multiple edges between the same node pair are handled."""
+
+    def test_references_to_returns_all_parallel_edges(self) -> None:
+        graph = CodeGraph()
+        a = SymbolNode(
+            symbol_id="a.py::caller",
+            name="caller", qualified_name="caller",
+            kind=SymbolKind.FUNCTION, file="a.py",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1}, "end": {"line": 10, "column": 1}}
+            ),
+        )
+        b = SymbolNode(
+            symbol_id="b.py::target",
+            name="target", qualified_name="target",
+            kind=SymbolKind.FUNCTION, file="b.py",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1}, "end": {"line": 5, "column": 1}}
+            ),
+        )
+        graph._add_node(a)
+        graph._add_node(b)
+
+        # Three references from caller to target at different locations
+        for line in [3, 5, 7]:
+            edge = EdgeData(
+                kind=EdgeKind.REFERENCES,
+                file="a.py",
+                range=Range.model_validate(
+                    {"start": {"line": line, "column": 5},
+                     "end": {"line": line, "column": 11}}
+                ),
+                role=ReferenceRole.READ,
+            )
+            graph._add_edge("a.py::caller", "b.py::target", edge, "a.py")
+
+        refs = graph.references_to("b.py::target")
+        assert len(refs) == 3, f"Expected 3 references, got {len(refs)}"
+
+        from_refs = graph.references_from("a.py::caller")
+        assert len(from_refs) == 3
+
+    def test_children_dedup_with_parallel_containment_edges(self) -> None:
+        """Children should deduplicate when multiple containment edges exist."""
+        graph = CodeGraph()
+        mod = SymbolNode(
+            symbol_id="m.py::<module>",
+            name="m", qualified_name="<module>",
+            kind=SymbolKind.MODULE, file="m.py",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
+            ),
+        )
+        func = SymbolNode(
+            symbol_id="m.py::foo",
+            name="foo", qualified_name="foo",
+            kind=SymbolKind.FUNCTION, file="m.py",
+            range=Range.model_validate(
+                {"start": {"line": 2, "column": 1}, "end": {"line": 5, "column": 1}}
+            ),
+        )
+        graph._add_node(mod)
+        graph._add_node(func)
+
+        # Add two DEFINES edges from module to foo (simulates parallel edges)
+        e1 = EdgeData(kind=EdgeKind.DEFINES, file="m.py")
+        e2 = EdgeData(kind=EdgeKind.DEFINES, file="m.py")
+        graph._add_edge("m.py::<module>", "m.py::foo", e1, "m.py")
+        graph._add_edge("m.py::<module>", "m.py::foo", e2, "m.py")
+
+        kids = graph.children("m.py::<module>")
+        assert len(kids) == 1, f"Expected 1 child (dedup), got {len(kids)}"
+        assert kids[0].name == "foo"
+
+    def test_references_to_unknown_symbol_returns_empty(self) -> None:
+        graph = CodeGraph()
+        refs = graph.references_to("nonexistent::symbol")
+        assert refs == []
+
+    def test_references_from_unknown_symbol_returns_empty(self) -> None:
+        graph = CodeGraph()
+        refs = graph.references_from("nonexistent::symbol")
+        assert refs == []
+
+    def test_children_unknown_symbol_returns_empty(self) -> None:
+        graph = CodeGraph()
+        kids = graph.children("nonexistent::symbol")
+        assert kids == []
+
+    def test_parent_unknown_symbol_returns_none(self) -> None:
+        graph = CodeGraph()
+        p = graph.parent("nonexistent::symbol")
+        assert p is None
+
+
 # ── Phase 6: Incremental updates (integration tests) ──
 
 
 @needs_native
 class TestUpdateFile:
-    """Integration tests for update_file — requires native extension."""
+    """Integration tests for update_file — requires native extension.
+
+    These tests mutate the graph, so each gets a fresh CodeGraph.build().
+    The session is shared via the session-scoped cache.
+    """
+
+    def _fresh_graph(self) -> CodeGraph:
+        """Build a fresh graph using the shared session."""
+        session = get_session("graph_test")
+        return CodeGraph.build(session)
 
     def test_update_preserves_other_files(self) -> None:
         """After updating one file, other file nodes are untouched."""
-        from tyo3.session import TyO3Session
+        session = get_session("graph_test")
+        graph = self._fresh_graph()
+        # Record nodes before update
+        original_count = graph.node_count
+        symbols_in_models = graph.symbols_in_file(
+            str(StdPath(fixture_path("graph_test")) / "models.py")
+        )
+        assert len(symbols_in_models) > 0
 
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            # Record nodes before update
-            original_count = graph.node_count
-            symbols_in_models = graph.symbols_in_file(
-                str(StdPath(fixture_path("graph_test")) / "models.py")
-            )
-            assert len(symbols_in_models) > 0
+        # Update app.py
+        app_path = str(StdPath(fixture_path("graph_test")) / "app.py")
+        graph.update_file(session, app_path)
 
-            # Update app.py
-            app_path = str(StdPath(fixture_path("graph_test")) / "app.py")
-            graph.update_file(session, app_path)
-
-            # models.py symbols should still be there
-            symbols_in_models_after = graph.symbols_in_file(
-                str(StdPath(fixture_path("graph_test")) / "models.py")
-            )
-            assert len(symbols_in_models_after) > 0
+        # models.py symbols should still be there
+        symbols_in_models_after = graph.symbols_in_file(
+            str(StdPath(fixture_path("graph_test")) / "models.py")
+        )
+        assert len(symbols_in_models_after) > 0
 
     def test_update_repopulates_file(self) -> None:
         """After updating, the file's symbols are back in the graph."""
-        from tyo3.session import TyO3Session
+        session = get_session("graph_test")
+        graph = self._fresh_graph()
+        app_path = str(StdPath(fixture_path("graph_test")) / "app.py")
 
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            app_path = str(StdPath(fixture_path("graph_test")) / "app.py")
+        before_symbols = graph.symbols_in_file(app_path)
+        graph.update_file(session, app_path)
+        after_symbols = graph.symbols_in_file(app_path)
 
-            before_symbols = graph.symbols_in_file(app_path)
-            graph.update_file(session, app_path)
-            after_symbols = graph.symbols_in_file(app_path)
-
-            # Should have at least as many as before (or more if new symbols)
-            assert len(after_symbols) >= len(before_symbols)
+        # Should have at least as many as before (or more if new symbols)
+        assert len(after_symbols) >= len(before_symbols)
 
     def test_update_clears_file_diagnostics(self) -> None:
         """After updating, diagnostics for the file are re-populated."""
-        from tyo3.session import TyO3Session
+        session = get_session("graph_test")
+        graph = self._fresh_graph()
+        bug_path = str(StdPath(fixture_path("graph_test")) / "bug.py")
 
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            bug_path = str(StdPath(fixture_path("graph_test")) / "bug.py")
-
-            graph.update_file(session, bug_path)
-            diags = graph.diagnostics_for_file(bug_path)
-            # Should still have diagnostics after re-indexing
-            assert isinstance(diags, list)
+        graph.update_file(session, bug_path)
+        diags = graph.diagnostics_for_file(bug_path)
+        # Should still have diagnostics after re-indexing
+        assert isinstance(diags, list)
 
 
 @needs_native
@@ -1036,34 +1117,25 @@ class TestImportCyclesIntegration:
     def test_no_false_cycles_on_simple_package(self) -> None:
         """A simple package without circular imports should not
         produce spurious cycles."""
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("simple_package")) as session:
-            graph = CodeGraph.build(session)
-            cycles = graph.import_cycles()
-            # It must not report false positives
-            assert len(cycles) == 0, (
-                f"simple_package should have no import cycles, got {cycles}"
-            )
+        graph = get_graph("simple_package")
+        cycles = graph.import_cycles()
+        # It must not report false positives
+        assert len(cycles) == 0, (
+            f"simple_package should have no import cycles, got {cycles}"
+        )
 
     def test_does_not_crash_on_complex_fixture(self) -> None:
         """The circular_imports fixture exercises the detector without
         crashing, even if the API cannot track cross-file edges yet."""
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("circular_imports")) as session:
-            graph = CodeGraph.build(session)
-            cycles = graph.import_cycles()
-            # Must return a list (possibly empty due to API limitations)
-            assert isinstance(cycles, list)
+        graph = get_graph("circular_imports")
+        cycles = graph.import_cycles()
+        # Must return a list (possibly empty due to API limitations)
+        assert isinstance(cycles, list)
 
     def test_graph_test_fixture_no_crash(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            cycles = graph.import_cycles()
-            assert isinstance(cycles, list)
+        graph = get_graph("graph_test")
+        cycles = graph.import_cycles()
+        assert isinstance(cycles, list)
 
 
 @needs_native
@@ -1071,28 +1143,22 @@ class TestHubSymbolsIntegration:
     """Integration tests for hub symbol detection."""
 
     def test_hub_symbols_returns_list(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            hubs = graph.hub_symbols(top_n=5)
-            assert isinstance(hubs, list)
-            for sid, score in hubs:
-                assert isinstance(sid, str)
-                assert isinstance(score, float)
-                assert score > 0.0
+        graph = get_graph("graph_test")
+        hubs = graph.hub_symbols(top_n=5)
+        assert isinstance(hubs, list)
+        for sid, score in hubs:
+            assert isinstance(sid, str)
+            assert isinstance(score, float)
+            assert score > 0.0
 
     def test_hub_symbols_sorted_descending(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("classes")) as session:
-            graph = CodeGraph.build(session)
-            hubs = graph.hub_symbols(top_n=10)
-            if len(hubs) >= 2:
-                for i in range(len(hubs) - 1):
-                    assert hubs[i][1] >= hubs[i+1][1], (
-                        f"Hubs not sorted: {hubs[i][1]} < {hubs[i+1][1]}"
-                    )
+        graph = get_graph("classes")
+        hubs = graph.hub_symbols(top_n=10)
+        if len(hubs) >= 2:
+            for i in range(len(hubs) - 1):
+                assert hubs[i][1] >= hubs[i+1][1], (
+                    f"Hubs not sorted: {hubs[i][1]} < {hubs[i+1][1]}"
+                )
 
 
 @needs_native
@@ -1100,36 +1166,30 @@ class TestSubgraphForFileIntegration:
     """Integration tests for file subgraph extraction."""
 
     def test_extracts_meaningful_subgraph(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            models_path = str(
-                StdPath(fixture_path("graph_test")) / "models.py"
-            )
-            sub = graph.subgraph_for_file(models_path)
-            assert sub.num_nodes() > 0
-            # Should have at least the module node
-            node_names = {sub[i].name for i in sub.node_indices()}
-            assert len(node_names) >= 1
+        graph = get_graph("graph_test")
+        models_path = str(
+            StdPath(fixture_path("graph_test")) / "models.py"
+        )
+        sub = graph.subgraph_for_file(models_path)
+        assert sub.num_nodes() > 0
+        # Should have at least the module node
+        node_names = {sub[i].name for i in sub.node_indices()}
+        assert len(node_names) >= 1
 
     def test_export_dot_of_subgraph(self) -> None:
-        from tyo3.session import TyO3Session
-
-        with TyO3Session(fixture_path("graph_test")) as session:
-            graph = CodeGraph.build(session)
-            models_path = str(
-                StdPath(fixture_path("graph_test")) / "models.py"
-            )
-            sub = graph.subgraph_for_file(models_path)
-            # We can't call to_dot directly on the sub (it expects a CodeGraph),
-            # but we can verify the sub is a valid PyDiGraph
-            assert sub.num_nodes() > 0
-            # Check we can iterate
-            for idx in sub.node_indices():
-                node = sub[idx]
-                assert isinstance(node, SymbolNode)
-                break
+        graph = get_graph("graph_test")
+        models_path = str(
+            StdPath(fixture_path("graph_test")) / "models.py"
+        )
+        sub = graph.subgraph_for_file(models_path)
+        # We can't call to_dot directly on the sub (it expects a CodeGraph),
+        # but we can verify the sub is a valid PyDiGraph
+        assert sub.num_nodes() > 0
+        # Check we can iterate
+        for idx in sub.node_indices():
+            node = sub[idx]
+            assert isinstance(node, SymbolNode)
+            break
 
 
 # ── Phase 2: Qualified-name mismatch fix tests ──
@@ -1146,97 +1206,86 @@ class TestQualifiedNameResolution:
 
     def test_nested_methods_have_correct_qualified_names(self) -> None:
         """Methods inside classes should have dotted qualified names."""
-        from tyo3.session import TyO3Session
+        graph = get_graph("simple_package")
 
-        with TyO3Session(fixture_path("simple_package")) as session:
-            graph = CodeGraph.build(session)
+        methods = graph.symbols_of_kind(SymbolKind.METHOD)
+        assert len(methods) >= 1, "Expected at least one method"
 
-            methods = graph.symbols_of_kind(SymbolKind.METHOD)
-            assert len(methods) >= 1, "Expected at least one method"
-
-            for m in methods:
-                if not m.external:
-                    assert "." in m.qualified_name, (
-                        f"Method {m.name} should have dotted qualified_name, "
-                        f"got {m.qualified_name!r}"
-                    )
+        for m in methods:
+            if not m.external:
+                assert "." in m.qualified_name, (
+                    f"Method {m.name} should have dotted qualified_name, "
+                    f"got {m.qualified_name!r}"
+                )
 
     def test_find_symbol_in_file_resolves_by_short_name(self) -> None:
         """_find_symbol_in_file must find nodes by short name when the
         SID contains a qualified path (e.g. 'models.py::User.save' vs
         the occurrence target_name 'save')."""
-        from tyo3.session import TyO3Session
+        graph = get_graph("simple_package")
 
-        with TyO3Session(fixture_path("simple_package")) as session:
-            graph = CodeGraph.build(session)
+        main_path = str(
+            StdPath(fixture_path("simple_package")) / "main.py"
+        )
 
-            main_path = str(
-                StdPath(fixture_path("simple_package")) / "main.py"
-            )
+        # Look up "MyClass" by short name
+        found = graph._find_symbol_in_file(main_path, "MyClass")
+        assert found is not None, (
+            "_find_symbol_in_file should find 'MyClass' by short name"
+        )
+        assert "MyClass" in found
 
-            # Look up "MyClass" by short name
-            found = graph._find_symbol_in_file(main_path, "MyClass")
-            assert found is not None, (
-                "_find_symbol_in_file should find 'MyClass' by short name"
-            )
-            assert "MyClass" in found
-
-            # Look up a method "get_val" by short name
-            found_method = graph._find_symbol_in_file(main_path, "get_val")
-            assert found_method is not None, (
-                "_find_symbol_in_file should find 'get_val' by short name"
-            )
-            assert "get_val" in found_method
+        # Look up a method "get_val" by short name
+        found_method = graph._find_symbol_in_file(main_path, "get_val")
+        assert found_method is not None, (
+            "_find_symbol_in_file should find 'get_val' by short name"
+        )
+        assert "get_val" in found_method
 
     def test_references_to_function_connect_correctly(self) -> None:
         """References to a top-level function should appear as incoming
         REFERENCES edges on that function's node."""
-        from tyo3.session import TyO3Session
+        graph = get_graph("simple_package")
 
-        with TyO3Session(fixture_path("simple_package")) as session:
-            graph = CodeGraph.build(session)
+        # Find the greet function
+        greet_nodes = [
+            n for n in graph.symbols_of_kind(SymbolKind.FUNCTION)
+            if n.name == "greet" and not n.external
+        ]
+        assert len(greet_nodes) >= 1, "greet function should exist"
+        greet_node = greet_nodes[0]
 
-            # Find the greet function
-            greet_nodes = [
-                n for n in graph.symbols_of_kind(SymbolKind.FUNCTION)
-                if n.name == "greet" and not n.external
-            ]
-            assert len(greet_nodes) >= 1, "greet function should exist"
-            greet_node = greet_nodes[0]
+        # greet() should have at least one incoming REFERENCES edge
+        # (the call `greet("world")` at module level)
+        refs = graph.references_to(greet_node.symbol_id)
+        assert len(refs) > 0, (
+            f"greet() should have at least one reference, got {len(refs)}"
+        )
 
-            # greet() should have at least one incoming REFERENCES edge
-            # (the call `greet("world")` at module level)
-            refs = graph.references_to(greet_node.symbol_id)
-            assert len(refs) > 0, (
-                f"greet() should have at least one reference, got {len(refs)}"
-            )
-
-            for r in refs:
-                assert r.kind == EdgeKind.REFERENCES
-                assert r.role is not None
+        for r in refs:
+            assert r.kind == EdgeKind.REFERENCES
+            assert r.role is not None
 
     def test_occurrence_model_has_target_qualified_name(self) -> None:
         """NameOccurrence objects from file_occurrences must carry the
         target_qualified_name field (added in Phase 2)."""
-        from tyo3.session import TyO3Session
+        session = get_session("simple_package")
+        main_path = str(
+            StdPath(fixture_path("simple_package")) / "main.py"
+        )
+        occurrences = session.file_occurrences(main_path)  # type: ignore[union-attr]
+        assert len(occurrences) > 0
 
-        with TyO3Session(fixture_path("simple_package")) as session:
-            main_path = str(
-                StdPath(fixture_path("simple_package")) / "main.py"
+        # Every occurrence should have the target_qualified_name field
+        for occ in occurrences:
+            assert hasattr(occ, "target_qualified_name"), (
+                "NameOccurrence must have target_qualified_name (Phase 2)"
             )
-            occurrences = session.file_occurrences(main_path)
-            assert len(occurrences) > 0
 
-            # Every occurrence should have the target_qualified_name field
-            for occ in occurrences:
-                assert hasattr(occ, "target_qualified_name"), (
-                    "NameOccurrence must have target_qualified_name (Phase 2)"
-                )
-
-            # At least one occurrence should have a qualified name
-            # (e.g. a class method reference)
-            has_qualified = any(
-                occ.target_qualified_name is not None for occ in occurrences
-            )
-            # Note: not asserting this is always True — some fixtures
-            # may only have top-level references (no qualified names needed)
+        # At least one occurrence should have a qualified name
+        # (e.g. a class method reference)
+        has_qualified = any(
+            occ.target_qualified_name is not None for occ in occurrences
+        )
+        # Note: not asserting this is always True — some fixtures
+        # may only have top-level references (no qualified names needed)
