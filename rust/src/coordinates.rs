@@ -46,22 +46,34 @@ pub fn position_to_offset_with_index(
     }
 
     let line_start = line_index.line_start(OneIndexed::from_zero_indexed(line_idx), source);
+    let line_start_usize = line_start.to_usize();
 
-    // Convert column (Unicode codepoints) to byte offset
-    let line_start_usize: usize = line_start.to_usize();
-    let line_text = &source[line_start_usize..];
-    let byte_col = char_len_to_byte_offset(line_text, col);
+    // Extract the current line only (not the rest of the file).
+    let line_end_usize = if line_idx + 1 < total_lines {
+        line_index
+            .line_start(OneIndexed::from_zero_indexed(line_idx + 1), source)
+            .to_usize()
+    } else {
+        source.len()
+    };
 
-    // Validate column does not exceed the line
-    if usize::from(byte_col) > line_text.len() {
+    let raw_line_text = &source[line_start_usize..line_end_usize];
+    let line_text = raw_line_text.trim_end_matches(['\n', '\r']);
+
+    // Validate column does not go beyond one-past-the-end of the line.
+    // Column line_length + 1 is allowed (position after last char);
+    // column line_length + 2 is rejected.
+    let line_char_count = line_text.chars().count();
+    if col > line_char_count {
         return Err(format!(
-            "Column {} exceeds line {} length ({} bytes)",
+            "Column {} exceeds line {} length ({} characters)",
             column,
             line,
-            line_text.len()
+            line_char_count
         ));
     }
 
+    let byte_col = char_len_to_byte_offset(line_text, col);
     Ok(line_start + byte_col)
 }
 
@@ -117,4 +129,49 @@ pub fn range_to_dto(
 ) -> RangeDto {
     let line_index = LineIndex::from_source_text(source);
     range_to_dto_with_index(source, &line_index, range)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ruff_source_file::LineIndex;
+
+    fn offset(source: &str, line: u32, column: u32) -> Result<u32, String> {
+        let index = LineIndex::from_source_text(source);
+        position_to_offset_with_index(source, &index, line, column)
+            .map(|t| t.to_u32())
+    }
+
+    #[test]
+    fn rejects_column_beyond_current_line() {
+        let source = "x = 1\ny = 2\n";
+        assert!(offset(source, 1, 500).is_err());
+    }
+
+    #[test]
+    fn accepts_end_of_line_position() {
+        let source = "x = 1\ny = 2\n";
+        assert!(offset(source, 1, 6).is_ok());
+    }
+
+    #[test]
+    fn rejects_line_past_file() {
+        let source = "x = 1\n";
+        assert!(offset(source, 99, 1).is_err());
+    }
+
+    #[test]
+    fn handles_unicode_codepoints() {
+        let source = "αβ = 1\n";
+        assert!(offset(source, 1, 1).is_ok());
+        assert!(offset(source, 1, 2).is_ok());
+        assert!(offset(source, 1, 99).is_err());
+    }
+
+    #[test]
+    fn handles_crlf() {
+        let source = "x = 1\r\ny = 2\r\n";
+        assert!(offset(source, 1, 6).is_ok());
+        assert!(offset(source, 1, 7).is_err());
+    }
 }

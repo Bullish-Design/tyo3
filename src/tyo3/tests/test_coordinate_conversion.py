@@ -172,6 +172,15 @@ class TestRustCoordinateConversion:
                     f" < start {sym.location.range.start.column}"
                 )
 
+    def test_valid_column_on_first_line_still_works(self) -> None:
+        """Position (1, 1) on the first line should still resolve correctly.
+
+        This is a regression test to ensure that the coordinate fix does not
+        break normal valid position lookup.
+        """
+        result = self.rp.goto_definition("main.py", 1, 1)
+        assert isinstance(result, list)
+
     def test_column_beyond_current_line_rejected(self) -> None:
         """Column 500 on line 1 must raise PositionError, not clamp silently.
 
