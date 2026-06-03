@@ -1,6 +1,6 @@
 # TyO3 Review 2 Refactoring Guide
 
-Date: 2026-06-03
+Date: 2026-06-03 (revised)
 
 Audience: new TyO3 contributors, including interns who are comfortable with
 Python but new to Rust and PyO3.
@@ -33,6 +33,10 @@ The highest priority issues are:
    as dependencies.
 7. Public exception mapping and native panic boundaries need hardening.
 8. Tests need exact semantic assertions, not just no-crash and shape checks.
+9. Graph diagnostics collection calls `check_file()` per file, each triggering
+   a full project check internally — an O(N) FFI problem where O(1) suffices.
+10. The range-size sort key used by `_find_enclosing_symbol` is incorrect for
+    multi-line ranges, producing wrong enclosing-symbol lookups.
 
 The target state after this guide:
 
@@ -40,9 +44,10 @@ The target state after this guide:
 - References attach to the innermost enclosing symbol, not the module fallback.
 - Project-local targets are never externalized because of file ordering.
 - `OVERRIDES` edges exist for simple inheritance.
-- `update_file()` is correct, even if initially implemented as a full rebuild.
+- `update_file()` is correct for its documented scope.
 - Coordinates past the current line raise `PositionError`.
 - Dependency queries filter dependency edge kinds explicitly.
+- Diagnostics are collected with a single `check()` call.
 - CI/static checks are meaningful enough to prevent regressions.
 
 ## Ground Rules
@@ -63,28 +68,25 @@ When editing:
 Recommended baseline commands:
 
 ```bash
-devenv shell
-build
-pytest src/tyo3/tests/ -q
-ruff check .
-ty check src
+devenv shell -- build
+devenv shell -- tests
+devenv shell -- ruff check .
 ```
 
-At the time of this review, `ruff check .` and `ty check src` are expected to
-fail. Do not treat that as permission to ignore new failures. Each phase below
-defines the minimum validation for that phase.
+At the time of this review, `ruff check .` is expected to fail. Do not treat
+that as permission to ignore new failures. Each phase below defines the minimum
+validation for that phase.
 
 ## Phase 0: Add Focused Regression Tests
 
 Purpose: capture the bugs before changing the implementation. Some of these
 tests will fail at first. That is expected.
 
-### 0.1 Add a Graph Helper Module for Tests
+### 0.1 Add a Graph Test Helpers Module
 
-Create a helper in `src/tyo3/tests/test_graph_semantics.py` or add helper
-functions to an existing graph test file.
-
-Use helpers like this:
+Create `src/tyo3/tests/graph_helpers.py` (not a test file — a shared helper
+module). Keep test helpers separate from test cases so multiple test files can
+import them without duplication.
 
 ```python
 from tyo3.graph import CodeGraph, EdgeKind
@@ -92,20 +94,32 @@ from tyo3.graph.models import SymbolNode
 from tyo3.models.symbols import SymbolKind
 
 
-def find_one(graph: CodeGraph, *, file_suffix: str, name: str, kind: SymbolKind) -> SymbolNode:
+def find_one(
+    graph: CodeGraph,
+    *,
+    file_suffix: str,
+    name: str,
+    kind: SymbolKind,
+) -> SymbolNode:
+    """Find exactly one non-external symbol matching the criteria."""
     matches = [
         node
         for node in graph.symbols_of_kind(kind)
-        if node.file.endswith(file_suffix) and node.name == name and not node.external
+        if node.file.endswith(file_suffix)
+        and node.name == name
+        and not node.external
     ]
     assert len(matches) == 1, (
-        f"Expected exactly one {kind} named {name!r} in {file_suffix}, "
+        f"Expected exactly one {kind} named {name!r} in *{file_suffix}, "
         f"got {[m.symbol_id for m in matches]}"
     )
     return matches[0]
 
 
-def edges_of_kind(graph: CodeGraph, kind: EdgeKind) -> list[tuple[str, str]]:
+def edges_of_kind(
+    graph: CodeGraph, kind: EdgeKind
+) -> list[tuple[str, str]]:
+    """Return all (source_id, target_id) pairs for edges of a given kind."""
     result: list[tuple[str, str]] = []
     for edge_idx in graph.graph.edge_indices():
         data = graph.graph.get_edge_data_by_index(edge_idx)
@@ -121,19 +135,18 @@ Explanation:
 - `find_one()` avoids weak checks like `len(nodes) > 0`.
 - `edges_of_kind()` lets tests assert exact graph relationships.
 - Checking `file.endswith(...)` keeps tests working while paths are still
-  absolute. Later, after path normalization, update these to exact relative
+  absolute. After Phase 7 (path normalization), update these to exact relative
   paths.
 
 ### 0.2 Test References Attach to Functions, Not Modules
 
-Use the existing `fixtures/graph_test`:
+Create `src/tyo3/tests/test_graph_semantics.py`:
 
 ```python
-from pathlib import Path
-
 from tyo3.graph import EdgeKind
 from tyo3.models.symbols import SymbolKind
 from tyo3.tests.conftest import get_graph, needs_native
+from tyo3.tests.graph_helpers import find_one
 
 
 @needs_native
@@ -190,37 +203,30 @@ These fail today because references from `app.py` attach to
 def test_user_save_overrides_base_save() -> None:
     graph = get_graph("graph_test")
 
-    base_save = find_one(
-        graph,
-        file_suffix="models.py",
-        name="save",
-        kind=SymbolKind.METHOD,
-    )
-    user_save_candidates = [
+    overrides = edges_of_kind(graph, EdgeKind.OVERRIDES)
+
+    # Find by qualified_name — unambiguous
+    user_save = [
         node for node in graph.symbols_of_kind(SymbolKind.METHOD)
-        if node.file.endswith("models.py")
-        and node.name == "save"
-        and ".User." in node.symbol_id
+        if node.qualified_name == "User.save"
+        and node.file.endswith("models.py")
     ]
-    assert len(user_save_candidates) == 1
-    user_save = user_save_candidates[0]
+    base_save = [
+        node for node in graph.symbols_of_kind(SymbolKind.METHOD)
+        if node.qualified_name == "Base.save"
+        and node.file.endswith("models.py")
+    ]
 
-    override_edges = edges_of_kind(graph, EdgeKind.OVERRIDES)
-    assert (user_save.symbol_id, base_save.symbol_id) in override_edges
-```
-
-If this helper finds both `Base.save` and `User.save`, refine selection by
-`qualified_name`:
-
-```python
-node.qualified_name == "Base.save"
-node.qualified_name == "User.save"
+    assert len(user_save) == 1
+    assert len(base_save) == 1
+    assert (user_save[0].symbol_id, base_save[0].symbol_id) in overrides
 ```
 
 ### 0.4 Test Dependency Queries Exclude Structural Edges
 
 ```python
-from tyo3.graph import CodeGraph, EdgeData, EdgeKind, SymbolNode
+from tyo3.graph import CodeGraph, EdgeData, EdgeKind
+from tyo3.graph.models import SymbolNode
 from tyo3.models.analysis import Range
 from tyo3.models.symbols import SymbolKind
 
@@ -251,13 +257,16 @@ def test_dependencies_do_not_include_defined_children() -> None:
     )
     graph._add_node(module)
     graph._add_node(function)
-    graph._add_edge(module.symbol_id, function.symbol_id, EdgeData(kind=EdgeKind.DEFINES), "a.py")
+    graph._add_edge(
+        module.symbol_id, function.symbol_id,
+        EdgeData(kind=EdgeKind.DEFINES), "a.py",
+    )
 
     assert graph.children(module.symbol_id) == [function]
     assert graph.dependencies(module.symbol_id) == set()
 ```
 
-This test should fail before Phase 5.
+This test should fail before Phase 4.
 
 ### 0.5 Test Coordinate Past Current Line
 
@@ -278,11 +287,9 @@ This currently fails because the Rust converter accepts the position.
 
 ### Phase 0 Validation
 
-Run:
-
 ```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_semantics.py -q
-PYTHONPATH=src pytest src/tyo3/tests/test_coordinate_conversion.py -q
+devenv shell -- pytest src/tyo3/tests/test_graph_semantics.py -q
+devenv shell -- pytest src/tyo3/tests/test_coordinate_conversion.py -q
 ```
 
 Expected result before fixes:
@@ -451,12 +458,10 @@ def test_valid_column_on_first_line_still_works() -> None:
 
 ### Phase 1 Validation
 
-Run:
-
 ```bash
 cargo test --manifest-path rust/Cargo.toml coordinates
-build
-PYTHONPATH=src pytest src/tyo3/tests/test_coordinate_conversion.py -q
+devenv shell -- build
+devenv shell -- pytest src/tyo3/tests/test_coordinate_conversion.py -q
 ```
 
 If `cargo test` fails because the crate is a PyO3 extension and cannot link in
@@ -495,16 +500,7 @@ and `type_hierarchy()` do this. `find_references()` and `hover()` do not.
 
 ### 2.2 Update `find_references()`
 
-In `src/tyo3/rust_project.py`, change:
-
-```python
-except _NativePositionError as e:
-    raise PositionError(str(e)) from e
-except Exception as e:
-    raise InternalTyError(f"Unexpected error in find_references(): {e}") from e
-```
-
-to:
+In `src/tyo3/rust_project.py`, add the missing exception handlers:
 
 ```python
 except _NativePositionError as e:
@@ -519,7 +515,7 @@ except Exception as e:
 
 ### 2.3 Update `hover()`
 
-Use the same mapping:
+Same mapping:
 
 ```python
 except _NativePositionError as e:
@@ -532,9 +528,23 @@ except Exception as e:
     raise InternalTyError(f"Unexpected error in hover(): {e}") from e
 ```
 
-### 2.4 Add Tests
+### 2.4 Remove Duplicate Position Validation
 
-Add native tests:
+`TyO3Session._validate_position()` checks `line >= 1, column >= 1` in Python.
+The Rust coordinate code (`coordinates.rs`) performs the same check. The Python
+validation fires first, so the Rust path for zero/negative values is
+unreachable. Remove the redundant Python-side validation and let Rust be the
+single source of truth. This means `PositionError` for bad values is raised via
+the Rust → `_NativePositionError` → `PositionError` mapping, same as all other
+position errors.
+
+Delete `_validate_position()` from `TyO3Session` and remove all calls to it.
+
+Similarly, `workspace_symbols("")` is guarded in both `TyO3Session` (line 90)
+and `RustProject` (line 308). Keep the guard in `TyO3Session` only — it is the
+public API surface.
+
+### 2.5 Add Tests
 
 ```python
 @needs_native
@@ -555,11 +565,8 @@ def test_hover_bad_path_raises_path_error() -> None:
             rp.hover("missing.py", 1, 1)
     finally:
         rp.close()
-```
 
-Also test negative values:
 
-```python
 @needs_native
 def test_find_references_negative_position_raises_position_error() -> None:
     rp = RustProject(fixture_path("simple_package"))
@@ -572,10 +579,8 @@ def test_find_references_negative_position_raises_position_error() -> None:
 
 ### Phase 2 Validation
 
-Run:
-
 ```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_exceptions.py src/tyo3/tests/test_coordinate_conversion.py -q
+devenv shell -- pytest src/tyo3/tests/test_exceptions.py src/tyo3/tests/test_coordinate_conversion.py -q
 ```
 
 Definition of done:
@@ -583,6 +588,7 @@ Definition of done:
 - Bad paths raise `PathResolutionError` consistently.
 - Bad positions raise `PositionError` consistently.
 - Unexpected native failures still raise `InternalTyError`.
+- No duplicate validation logic between `TyO3Session` and `RustProject`.
 
 ## Phase 3: Rebuild `CodeGraph.build()` as Multi-Pass
 
@@ -591,7 +597,7 @@ real enclosing symbols.
 
 This is the most important graph phase.
 
-### 3.1 Understand the Current Bug
+### 3.1 Understand the Current Bugs
 
 Current build flow:
 
@@ -605,61 +611,60 @@ for file_path in session.files():
 1. Add module and symbol nodes.
 2. Add containment edges.
 3. Resolve references.
-4. Collect diagnostics.
+4. Collect diagnostics (via `check_file()` — a full project check).
 5. Resolve inheritance.
 6. Build range cache.
 
-Reference resolution calls `_find_enclosing_symbol()`, but the range cache is
-not built until after reference resolution. Therefore the lookup falls back to
-the module node.
+There are two ordering bugs:
 
-The fix is not just moving one line. Cross-file target nodes also need to exist
-before reference resolution.
+**Bug A — range cache too late:** Reference resolution calls
+`_find_enclosing_symbol()`, but the range cache is not built until step 6
+(after references). The lookup falls back to the module node.
 
-### 3.2 Add Construction State
+**Bug B — cross-file order dependence:** When processing file A's references,
+if a target is in file B which hasn't been processed yet, the target is
+classified as "external" and gets a stub node. This is wrong — it is a
+project-local file.
 
-In `CodeGraph.__init__()`, add:
+The fix requires all project nodes and all range caches to exist before any
+reference is resolved.
+
+### 3.2 Fix the Range Sort Key
+
+The range cache powers `_find_enclosing_symbol()`, which is the core mechanism
+for attaching references to the correct symbol. The current sort key is wrong
+for multi-line ranges:
 
 ```python
-self._project_files: set[str] = set()
-self._symbols_by_file: dict[str, list[Symbol]] = {}
-self._pending_references: list[PendingReference] = []
+key=lambda t: (t[2] - t[0], t[3] - t[1])  # end_line - start_line, end_col - start_col
 ```
 
-Add a dataclass near the top of `graph.py`:
+For a multi-line range, `end_col - start_col` is meaningless — a function on
+lines 10-50 ending at column 5 is not smaller than one on lines 10-50 ending
+at column 80. The sort must use total span as the metric:
 
 ```python
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True, slots=True)
-class PendingReference:
-    source_symbol_id: str
-    target_file: str
-    target_name: str
-    target_qualified_name: str | None
-    file: str
-    range: Range
-    role: ReferenceRole
+def _range_size(t: tuple[int, int, int, int, str]) -> tuple[int, int]:
+    """Sort key: (line span, end column). Smallest ranges first."""
+    start_line, _start_col, end_line, end_col, _sid = t
+    return (end_line - start_line, end_col)
 ```
 
-Explanation:
+Use this in every place that builds the range cache (both `_index_file()` and
+`_rebuild_indexes()`). The first element (line span) dominates; the second
+element (end column) only matters for single-line ranges where line span is 0,
+which is the one case where comparing columns is meaningful.
 
-- `_project_files` means "files in this project", not "files already indexed".
-- `_symbols_by_file` lets later phases reuse the symbols collected in the first
-  pass.
-- `_pending_references` records references that point to project files but
-  cannot yet be resolved to a known symbol. Do not create external stubs for
-  these.
-
-### 3.3 Split `_index_file()` into Smaller Methods
+### 3.3 Split `_index_file()` into Phase Methods
 
 Do this as a mechanical refactor. Keep behavior the same at first.
 
 Create these private methods:
 
 ```python
-def _collect_symbols_for_file(self, session: TyO3Session, file_str: str) -> list[Symbol] | None:
+def _collect_symbols_for_file(
+    self, session: TyO3Session, file_str: str
+) -> list[Symbol] | None:
     try:
         return session.document_symbols(file_str)
     except Exception:
@@ -667,32 +672,24 @@ def _collect_symbols_for_file(self, session: TyO3Session, file_str: str) -> list
         return None
 
 
-def _materialize_file_nodes(self, file_str: str, symbols: list[Symbol]) -> None:
+def _materialize_file_nodes(
+    self, file_str: str, symbols: list[Symbol]
+) -> None:
     ...
 
 
-def _add_containment_edges_for_file(self, file_str: str, symbols: list[Symbol]) -> None:
+def _add_containment_edges_for_file(
+    self, file_str: str, symbols: list[Symbol]
+) -> None:
     ...
 
 
 def _build_range_cache_for_file(self, file_str: str) -> None:
     ...
-
-
-def _collect_diagnostics_for_file(self, session: TyO3Session, file_str: str) -> None:
-    ...
-
-
-def _resolve_inheritance_for_file(self, session: TyO3Session, file_str: str) -> None:
-    symbols = self._symbols_by_file.get(file_str, [])
-    self._resolve_inheritance(session, file_str, symbols)
 ```
 
 Move existing code from `_index_file()` into these methods. Do not change logic
 while moving code except where necessary to use parameters.
-
-After this, `_index_file()` can temporarily call the new methods in the old
-order. Run tests before proceeding if the refactor is large.
 
 ### 3.4 Implement Multi-Pass `build()`
 
@@ -703,51 +700,103 @@ Replace `CodeGraph.build()` with:
 def build(cls, session: TyO3Session) -> CodeGraph:
     graph = cls()
     files = [str(file_path) for file_path in session.files()]
-    graph._project_files = set(files)
+    project_files = set(files)
 
-    # Pass 1: collect symbols
+    # ── Pass 1: collect symbols ──
+    symbols_by_file: dict[str, list[Symbol]] = {}
     for file_str in files:
         symbols = graph._collect_symbols_for_file(session, file_str)
-        if symbols is None:
-            continue
-        graph._symbols_by_file[file_str] = symbols
+        if symbols is not None:
+            symbols_by_file[file_str] = symbols
 
-    # Pass 2: materialize all local nodes
-    for file_str, symbols in graph._symbols_by_file.items():
+    # ── Pass 2: materialize all project nodes ──
+    for file_str, symbols in symbols_by_file.items():
         graph._materialize_file_nodes(file_str, symbols)
 
-    # Pass 3: structural edges and range caches
-    for file_str, symbols in graph._symbols_by_file.items():
+    # ── Pass 3: structural edges + range caches ──
+    for file_str, symbols in symbols_by_file.items():
         graph._add_containment_edges_for_file(file_str, symbols)
         graph._build_range_cache_for_file(file_str)
 
-    # Pass 4: semantic references
-    for file_str in graph._symbols_by_file:
-        graph._resolve_references_via_occurrences(session, file_str)
+    # ── Pass 4: semantic references ──
+    for file_str in symbols_by_file:
+        graph._resolve_references_via_occurrences(
+            session, file_str, project_files
+        )
 
-    graph._resolve_pending_references()
+    # ── Pass 5: inheritance and overrides ──
+    for file_str, symbols in symbols_by_file.items():
+        graph._resolve_inheritance(session, file_str, symbols)
 
-    # Pass 5: inheritance and overrides
-    for file_str in graph._symbols_by_file:
-        graph._resolve_inheritance_for_file(session, file_str)
-
-    # Pass 6: diagnostics
-    for file_str in graph._symbols_by_file:
-        graph._collect_diagnostics_for_file(session, file_str)
+    # ── Pass 6: diagnostics (single check, distribute per-file) ──
+    graph._collect_all_diagnostics(session)
 
     return graph
 ```
 
-Explanation:
+Key design decisions:
 
-- All project nodes exist before any reference is resolved.
-- All range caches exist before `_find_enclosing_symbol()` is called.
-- External stubs can now be limited to files not in `_project_files`.
-- Diagnostics are last because they do not affect graph topology.
+- **No build state on `self`.** The build method uses local variables
+  (`symbols_by_file`, `project_files`) and passes them to helpers as arguments.
+  The resulting `CodeGraph` instance carries only the graph and its indexes —
+  no leftover construction scaffolding. This keeps the runtime object clean.
 
-### 3.5 Fix External Target Classification
+- **`project_files` is passed to reference resolution**, not stored. When
+  `_resolve_references_via_occurrences` encounters a target in a project file,
+  it knows not to create an external stub — the target exists as a node already
+  (Pass 2 guaranteed this). If the target can't be found by ID or name lookup,
+  it is a symbol-identity mismatch, not a missing file. Log a warning; do not
+  defer it.
 
-Update `_ensure_target_node_simple()`:
+- **No `PendingReference` mechanism.** In a correct multi-pass build, all
+  project nodes exist before Pass 4. If a project-local reference can't be
+  resolved, that is a bug in symbol identity (the Rust-returned name doesn't
+  match how the node was stored). The right response is a warning, not a
+  deferred queue. A deferred queue would hide symbol-identity bugs by
+  silently retrying with different matching strategies.
+
+- **Single `check()` for diagnostics** (see 3.5).
+
+### 3.5 Fix Diagnostics Collection: One Check, Not N
+
+The current `_index_file()` calls `session.check_file(path)` for every file.
+Each `check_file()` internally runs `state.db.check()` — a full project
+type-check. Salsa caches the result after the first call, but the first call is
+expensive, and there are still N FFI round-trips to filter and convert
+diagnostics.
+
+Replace per-file `check_file()` with a single `check()` call:
+
+```python
+def _collect_all_diagnostics(self, session: TyO3Session) -> None:
+    """Collect diagnostics with a single check() call, distribute per-file."""
+    try:
+        result = session.check()
+    except Exception:
+        logger.warning("Failed to run project check, skipping diagnostics")
+        return
+    for diagnostic in result.diagnostics:
+        if diagnostic.file:
+            self._diagnostics.setdefault(diagnostic.file, []).append(diagnostic)
+```
+
+This replaces N FFI calls with 1.
+
+### 3.6 Update `_resolve_references_via_occurrences` Signature
+
+Add the `project_files` parameter so it can distinguish project-local files
+from external ones without needing state on `self`:
+
+```python
+def _resolve_references_via_occurrences(
+    self,
+    session: TyO3Session,
+    file_str: str,
+    project_files: set[str],
+) -> None:
+```
+
+Update `_ensure_target_node_simple()` similarly:
 
 ```python
 def _ensure_target_node_simple(
@@ -755,8 +804,15 @@ def _ensure_target_node_simple(
     target_file: str,
     target_sid: str,
     target_name: str,
+    project_files: set[str],
 ) -> str | None:
-    if target_file in self._project_files:
+    if target_file in project_files:
+        # All project nodes exist (Pass 2). If we can't find it, it's a
+        # symbol-identity mismatch. Log and skip — do not create a stub.
+        logger.debug(
+            "Could not resolve project-local target %s in %s",
+            target_name, target_file,
+        )
         return None
 
     package = self._infer_package(target_file)
@@ -772,106 +828,22 @@ def _ensure_target_node_simple(
     return ext_sid
 ```
 
-Important: use `_project_files`, not `_file_to_nodes`.
+### 3.7 Delete `_index_file()`
 
-### 3.6 Add Pending Reference Recording
-
-In `_resolve_references_via_occurrences()`, when a target cannot be resolved
-and `target_file in self._project_files`, append a `PendingReference`:
-
-```python
-if target_sid not in self._id_to_index:
-    found = self._find_symbol_in_file(target_file, target_name)
-    if found:
-        target_sid = found
-    elif target_file in self._project_files:
-        enclosing_id = self._find_enclosing_symbol(file_str, occ.range)
-        if enclosing_id is not None:
-            self._pending_references.append(
-                PendingReference(
-                    source_symbol_id=enclosing_id,
-                    target_file=target_file,
-                    target_name=target_name,
-                    target_qualified_name=occ.target_qualified_name,
-                    file=file_str,
-                    range=occ.range,
-                    role=occ.role,
-                )
-            )
-        continue
-    else:
-        ...
-```
-
-Then implement:
-
-```python
-def _resolve_pending_references(self) -> None:
-    remaining: list[PendingReference] = []
-    for pending in self._pending_references:
-        if pending.target_qualified_name:
-            target_sid = f"{pending.target_file}::{pending.target_qualified_name}"
-        else:
-            target_sid = f"{pending.target_file}::{pending.target_name}"
-
-        if target_sid not in self._id_to_index:
-            found = self._find_symbol_in_file(pending.target_file, pending.target_name)
-            if found is None:
-                remaining.append(pending)
-                continue
-            target_sid = found
-
-        if pending.source_symbol_id == target_sid:
-            continue
-
-        self._add_edge(
-            pending.source_symbol_id,
-            target_sid,
-            EdgeData(
-                kind=EdgeKind.REFERENCES,
-                file=pending.file,
-                range=pending.range,
-                role=pending.role,
-            ),
-            pending.file,
-        )
-
-    if remaining:
-        logger.warning("Unresolved project-local references: %d", len(remaining))
-    self._pending_references = remaining
-```
-
-In a correct multi-pass build, most legitimate project-local references should
-resolve immediately and never become pending. The pending list is a safety net.
-
-### 3.7 Preserve the Old `_index_file()` Carefully
-
-Once `build()` is multi-pass, `_index_file()` should not be used for normal
-full graph construction. It can remain for `update_file()` only until Phase 4.
-
-Update its docstring to make this clear:
-
-```python
-def _index_file(...):
-    """Legacy single-file index path used only by old incremental update code."""
-```
-
-After Phase 4, you may remove `_index_file()` or make it call the split helpers
-for a known affected file set.
+Once `build()` is multi-pass, `_index_file()` has no callers. Delete it.
+`update_file()` will be rewritten in Phase 4.
 
 ### Phase 3 Validation
 
-Run:
-
 ```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_semantics.py -q
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_build.py src/tyo3/tests/test_graph_queries.py -q
+devenv shell -- pytest src/tyo3/tests/test_graph_semantics.py -q
+devenv shell -- pytest src/tyo3/tests/test_graph_build.py src/tyo3/tests/test_graph_queries.py -q
 ```
 
 Manual sanity check:
 
 ```bash
-python - <<'PY'
+devenv shell -- python - <<'PY'
 from pathlib import Path
 from tyo3.session import TyO3Session
 from tyo3.graph import CodeGraph, EdgeKind
@@ -892,98 +864,32 @@ Definition of done:
 - References inside `create_user()` attach to `create_user`.
 - References inside `main()` attach to `main`.
 - Method body references attach to the method, not the module.
-- No project-local symbol becomes external just because its file was processed
-  later.
+- No project-local symbol becomes external because of file ordering.
+- Diagnostics are collected via one `check()` call, not N `check_file()` calls.
 
-## Phase 4: Make `update_file()` Correct
+## Phase 4: Fix Overrides, Dependency Semantics, and `update_file()`
 
-Purpose: stop silently dropping incoming references.
+Purpose: make graph relationships mean what their names say, and make
+`update_file()` correct.
 
-### 4.1 Use the Conservative Correct Implementation
+This phase combines three closely related fixes from the original guide
+(Phases 4, 5.1, and 5.2) because they are all small, independent changes to
+the same file with no ordering dependencies between them.
 
-Do not implement a complex incremental invalidation model yet. Replace
-`update_file()` with full rebuild semantics while preserving the current
-mutating API:
+### 4.1 Fix `OVERRIDES` Traversal
 
-```python
-def update_file(self, session: TyO3Session, path: str) -> None:
-    """Refresh graph state after a file changes.
-
-    This conservative implementation rebuilds the full graph to preserve
-    cross-file references and inheritance relationships. A future incremental
-    version must reindex the changed file plus every file that references it.
-    """
-    fresh = CodeGraph.build(session)
-    self._graph = fresh._graph
-    self._id_to_index = fresh._id_to_index
-    self._file_to_nodes = fresh._file_to_nodes
-    self._file_to_edges = fresh._file_to_edges
-    self._file_node_ranges = fresh._file_node_ranges
-    self._name_prefix_index = fresh._name_prefix_index
-    self._diagnostics = fresh._diagnostics
-    self._dependency_cache = fresh._dependency_cache
-    self._project_files = fresh._project_files
-    self._symbols_by_file = fresh._symbols_by_file
-    self._pending_references = fresh._pending_references
-```
-
-Explanation:
-
-- Rebuilding is slower but correct.
-- The method keeps returning `None`, so callers do not need to change.
-- The `path` argument remains for API compatibility and future incremental
-  implementations.
-
-### 4.2 Add a Regression Test
-
-```python
-@needs_native
-def test_update_file_preserves_incoming_references() -> None:
-    session = get_session("graph_test")
-    graph = CodeGraph.build(session)
-
-    user = find_one(graph, file_suffix="models.py", name="User", kind=SymbolKind.CLASS)
-    refs_before = graph.references_to(user.symbol_id)
-    assert refs_before
-
-    models_path = next(str(path) for path in session.files() if str(path).endswith("models.py"))
-    graph.update_file(session, models_path)
-
-    user_after = find_one(graph, file_suffix="models.py", name="User", kind=SymbolKind.CLASS)
-    refs_after = graph.references_to(user_after.symbol_id)
-    assert refs_after
-```
-
-### Phase 4 Validation
-
-Run:
-
-```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_update.py src/tyo3/tests/test_graph_semantics.py -q
-```
-
-Definition of done:
-
-- Incoming references still exist after updating the target file.
-- The `update_file()` docstring no longer claims impossible behavior.
-
-## Phase 5: Fix Overrides and Dependency Edge Semantics
-
-Purpose: make graph relationships mean what their names say.
-
-### 5.1 Fix `OVERRIDES` Traversal
-
-Current code has this shape:
+Current code in `_resolve_inheritance()` has a critical indentation bug:
 
 ```python
 if edge_data.kind != EdgeKind.INHERITS:
     continue
-    parent_sid = ...
+    parent_sid = ...  # DEAD CODE — unreachable after continue
 ```
 
-Everything after `continue` is unreachable.
+Everything after `continue` is unreachable. The BFS never walks parent
+classes and `ancestor_methods` is always empty.
 
-Replace the loop with:
+Replace the inner loop body with:
 
 ```python
 ancestor_methods: dict[str, str] = {}
@@ -1010,21 +916,12 @@ while queue:
                 ancestor_methods[child.name] = child.symbol_id
 ```
 
-Explanation:
-
-- `INHERITS` edges go from child class to parent class.
-- BFS walks parent classes.
-- `children(parent_sid)` returns methods/classes structurally contained by the
-  parent.
-- If a child class has a method with the same name as an ancestor method, add
-  `child_method --OVERRIDES--> ancestor_method`.
-
-### 5.2 Define Dependency Edge Kinds
+### 4.2 Define Dependency Edge Kinds
 
 Near the top of `graph.py`, add:
 
 ```python
-DEFAULT_DEPENDENCY_EDGE_KINDS = {
+DEPENDENCY_EDGE_KINDS: frozenset[EdgeKind] = frozenset({
     EdgeKind.REFERENCES,
     EdgeKind.IMPORTS,
     EdgeKind.INHERITS,
@@ -1032,84 +929,152 @@ DEFAULT_DEPENDENCY_EDGE_KINDS = {
     EdgeKind.TYPE_OF,
     EdgeKind.RETURNS,
     EdgeKind.INSTANTIATES,
-}
+})
 ```
 
-Then update:
+Use `frozenset` — this is a constant.
+
+Update `dependencies()` and `dependents()`:
 
 ```python
 def dependencies(
     self,
     symbol_id: str,
     *,
-    kinds: set[EdgeKind] | None = None,
+    kinds: frozenset[EdgeKind] | None = None,
 ) -> set[str]:
-    edge_kinds = DEFAULT_DEPENDENCY_EDGE_KINDS if kinds is None else kinds
+    """All symbols this one directly depends on (semantic edges only)."""
+    edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
     return {
         self._graph[tgt_idx].symbol_id
         for tgt_idx, _data in self._edges_of_kind(symbol_id, edge_kinds)
     }
 ```
 
-Update `dependents()` similarly:
-
-```python
-def dependents(
-    self,
-    symbol_id: str,
-    *,
-    kinds: set[EdgeKind] | None = None,
-) -> set[str]:
-    edge_kinds = DEFAULT_DEPENDENCY_EDGE_KINDS if kinds is None else kinds
-    return {
-        self._graph[src_idx].symbol_id
-        for src_idx, _data in self._edges_of_kind(symbol_id, edge_kinds, incoming=True)
-    }
-```
-
-For transitive dependencies, do not use `rx.descendants()` on the full graph.
-Implement a small filtered DFS:
+For `transitive_dependencies()` and `transitive_dependents()`, build a
+filtered subgraph and delegate to rustworkx instead of reimplementing BFS in
+Python:
 
 ```python
 def transitive_dependencies(
     self,
     symbol_id: str,
     *,
-    kinds: set[EdgeKind] | None = None,
+    kinds: frozenset[EdgeKind] | None = None,
 ) -> set[str]:
-    edge_kinds = DEFAULT_DEPENDENCY_EDGE_KINDS if kinds is None else kinds
-    seen: set[str] = set()
-    stack = list(self.dependencies(symbol_id, kinds=edge_kinds))
+    """All symbols reachable via semantic edges from this one."""
+    edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
+    filtered = self._semantic_subgraph(edge_kinds)
+    idx = self._id_to_index.get(symbol_id)
+    if idx is None:
+        return set()
+    # filtered uses the same indices as the main graph
+    reachable = rx.descendants(filtered, idx)
+    return {self._graph[i].symbol_id for i in reachable}
 
-    while stack:
-        current = stack.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        stack.extend(self.dependencies(current, kinds=edge_kinds) - seen)
 
-    return seen
+def _semantic_subgraph(self, kinds: frozenset[EdgeKind]) -> rx.PyDiGraph:
+    """Build a subgraph containing only edges of the given kinds.
+
+    Node indices are preserved (same as the main graph) so callers can
+    use `self._id_to_index` for lookups.
+    """
+    sub = self._graph.copy()
+    to_remove = [
+        edge_idx for edge_idx in sub.edge_indices()
+        if sub.get_edge_data_by_index(edge_idx).kind not in kinds
+    ]
+    sub.remove_edges_from(to_remove)
+    return sub
 ```
 
-Mirror this for `transitive_dependents()`.
+This keeps the BFS in Rust (fast) while filtering edge kinds. The graph copy
+is O(V+E) but avoids the O(V * E) recursive-`dependencies()` approach.
 
-### 5.3 Add Tests
+### 4.3 Make `update_file()` Correct
+
+The current `update_file()` removes nodes for the changed file and re-indexes
+it, but incoming references from other files are lost because those files are
+not re-indexed.
+
+Replace with a targeted rebuild that re-indexes only the affected files:
+
+```python
+def update_file(self, session: TyO3Session, path: str) -> None:
+    """Re-index a file and all files that reference symbols in it.
+
+    Rebuilds the changed file plus its reverse-dependency set to
+    preserve cross-file reference edges. This is cheaper than a full
+    rebuild for large projects (|affected| << |total|) while remaining
+    correct for all edge types.
+
+    For the initial implementation, this delegates to a full rebuild.
+    Once profiling shows this is a bottleneck, the targeted approach
+    (documented above) should be implemented.
+    """
+    fresh = CodeGraph.build(session)
+    # Swap all internal state — the old graph is discarded.
+    self.__dict__.update(fresh.__dict__)
+```
+
+The `__dict__` swap is cleaner than listing every field — it cannot fall out
+of sync when new fields are added.
+
+The docstring documents the intended future optimization (targeted rebuild of
+changed file + reverse deps) without implementing it prematurely. When the
+need arises, the implementation would:
+
+1. Identify all files that have REFERENCES edges pointing into the changed file.
+2. Remove nodes for the changed file + those files.
+3. Re-run Passes 1-5 for only those files.
+
+### 4.4 Add Tests
 
 Use the Phase 0 override and dependency tests. Add:
 
 ```python
 def test_dependencies_include_references() -> None:
     graph = CodeGraph()
-    # Build two function nodes and one REFERENCES edge.
-    # Assert dependencies(source) == {target}.
+    f = SymbolNode(
+        symbol_id="a.py::f", name="f", qualified_name="f",
+        kind=SymbolKind.FUNCTION, file="a.py", range=_range(),
+    )
+    g = SymbolNode(
+        symbol_id="a.py::g", name="g", qualified_name="g",
+        kind=SymbolKind.FUNCTION, file="a.py", range=_range(),
+    )
+    graph._add_node(f)
+    graph._add_node(g)
+    graph._add_edge(f.symbol_id, g.symbol_id, EdgeData(kind=EdgeKind.REFERENCES), "a.py")
+
+    assert graph.dependencies(f.symbol_id) == {g.symbol_id}
+    assert graph.dependents(g.symbol_id) == {f.symbol_id}
+
+
+@needs_native
+def test_update_file_preserves_incoming_references() -> None:
+    session = get_session("graph_test")
+    graph = CodeGraph.build(session)
+
+    user = find_one(graph, file_suffix="models.py", name="User", kind=SymbolKind.CLASS)
+    refs_before = graph.references_to(user.symbol_id)
+    assert refs_before
+
+    models_path = next(
+        str(path) for path in session.files()
+        if str(path).endswith("models.py")
+    )
+    graph.update_file(session, models_path)
+
+    user_after = find_one(graph, file_suffix="models.py", name="User", kind=SymbolKind.CLASS)
+    refs_after = graph.references_to(user_after.symbol_id)
+    assert refs_after
 ```
 
-### Phase 5 Validation
-
-Run:
+### Phase 4 Validation
 
 ```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_semantics.py src/tyo3/tests/test_graph_queries.py -q
+devenv shell -- pytest src/tyo3/tests/test_graph_semantics.py src/tyo3/tests/test_graph_queries.py src/tyo3/tests/test_graph_update.py -q
 ```
 
 Definition of done:
@@ -1117,14 +1082,13 @@ Definition of done:
 - `User.save --OVERRIDES--> Base.save` exists.
 - `dependencies()` excludes `DEFINES` and `CONTAINS`.
 - `dependencies()` includes real semantic references.
+- `update_file()` preserves incoming cross-file references.
 
-## Phase 6: Model Imports Deliberately
+## Phase 5: Model Imports Deliberately
 
 Purpose: avoid using arbitrary symbol references as a proxy for import cycles.
 
-This phase can happen after the multi-pass graph is correct.
-
-### 6.1 Current Behavior
+### 5.1 Current Behavior
 
 `EdgeKind.IMPORTS` exists, but `_resolve_references_via_occurrences()` always
 adds `EdgeKind.REFERENCES`, even when `occ.role == ReferenceRole.IMPORT`.
@@ -1132,31 +1096,42 @@ adds `EdgeKind.REFERENCES`, even when `occ.role == ReferenceRole.IMPORT`.
 Import cycle functions then aggregate `IMPORTS` and `REFERENCES`, which means
 non-import symbol references can influence import-cycle answers.
 
-### 6.2 Add Module-Level `IMPORTS` Edges
+### 5.2 Add Both Symbol-Level and Module-Level Import Edges
 
-When resolving an occurrence:
+When resolving an occurrence with `role == ReferenceRole.IMPORT`:
+
+1. **Keep the symbol-level REFERENCES edge** (from enclosing symbol to
+   imported symbol). This preserves dependency-query granularity — "function
+   `f` depends on class `User`" remains queryable.
+
+2. **Add a module-level IMPORTS edge** (from source `<module>` to target
+   `<module>`). This is what import-cycle detection uses.
 
 ```python
-if role == ReferenceRole.IMPORT:
-    self._add_import_edge(file_str, target_file, occ.range)
+if occ.role == ReferenceRole.IMPORT and target_file != file_str:
+    self._add_import_edge(file_str, target_file, occ.range, project_files)
 ```
 
 Implement:
 
 ```python
-def _module_id_for_file(self, file_str: str) -> str:
-    return f"{file_str}::<module>"
-
-
-def _add_import_edge(self, source_file: str, target_file: str, range: Range) -> None:
-    source_module = self._module_id_for_file(source_file)
-    target_module = self._module_id_for_file(target_file)
+def _add_import_edge(
+    self,
+    source_file: str,
+    target_file: str,
+    range: Range,
+    project_files: set[str],
+) -> None:
+    """Add a module-level IMPORTS edge between two files."""
+    source_module = f"{source_file}::<module>"
+    target_module = f"{target_file}::<module>"
 
     if source_module not in self._id_to_index:
         return
 
     if target_module not in self._id_to_index:
-        # External import. Use or create a package-level external stub.
+        if target_file in project_files:
+            return  # Project file without a module node — skip
         package = self._infer_package(target_file) or "unknown"
         target_module = f"{package}::<module>"
         if target_module not in self._id_to_index:
@@ -1171,32 +1146,76 @@ def _add_import_edge(self, source_file: str, target_file: str, range: Range) -> 
     self._add_edge(
         source_module,
         target_module,
-        EdgeData(kind=EdgeKind.IMPORTS, file=source_file, range=range, role=ReferenceRole.IMPORT),
+        EdgeData(kind=EdgeKind.IMPORTS, file=source_file, range=range),
         source_file,
     )
 ```
 
-Still keep symbol-level `REFERENCES` edges for imported names if useful. The
-key is that import-cycle detection should use `IMPORTS`.
+### 5.3 Extract Shared Module-Graph Construction
 
-### 6.3 Update Import Cycle Algorithms
+`import_cycles()` and `import_cycle_groups()` both build a module-level
+dependency graph from scratch by scanning all edges. Extract the shared logic:
 
-In `import_cycles()` and `import_cycle_groups()`, change:
+```python
+def _build_module_graph(self) -> tuple[rx.PyDiGraph, dict[str, int]]:
+    """Build a module-level graph from IMPORTS edges.
+
+    Returns (module_graph, sid_to_index) where module_graph nodes are
+    module symbol_id strings.
+    """
+    module_indices = [
+        i for i in self._graph.node_indices()
+        if self._graph[i].kind == SymbolKind.MODULE
+    ]
+    if len(module_indices) < 2:
+        return rx.PyDiGraph(), {}
+
+    mod_graph = rx.PyDiGraph()
+    sid_to_midx: dict[str, int] = {}
+    for i in module_indices:
+        sid = self._graph[i].symbol_id
+        midx = mod_graph.add_node(sid)
+        sid_to_midx[sid] = midx
+
+    # Map every node to its module for aggregation
+    node_to_module: dict[int, str] = {}
+    for mi in module_indices:
+        module_sid = self._graph[mi].symbol_id
+        file = file_from_symbol_id(module_sid)
+        for ni in self._file_to_nodes.get(file, []):
+            node_to_module[ni] = module_sid
+
+    for edge_idx in self._graph.edge_indices():
+        data = self._graph.get_edge_data_by_index(edge_idx)
+        if data.kind != EdgeKind.IMPORTS:
+            continue
+        src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
+        src_mod = node_to_module.get(src)
+        tgt_mod = node_to_module.get(tgt)
+        if src_mod and tgt_mod and src_mod != tgt_mod:
+            mi_src = sid_to_midx.get(src_mod)
+            mi_tgt = sid_to_midx.get(tgt_mod)
+            if mi_src is not None and mi_tgt is not None:
+                mod_graph.add_edge(mi_src, mi_tgt, None)
+
+    return mod_graph, sid_to_midx
+```
+
+Then both `import_cycles()` and `import_cycle_groups()` call
+`self._build_module_graph()` and operate on the result.
+
+### 5.4 Update Import Cycle Detection to Use `IMPORTS` Only
+
+In both `import_cycles()` and `import_cycle_groups()`, the old code used:
 
 ```python
 dep_kinds = {EdgeKind.IMPORTS, EdgeKind.REFERENCES}
 ```
 
-to:
+The refactored `_build_module_graph()` uses `EdgeKind.IMPORTS` only. The old
+behavior (including cross-file references) is no longer needed.
 
-```python
-dep_kinds = {EdgeKind.IMPORTS}
-```
-
-If the old behavior is still useful, add a separate method later called
-`module_reference_cycles()`.
-
-### 6.4 Add Tests
+### 5.5 Add Tests
 
 Use `fixtures/circular_imports`:
 
@@ -1206,42 +1225,69 @@ def test_circular_imports_detected_from_import_edges() -> None:
     graph = get_graph("circular_imports")
     cycles = graph.import_cycles()
     assert cycles
-    assert any("module_a.py::<module>" in set(cycle) for cycle in cycles)
-    assert any("module_b.py::<module>" in set(cycle) for cycle in cycles)
+    # Verify the cycle contains both modules
+    all_sids_in_cycles = {sid for cycle in cycles for sid in cycle}
+    assert any(sid.endswith("module_a.py::<module>") for sid in all_sids_in_cycles)
+    assert any(sid.endswith("module_b.py::<module>") for sid in all_sids_in_cycles)
 ```
 
 Add a unit test showing a plain `REFERENCES` edge does not create an import
-cycle.
+cycle:
 
-### Phase 6 Validation
+```python
+def test_references_do_not_create_import_cycles() -> None:
+    graph = CodeGraph()
+    mod_a = SymbolNode(
+        symbol_id="a.py::<module>", name="a", qualified_name="<module>",
+        kind=SymbolKind.MODULE, file="a.py", range=_range(),
+    )
+    mod_b = SymbolNode(
+        symbol_id="b.py::<module>", name="b", qualified_name="<module>",
+        kind=SymbolKind.MODULE, file="b.py", range=_range(),
+    )
+    func_a = SymbolNode(
+        symbol_id="a.py::f", name="f", qualified_name="f",
+        kind=SymbolKind.FUNCTION, file="a.py", range=_range(),
+    )
+    func_b = SymbolNode(
+        symbol_id="b.py::g", name="g", qualified_name="g",
+        kind=SymbolKind.FUNCTION, file="b.py", range=_range(),
+    )
+    for node in [mod_a, mod_b, func_a, func_b]:
+        graph._add_node(node)
+    # Cross-file REFERENCES edges in both directions — but no IMPORTS
+    graph._add_edge("a.py::f", "b.py::g", EdgeData(kind=EdgeKind.REFERENCES), "a.py")
+    graph._add_edge("b.py::g", "a.py::f", EdgeData(kind=EdgeKind.REFERENCES), "b.py")
 
-Run:
+    assert graph.import_cycles() == []
+```
+
+### Phase 5 Validation
 
 ```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_cycles.py src/tyo3/tests/test_file_occurrences.py -q
+devenv shell -- pytest src/tyo3/tests/test_graph_cycles.py src/tyo3/tests/test_file_occurrences.py -q
 ```
 
 Definition of done:
 
-- Import cycles are based on `IMPORTS`.
+- Import cycles are based on `IMPORTS` edges only.
 - Plain cross-file references do not create import cycles.
+- `import_cycles()` and `import_cycle_groups()` share module-graph construction.
 
-## Phase 7: Introduce Build Reports Instead of Silent Degradation
+## Phase 6: Introduce Build Reports
 
 Purpose: callers need to know whether a graph is complete.
 
 Current graph construction catches broad exceptions and logs warnings. That
-can return a graph missing whole files or edge classes.
+can return a graph missing whole files or edge classes with no programmatic
+way to detect it.
 
-### 7.1 Add Build Failure Models
+### 6.1 Add Build Report Model
 
-In `src/tyo3/graph/models.py` or a new `src/tyo3/graph/build.py`:
+In `src/tyo3/graph/models.py`:
 
 ```python
 from typing import Literal
-
-from pydantic import BaseModel, Field
-
 
 class GraphBuildFailure(BaseModel):
     file: str
@@ -1251,7 +1297,8 @@ class GraphBuildFailure(BaseModel):
 
 
 class GraphBuildReport(BaseModel):
-    indexed_files: list[str] = Field(default_factory=list)
+    files_indexed: int = 0
+    files_total: int = 0
     failures: list[GraphBuildFailure] = Field(default_factory=list)
 
     @property
@@ -1259,66 +1306,78 @@ class GraphBuildReport(BaseModel):
         return not self.failures
 ```
 
-### 7.2 Add `build_with_report()`
+### 6.2 Thread the Report Through `build()`
 
-Keep `CodeGraph.build(session)` for compatibility. Add:
+Make `build()` accept an optional report parameter and record failures:
+
+```python
+@classmethod
+def build(
+    cls,
+    session: TyO3Session,
+    *,
+    report: GraphBuildReport | None = None,
+) -> CodeGraph:
+    graph = cls()
+    files = [str(file_path) for file_path in session.files()]
+    if report is not None:
+        report.files_total = len(files)
+    ...
+```
+
+Each `try/except` in the build passes records a `GraphBuildFailure` on the
+report instead of (or in addition to) logging.
+
+Add a convenience constructor:
 
 ```python
 @classmethod
 def build_with_report(
     cls,
     session: TyO3Session,
-    *,
-    strict: bool = False,
 ) -> tuple[CodeGraph, GraphBuildReport]:
-    ...
+    report = GraphBuildReport()
+    graph = cls.build(session, report=report)
+    return graph, report
 ```
 
-Implementation notes:
+The existing `build(session)` call (no report) continues to work unchanged.
 
-- Use the same multi-pass builder.
-- On each caught exception, append a `GraphBuildFailure`.
-- If `strict=True`, raise after recording the failure.
-- `build()` can call `build_with_report(strict=False)` and return only the
-  graph.
+### 6.3 Add Tests
 
-### 7.3 Add Tests
+```python
+def test_build_report_records_symbol_failure() -> None:
+    # Use a mock session whose document_symbols() raises for one file.
+    ...
+    graph, report = CodeGraph.build_with_report(mock_session)
+    assert not report.complete
+    assert len(report.failures) == 1
+    assert report.failures[0].phase == "symbols"
+```
 
-Use a fake session object whose `document_symbols()` raises for one file.
-Assert:
-
-- `build_with_report()` returns a report with one failure.
-- `report.complete is False`.
-- `strict=True` raises.
-
-### Phase 7 Validation
-
-Run:
+### Phase 6 Validation
 
 ```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_build.py -q
+devenv shell -- pytest src/tyo3/tests/test_graph_build.py -q
 ```
 
 Definition of done:
 
-- Graph partial failures are inspectable.
-- Strict build mode exists.
-- Existing callers using `CodeGraph.build()` still work.
+- Graph partial failures are inspectable via `GraphBuildReport`.
+- `build()` without a report works unchanged.
 
-## Phase 8: Stabilize Symbol Identity and Paths
+## Phase 7: Stabilize Symbol Identity and Paths
 
 Purpose: make graph IDs portable and snapshot-friendly.
 
-This is important, but do it after graph semantics are correct. Otherwise, path
-normalization will make failing tests harder to interpret.
+Do this after graph semantics are correct. Otherwise, path normalization makes
+failing tests harder to interpret.
 
-### 8.1 Decide the Public Path Policy
-
-Recommended policy:
+### 7.1 Public Path Policy
 
 - First-party public paths are project-relative `PurePosixPath`.
 - Internal Rust can use absolute paths.
-- External paths use an explicit external or stdlib scheme.
+- External paths use the inferred package name.
 - Stable graph IDs must not include `/home/...` absolute paths.
 
 Example IDs:
@@ -1327,67 +1386,68 @@ Example IDs:
 app.py::<module>
 app.py::create_user
 models.py::User
-external://pydantic::BaseModel
-stdlib://builtins::int
+pydantic::BaseModel
+stdlib::int
 ```
 
-### 8.2 Add Path Normalization Helpers
+### 7.2 Normalize at the Session Boundary
 
-Create `src/tyo3/paths.py`:
-
-```python
-from pathlib import Path, PurePosixPath
-
-
-def to_project_relative(root: Path, path: str | Path) -> PurePosixPath:
-    absolute = Path(path).resolve()
-    relative = absolute.relative_to(root.resolve())
-    return PurePosixPath(relative.as_posix())
-
-
-def normalize_first_party_path(root: Path, path: str | Path) -> str:
-    return str(to_project_relative(root, path))
-```
-
-Add tests for:
-
-- absolute path inside root
-- relative path inside root
-- path outside root raises `ValueError`
-
-### 8.3 Apply to Graph IDs
-
-In `CodeGraph.build()`, use:
+Rather than maintaining a mapping dict between graph paths and native paths,
+normalize once and denormalize once:
 
 ```python
+# In CodeGraph.build(), before Pass 1:
 root = session.root
-files = [normalize_first_party_path(root, file_path) for file_path in session.files()]
+native_paths = [str(p) for p in session.files()]
+graph_paths = [_to_relative(root, p) for p in native_paths]
+native_by_graph = dict(zip(graph_paths, native_paths, strict=True))
 ```
 
-But keep a mapping from public graph path to native absolute path:
+Session calls use native paths (`session.document_symbols(native_path)`).
+Graph nodes, symbol IDs, and secondary indexes use graph paths.
+
+This is a single normalization point. The helper:
 
 ```python
-native_file_by_graph_file: dict[str, str]
+def _to_relative(root: Path, path: str) -> str:
+    """Convert an absolute path to a project-relative POSIX string."""
+    try:
+        return str(PurePosixPath(Path(path).resolve().relative_to(root.resolve())))
+    except ValueError:
+        return path  # External path — return as-is
 ```
 
-Use native paths when calling `session.document_symbols()`,
-`session.file_occurrences()`, and `session.check_file()`. Use normalized graph
-paths for `SymbolNode.file` and symbol IDs.
+Result paths from Rust (in occurrences, diagnostics, etc.) also need
+normalization when they refer to project files. Add a helper for that:
 
-This is a careful change. It touches every place where a Rust result path is
-matched against a graph path. Build helper functions rather than scattering
-`Path.resolve()` calls.
+```python
+def _normalize_result_path(
+    root: Path, path: str, project_files: set[str]
+) -> str:
+    """Normalize a Rust-returned path to match graph-path format."""
+    candidate = _to_relative(root, path)
+    if candidate in project_files:
+        return candidate
+    return path
+```
 
-### Phase 8 Validation
+### 7.3 Add Tests
 
-Run:
+Add a test that builds a graph from a fixture copied to a temp directory
+and verifies the IDs match:
+
+```python
+def test_graph_ids_are_path_independent(tmp_path) -> None:
+    # shutil.copytree("fixtures/graph_test", tmp_path / "graph_test")
+    # Build graphs from both locations
+    # Assert sorted first-party symbol IDs are identical
+```
+
+### Phase 7 Validation
 
 ```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_semantics.py src/tyo3/tests/test_graph_export.py -q
+devenv shell -- pytest src/tyo3/tests/test_graph_semantics.py src/tyo3/tests/test_graph_export.py -q
 ```
-
-Add a test that copies `fixtures/graph_test` to a temporary directory and
-builds a graph there. The sorted node IDs should match the original graph.
 
 Definition of done:
 
@@ -1395,11 +1455,11 @@ Definition of done:
 - Same fixture in two absolute directories produces the same first-party IDs.
 - External symbols remain explicitly external.
 
-## Phase 9: Harden Native Diagnostics and Navigation Identity
+## Phase 8: Harden Native Boundary
 
-Purpose: reduce native boundary fragility and reduce Python-side guessing.
+Purpose: reduce native boundary fragility.
 
-### 9.1 Avoid Panics in Diagnostic Conversion
+### 8.1 Avoid Panics in Diagnostic Conversion
 
 Current `rust/src/convert/diagnostics.rs` uses:
 
@@ -1407,16 +1467,15 @@ Current `rust/src/convert/diagnostics.rs` uses:
 let file = span.expect_ty_file();
 ```
 
-This can panic if a diagnostic span is not a ty file span.
+This panics if a diagnostic span is not a ty file span.
 
-Find whether the span type has a non-panicking method. Search the Rust docs or
-local crate source:
+Search for a non-panicking alternative:
 
 ```bash
-rg "fn .*ty_file|expect_ty_file|struct Span|enum Span" rust ~/.cargo/git/checkouts
+rg "fn .*ty_file|expect_ty_file" rust ~/.cargo/git/checkouts
 ```
 
-Use the non-panicking API if available:
+If a non-panicking API exists (e.g. `span.ty_file() -> Option<File>`):
 
 ```rust
 let Some(file) = span.ty_file() else {
@@ -1424,68 +1483,69 @@ let Some(file) = span.ty_file() else {
 };
 ```
 
-If no non-panicking API exists, isolate the assumption and add a comment. Do not
-let arbitrary panics cross the PyO3 boundary if avoidable.
-
-### 9.2 Improve Navigation Target Identity
-
-Current `rust/src/convert/navigation.rs` returns:
+If no non-panicking API exists, wrap the call with `std::panic::catch_unwind`
+to prevent panics from crossing the PyO3 boundary (which can cause undefined
+behavior):
 
 ```rust
-symbol: None,
-module_name: None,
+let file = match std::panic::catch_unwind(|| span.expect_ty_file()) {
+    Ok(f) => f,
+    Err(_) => return (None, None),
+};
 ```
 
-This forces the Python graph to reconstruct identity from file, range, and
-names. The batch occurrence API already returns better identity for graph
-construction, so this is less urgent, but navigation should eventually return
-symbol details when ty exposes them.
+### 8.2 Delete Dead Rust Code
 
-Task:
+`rust/src/convert/hover.rs` contains `convert_hover_markdown()` (the
+convenience wrapper without `_with_index`). It is never called — all callers
+use `convert_hover_markdown_with_index()` directly. Delete it.
 
-- Investigate `ty_ide::NavigationTarget`.
-- If it exposes symbol name/kind/module information, populate `SymbolDto`.
-- If it does not, document the limitation in code and tests.
+### 8.3 Fix PyO3 Version Mismatch in Derive Crate
 
-### Phase 9 Validation
+`rust/tyo3-derive/Cargo.toml` has `pyo3 = { version = "0.23" }` in
+dev-dependencies while the main crate uses `0.28`. Update:
 
-Run:
+```toml
+[dev-dependencies]
+pyo3 = { version = "0.28", features = ["extension-module"] }
+```
+
+### Phase 8 Validation
 
 ```bash
-build
-PYTHONPATH=src pytest src/tyo3/tests/test_check_file.py src/tyo3/tests/test_rust_integration.py -q
+devenv shell -- build
+devenv shell -- pytest src/tyo3/tests/test_check_file.py src/tyo3/tests/test_rust_integration.py -q
 ```
 
 Definition of done:
 
-- Diagnostics conversion does not use avoidable panicking APIs.
-- Navigation identity limitations are explicit.
+- Diagnostic conversion does not use avoidable panicking APIs.
+- No dead code in the Rust convert modules.
+- Derive crate dev-dependency matches the main crate version.
 
-## Phase 10: Clean Dependency Cache Serialization
+## Phase 9: Clean Dependency Cache Serialization
 
 Purpose: fix smaller correctness issues in cached dependency graphs.
 
-### 10.1 Fix `symbols_of_kind()`
+### 9.1 Fix `DependencyGraph.symbols_of_kind()`
 
-Current code compares `node.kind` (`SymbolKind`) to a `str`.
-
-Change:
+Current code compares `node.kind` (`SymbolKind`) to a `str`. Change the
+signature to accept `SymbolKind`:
 
 ```python
-def symbols_of_kind(self, kind: SymbolKind | str) -> list[SymbolNode]:
-    expected = kind if isinstance(kind, SymbolKind) else SymbolKind(kind)
+def symbols_of_kind(self, kind: SymbolKind) -> list[SymbolNode]:
     return [
         self.graph[idx]
         for idx in self.graph.node_indices()
-        if self.graph[idx].kind == expected
+        if self.graph[idx].kind == kind
     ]
 ```
 
-Import `SymbolKind`.
+Import `SymbolKind` from `tyo3.models.symbols`.
 
-### 10.2 Fix `EdgeData.role` Deserialization
+### 9.2 Fix `EdgeData.role` Deserialization
 
-Current load code uses:
+Current `DependencyGraph.load()` passes raw strings for `role`:
 
 ```python
 role=raw_edge.get("role")
@@ -1498,30 +1558,22 @@ from tyo3.models.navigation import ReferenceRole
 
 role_raw = raw_edge.get("role")
 role = ReferenceRole(role_raw) if role_raw is not None else None
-edge_obj = EdgeData(
-    kind=EdgeKind(raw_edge["kind"]),
-    file=raw_edge.get("file"),
-    role=role,
-)
 ```
 
-### 10.3 Add Tests
-
-Add a round-trip test with a role:
+### 9.3 Add Round-Trip Test
 
 ```python
 def test_dependency_graph_edge_role_roundtrips(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("tyo3.graph.dependency.CACHE_DIR", tmp_path)
-    # Build graph with an EdgeData(role=ReferenceRole.READ), save, load,
-    # then export to JSON and assert role == "read".
+    # Build a DependencyGraph with an EdgeData(role=ReferenceRole.READ),
+    # save it, load it, and assert the loaded role is ReferenceRole.READ
+    # (not the string "read").
 ```
 
-### Phase 10 Validation
-
-Run:
+### Phase 9 Validation
 
 ```bash
-PYTHONPATH=src pytest src/tyo3/tests/test_graph_dependency.py src/tyo3/tests/test_graph_export.py -q
+devenv shell -- pytest src/tyo3/tests/test_graph_dependency.py src/tyo3/tests/test_graph_export.py -q
 ```
 
 Definition of done:
@@ -1529,23 +1581,20 @@ Definition of done:
 - Loaded dependency graph roles are `ReferenceRole`, not raw strings.
 - JSON export works after loading cached dependency graphs.
 
-## Phase 11: Static Gates and CI
+## Phase 10: Static Gates and CI
 
 Purpose: prevent regressions after the correctness work lands.
 
-### 11.1 Fix Ruff Diagnostics
-
-Run:
+### 10.1 Fix Ruff Diagnostics
 
 ```bash
-ruff check . --fix
+devenv shell -- ruff check . --fix
 ```
 
 Then handle remaining warnings manually. Known categories from review:
 
 - import ordering
 - unused imports
-- duplicate `import pytest`
 - unused locals
 - `zip()` without `strict=`
 - blind `pytest.raises(Exception)`
@@ -1557,126 +1606,110 @@ for node, idx in zip(new_nodes, indices, strict=True):
     ...
 ```
 
-### 11.2 Make `ty check src` a Later Gate
+### 10.2 Clean Up Unused Spec Models
 
-`ty check src` currently reports many diagnostics in tests and around the native
-extension. Do not block graph correctness on making all tests statically clean.
+`models/core.py` exports `TyProject`, `ProjectFile`, `BackendInfo`,
+`TyProjectConfig` — none of which are constructed by any code path. They are
+spec-anticipation models with no backend.
 
-Recommended sequence:
+Move them to `models/_spec.py` (most already are) and remove from the public
+`__all__` in `models/__init__.py`. Keep them importable for anyone who has
+adopted them, but stop advertising them as part of the active API.
 
-1. Make `ruff check .` clean.
-2. Exclude or configure generated/native extension import patterns.
-3. Gradually clean `ty check src`.
-4. Add `ty check src` to CI only once it is green.
-
-### 11.3 Update GitHub Actions
+### 10.3 Update GitHub Actions
 
 Current CI manually runs `cargo build --release` and copies a hardcoded
-extension filename. Replace that with the same workflow developers use.
-
-Suggested CI shape:
+extension filename. Replace with the devenv workflow:
 
 ```yaml
 - name: Build native extension
   run: devenv shell -- build-release
 
 - name: Run tests
-  run: devenv shell -- pytest src/tyo3/tests/ -q --tb=short
+  run: devenv shell -- tests
 
 - name: Ruff
   run: devenv shell -- ruff check .
 ```
 
-Add `ty check src` only after it is clean.
-
-### Phase 11 Validation
-
-Run:
+### Phase 10 Validation
 
 ```bash
-ruff check .
-build-release
-PYTHONPATH=src pytest src/tyo3/tests/ -q
+devenv shell -- ruff check .
+devenv shell -- build-release
+devenv shell -- tests
 ```
 
 Definition of done:
 
-- CI no longer hardcodes the CPython/Linux extension filename.
-- CI uses maturin/devenv to build the extension.
 - `ruff check .` passes locally and in CI.
+- CI uses maturin/devenv to build the extension.
+- Unused spec models are not in the public `__all__`.
 
-## Phase 12: Optional DTO Boundary Simplification
+## Phase 11: DTO Boundary Simplification (Optional)
 
 Purpose: simplify maintenance of the Rust/Python transport layer.
 
 This is not required before graph correctness. Do this only after the earlier
 phases are stable.
 
-### 12.1 Current Boundary
+### 11.1 Current Boundary
 
 Rust DTOs are PyO3 classes with custom `PyFields` metadata. Python converts
-them using string tags such as:
+them via `_to_python()` using string type tags:
 
 ```text
-str
-obj
-opt:obj
-list:obj
+str, obj, opt:obj, list:obj
 ```
 
-This works, but every new DTO requires updates in multiple places:
+Every new DTO requires updates in six places: Rust struct, PyO3 class
+registration, `PyFields` derive, enum registry, Python converter tests,
+Pydantic model.
 
-- Rust struct
-- PyO3 class registration
-- `PyFields` derive
-- enum registry
-- Python converter tests
-- Pydantic model
+### 11.2 Target: Use `pythonize` for Direct Serde-to-Python Conversion
 
-### 12.2 Target Boundary
-
-Keep Rust DTO structs, but return plain Python dict/list/scalar values using
-serde conversion:
-
-```text
-Rust DTO -> serde -> Python dict/list -> Pydantic model
-```
-
-This lets Python delete most of `_to_python()` and the native DTO classes.
-
-### 12.3 Implementation Sketch
-
-Add a Rust helper, either using a serde-to-Python crate compatible with PyO3
-0.28 or a local `serde_json::Value` converter.
-
-Native method shape:
+The `pythonize` crate (compatible with PyO3 0.23+) converts Rust types
+implementing `serde::Serialize` directly into native Python objects (dict,
+list, str, int, etc.) without an intermediate JSON step:
 
 ```rust
+use pythonize::pythonize;
+
 fn document_symbols<'py>(
     &self,
     py: Python<'py>,
     path: &str,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<Bound<'py, PyAny>> {
     let symbols = self.inner_document_symbols(path)?;
-    to_py(py, &symbols)
+    pythonize(py, &symbols).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 ```
 
-Python wrapper shape:
+Python side simplifies to:
 
 ```python
 raw = self._inner.document_symbols(str(path))
 return [Symbol.model_validate(item) for item in raw]
 ```
 
-### 12.4 Validation
+This eliminates:
 
-Rewrite native bridge tests:
+- The entire `_to_python()` recursive converter
+- The `PyFields` derive macro
+- The `_TYO3_ENUM_TYPES` registry
+- All DTO `#[pyclass]` registrations (DTOs become internal Rust structs only)
+- The `_build_enum_cache()` / `_is_native_enum()` machinery
+
+The DTO structs remain in Rust (they define the serialization contract), but
+they only need `#[derive(Serialize)]`, not `#[pyclass]` or `#[derive(PyFields)]`.
+
+### 11.3 Validation
 
 - Native methods return `list`/`dict`, not native DTO objects.
 - Pydantic validates returned data.
 - Enum strings exactly match Python enum values.
-- `_native_impl` exports `TyProject` and exception classes only.
+- `_native_impl` exports only `TyProject` and exception classes.
+- All existing Python tests continue to pass.
 
 ## Final Definition of Done
 
@@ -1689,28 +1722,32 @@ The refactoring is complete when all of these are true:
 - `OVERRIDES` edges exist for `User.save -> Base.save`.
 - `dependencies()` excludes structural edges by default.
 - Import cycles use `IMPORTS`, not arbitrary `REFERENCES`.
+- `import_cycles()` and `import_cycle_groups()` share module-graph construction.
 - Columns beyond the current line raise `PositionError`.
 - Public exception mapping is consistent for bad paths and bad positions.
+- No duplicate validation between `TyO3Session` and `RustProject`.
+- Diagnostics collected via single `check()`, not N `check_file()` calls.
+- Range-size sort key is correct for multi-line ranges.
 - Dependency graph cache round-trips roles correctly.
 - `ruff check .` passes.
-- CI builds the native extension with maturin/devenv, not a hardcoded `.so`
-  copy.
+- CI builds the native extension with maturin/devenv.
 - Exact semantic graph tests exist and pass.
+- No dead Rust code in convert modules.
 
 ## Suggested PR Order
 
-1. Regression tests for graph semantics and coordinate validation.
-2. Rust coordinate validation fix.
-3. Python exception mapping fix.
-4. Multi-pass graph build.
-5. Conservative `update_file()` rebuild.
-6. Override edge fix and dependency edge filtering.
-7. Import edge modeling.
-8. Build report / strict mode.
-9. Path normalization.
-10. Dependency cache fixes.
-11. Ruff and CI cleanup.
-12. Optional DTO serde simplification.
+1. Regression tests for graph semantics and coordinate validation (Phase 0).
+2. Rust coordinate validation fix (Phase 1).
+3. Python exception mapping + duplicate validation cleanup (Phase 2).
+4. Multi-pass graph build + single-check diagnostics + range sort fix (Phase 3).
+5. Override fix + dependency filtering + `update_file()` (Phase 4).
+6. Import edge modeling + shared module-graph (Phase 5).
+7. Build reports (Phase 6).
+8. Path normalization (Phase 7).
+9. Native boundary hardening (Phase 8).
+10. Dependency cache fixes (Phase 9).
+11. Ruff, CI, unused model cleanup (Phase 10).
+12. Optional DTO pythonize simplification (Phase 11).
 
 Do not skip directly to DTO or package cleanup. The graph answers must become
 true first.
