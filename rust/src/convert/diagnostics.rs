@@ -1,19 +1,95 @@
 use ruff_db::diagnostic::{Diagnostic, DiagnosticId};
+use ruff_db::source::{line_index, source_text};
+use ruff_db::Db;
 
-use crate::dto::{DiagnosticDto, SeverityDto};
+use crate::coordinates;
+use crate::dto::{DiagnosticDto, RangeDto, SeverityDto};
 
 /// Convert a slice of ruff_db diagnostics into DiagnosticDto objects.
 ///
-/// ruff_db's `Diagnostic` carries severity, id, primary message, and
-/// sub-diagnostics. File/range information is attached to annotations,
-/// not the diagnostic itself, so we leave `file` and `range` as `None`.
-pub fn convert_diagnostics(diagnostics: &[Diagnostic]) -> Vec<DiagnosticDto> {
+/// Each diagnostic carries severity, id, primary message, and
+/// sub-diagnostics. File/range information is extracted from the
+/// diagnostic's primary annotation span.
+pub fn convert_diagnostics(
+    db: &dyn Db,
+    diagnostics: &[Diagnostic],
+) -> Vec<DiagnosticDto> {
     diagnostics
         .iter()
         .map(|d| {
+            let (file, range) = extract_file_and_range(db, d);
             DiagnosticDto {
-                file: None,
-                range: None,
+                file,
+                range,
+                severity: severity_to_dto(d.severity()),
+                code: diagnostic_id_to_code(d.id()),
+                message: d.primary_message().to_string(),
+                details: vec![],
+            }
+        })
+        .collect()
+}
+
+/// Extract the file path and text range from a diagnostic's primary annotation.
+///
+/// Returns `(None, None)` if the diagnostic has no primary annotation with a
+/// ty `File` span.
+fn extract_file_and_range(
+    db: &dyn Db,
+    d: &Diagnostic,
+) -> (Option<String>, Option<RangeDto>) {
+    let annotation = match d.primary_annotation() {
+        Some(a) => a,
+        None => return (None, None),
+    };
+    let span = annotation.get_span();
+
+    // All diagnostics from the ty checker carry ty `File` spans.
+    // If we ever encounter a Ruff `SourceFile`, it's a bug we should catch.
+    let file = span.expect_ty_file();
+    let path = file.path(db).as_str().to_string();
+
+    let range = span.range().map(|r| {
+        let idx = line_index(db, file);
+        let src = source_text(db, file);
+        coordinates::range_to_dto_with_index(src.as_str(), &idx, r)
+    });
+
+    (Some(path), range)
+}
+
+/// Check if a diagnostic's primary annotation is for the given file path.
+///
+/// Extracts the file from the primary annotation span and compares it to
+/// *target_path* without computing the full RangeDto — only the file path is
+/// needed for filtering. Returns `false` if the diagnostic has no primary
+/// annotation or no ty `File` span.
+pub fn diagnostic_matches_file(db: &dyn Db, d: &Diagnostic, target_path: &str) -> bool {
+    let annotation = match d.primary_annotation() {
+        Some(a) => a,
+        None => return false,
+    };
+    let span = annotation.get_span();
+    let file = span.expect_ty_file();
+    let path = file.path(db).as_str();
+    path == target_path
+}
+
+/// Convert a slice of diagnostic references (used by `check_file`).
+///
+/// Unlike `convert_diagnostics`, this takes `&[&Diagnostic]` references
+/// rather than a borrowed slice of owned `Diagnostic` values.
+pub fn convert_diagnostic_refs(
+    db: &dyn Db,
+    diagnostics: &[&Diagnostic],
+) -> Vec<DiagnosticDto> {
+    diagnostics
+        .iter()
+        .map(|d| {
+            let (file, range) = extract_file_and_range(db, d);
+            DiagnosticDto {
+                file,
+                range,
                 severity: severity_to_dto(d.severity()),
                 code: diagnostic_id_to_code(d.id()),
                 message: d.primary_message().to_string(),

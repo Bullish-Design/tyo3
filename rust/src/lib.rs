@@ -21,7 +21,26 @@ mod files;
 #[pymodule]
 #[pyo3(name = "_native_impl")]
 fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // TyProject (the main project handle)
     m.add_class::<project::PyTyProject>()?;
+
+    // DTO classes — native object transport layer
+    m.add_class::<dto::PositionDto>()?;
+    m.add_class::<dto::RangeDto>()?;
+    m.add_class::<dto::FileRangeDto>()?;
+    m.add_class::<dto::SymbolKindDto>()?;
+    m.add_class::<dto::SymbolDto>()?;
+    m.add_class::<dto::SeverityDto>()?;
+    m.add_class::<dto::DiagnosticDto>()?;
+    m.add_class::<dto::DefinitionTargetDto>()?;
+    m.add_class::<dto::ReferenceKindDto>()?;
+    m.add_class::<dto::ReferenceDto>()?;
+    m.add_class::<dto::HoverContentKindDto>()?;
+    m.add_class::<dto::HoverContentDto>()?;
+    m.add_class::<dto::HoverDto>()?;
+    m.add_class::<dto::CheckResultDto>()?;
+
+    // Exception types
     m.add("ProjectClosedError", m.py().get_type::<ProjectClosedError>())?;
     m.add("PathResolutionError", m.py().get_type::<PathResolutionError>())?;
     m.add("PositionError", m.py().get_type::<PositionError>())?;

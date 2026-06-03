@@ -1,10 +1,37 @@
 """TyO3 domain models."""
 
-from tyo3.models.advanced import *  # noqa: F401,F403
-from tyo3.models.analysis import *  # noqa: F401,F403
-from tyo3.models.core import *  # noqa: F401,F403
-from tyo3.models.navigation import *  # noqa: F401,F403
-from tyo3.models.symbols import *  # noqa: F401,F403
+from tyo3.models.advanced import (
+    SemanticToken,
+    SemanticTokenModifier,
+    SemanticTokenType,
+)
+from tyo3.models.analysis import (
+    CheckResult,
+    Diagnostic,
+    DiagnosticSeverity,
+    FileRange,
+    Position,
+    Range,
+)
+from tyo3.models.core import (
+    CoordinateMode,
+    FileCategory,
+    ProjectFile,
+    ProjectStatus,
+    TyProject,
+)
+from tyo3.models.navigation import (
+    DefinitionTarget,
+    HoverContent,
+    HoverContentKind,
+    HoverResult,
+    Reference,
+    ReferenceKind,
+)
+from tyo3.models.symbols import Symbol, SymbolKind
+
+# Spec-anticipation models (no backend yet)
+from tyo3.models._spec import BackendInfo, TyProjectConfig
 
 __all__ = [  # noqa: F405
     # Core

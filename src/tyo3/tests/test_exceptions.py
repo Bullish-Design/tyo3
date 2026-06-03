@@ -156,6 +156,115 @@ class TestExceptionChaining:
             assert isinstance(e.__cause__, ValueError)
 
 
+class TestClosedOperations:
+    """Calling any public method on a closed RustProject raises ProjectClosedError
+    immediately — without crossing the Rust boundary."""
+
+    def _make_closed_rp(self):
+        """Create a mock RustProject that is already closed."""
+        from tyo3.rust_project import RustProject
+        rp = object.__new__(RustProject)
+        rp._inner = MagicMock()
+        rp._root = None
+        rp._closed = True
+        return rp
+
+    # ── check() ──────────────────────────────────────────────────
+
+    def test_check_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.check()
+        rp._inner.check.assert_not_called()
+
+    # ── check_file() ─────────────────────────────────────────────
+
+    def test_check_file_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.check_file("main.py")
+        rp._inner.check_file.assert_not_called()
+
+    # ── files() ──────────────────────────────────────────────────
+
+    def test_files_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.files()
+        rp._inner.files.assert_not_called()
+
+    # ── document_symbols() ───────────────────────────────────────
+
+    def test_document_symbols_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.document_symbols("main.py")
+        rp._inner.document_symbols.assert_not_called()
+
+    # ── workspace_symbols() ──────────────────────────────────────
+
+    def test_workspace_symbols_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.workspace_symbols("foo")
+        rp._inner.workspace_symbols.assert_not_called()
+
+    # ── goto_definition() ────────────────────────────────────────
+
+    def test_goto_definition_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.goto_definition("main.py", 1, 1)
+        rp._inner.goto_definition.assert_not_called()
+
+    # ── goto_declaration() ───────────────────────────────────────
+
+    def test_goto_declaration_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.goto_declaration("main.py", 1, 1)
+        rp._inner.goto_declaration.assert_not_called()
+
+    # ── goto_type_definition() ───────────────────────────────────
+
+    def test_goto_type_definition_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.goto_type_definition("main.py", 1, 1)
+        rp._inner.goto_type_definition.assert_not_called()
+
+    # ── find_references() ────────────────────────────────────────
+
+    def test_find_references_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.find_references("main.py", 1, 1)
+        rp._inner.find_references.assert_not_called()
+
+    # ── hover() ──────────────────────────────────────────────────
+
+    def test_hover_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.hover("main.py", 1, 1)
+        rp._inner.hover.assert_not_called()
+
+    # ── reload() ─────────────────────────────────────────────────
+
+    def test_reload_raises_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        with pytest.raises(ProjectClosedError, match="Project is closed"):
+            rp.reload()
+        rp._inner.reload.assert_not_called()
+
+    # ── close() is idempotent (already covered in TestCloseIdempotent) ─
+    # ── root property is always accessible ────────────────────────
+
+    def test_root_still_accessible_when_closed(self) -> None:
+        rp = self._make_closed_rp()
+        assert rp.root is None  # root is not guarded
+
+
 class TestCloseIdempotent:
     """Verify that RustProject.close() is idempotent and __del__ warns."""
 

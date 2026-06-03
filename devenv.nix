@@ -34,18 +34,16 @@
 
   scripts.build.exec = ''
     echo "═══ Building Rust extension (debug) ═══"
-    cd "$DEVENV_ROOT/rust"
-    cargo build 2>&1
-    cp target/debug/lib_native_impl.so "$DEVENV_ROOT/src/tyo3/_native_impl.cpython-313-x86_64-linux-gnu.so"
-    echo "═══ Build complete — .so copied to src/tyo3/ ═══"
+    cd "$DEVENV_ROOT"
+    maturin develop 2>&1
+    echo "═══ Build complete ═══"
   '';
 
   scripts.build-release.exec = ''
     echo "═══ Building Rust extension (release) ═══"
-    cd "$DEVENV_ROOT/rust"
-    cargo build --release 2>&1
-    cp target/release/lib_native_impl.so "$DEVENV_ROOT/src/tyo3/_native_impl.cpython-313-x86_64-linux-gnu.so"
-    echo "═══ Release build complete — .so copied to src/tyo3/ ═══"
+    cd "$DEVENV_ROOT"
+    maturin develop --release 2>&1
+    echo "═══ Release build complete ═══"
   '';
 
   scripts.build-wheel.exec = ''
@@ -184,10 +182,8 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
 
   enterTest = ''
     echo "Running CI-style tests..."
-    cd "$DEVENV_ROOT/rust"
-    cargo build 2>&1
-    cp target/debug/lib_native_impl.so "$DEVENV_ROOT/src/tyo3/_native_impl.cpython-313-x86_64-linux-gnu.so"
     cd "$DEVENV_ROOT"
+    maturin develop 2>&1
     PYTHONPATH=src python -m pytest src/tyo3/tests/ -x -q --tb=short 2>&1
   '';
 }

@@ -19,27 +19,27 @@ _CYAN = "\033[36m"
 _RED = "\033[31m"
 
 
-def bold(s: str) -> str:
+def bold(s: object) -> str:
     return f"{_BOLD}{s}{_RESET}"
 
 
-def dim(s: str) -> str:
+def dim(s: object) -> str:
     return f"{_DIM}{s}{_RESET}"
 
 
-def green(s: str) -> str:
+def green(s: object) -> str:
     return f"{_GREEN}{s}{_RESET}"
 
 
-def yellow(s: str) -> str:
+def yellow(s: object) -> str:
     return f"{_YELLOW}{s}{_RESET}"
 
 
-def cyan(s: str) -> str:
+def cyan(s: object) -> str:
     return f"{_CYAN}{s}{_RESET}"
 
 
-def red(s: str) -> str:
+def red(s: object) -> str:
     return f"{_RED}{s}{_RESET}"
 
 

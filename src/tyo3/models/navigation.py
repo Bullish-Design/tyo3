@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import PurePosixPath
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from tyo3.models.analysis import FileRange, Range
 from tyo3.models.symbols import Symbol
@@ -44,6 +44,8 @@ class HoverContentKind(StrEnum):
 class DefinitionTarget(BaseModel):
     """A navigation target produced by goto-definition-like operations."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     path: PurePosixPath
     range: Range
     selection_range: Range | None = None
@@ -54,6 +56,8 @@ class DefinitionTarget(BaseModel):
 class Reference(BaseModel):
     """A reference occurrence within a project file."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     path: PurePosixPath
     range: Range
     kind: ReferenceKind
@@ -62,12 +66,16 @@ class Reference(BaseModel):
 class HoverContent(BaseModel):
     """A single piece of structured hover information."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     kind: HoverContentKind
     value: str
 
 
 class HoverResult(BaseModel):
     """Structured hover information for a symbol location."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     location: FileRange
     contents: list[HoverContent]

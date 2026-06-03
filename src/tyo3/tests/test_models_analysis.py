@@ -95,7 +95,7 @@ class TestDiagnosticSeverity:
 class TestDiagnostic:
     """Diagnostic entity tests."""
 
-    def test_required_fields(self, open_project) -> None:
+    def test_required_fields(self) -> None:
         d = Diagnostic(
             message="Unexpected type",
         )
@@ -106,21 +106,21 @@ class TestDiagnostic:
         assert d.code is None
         assert d.details == []
 
-    def test_with_file_and_range(self, first_party_file, range_) -> None:
+    def test_with_file_and_range(self, range_) -> None:
         d = Diagnostic(
-            file=first_party_file,
+            file="src/main.py",
             range=range_,
             severity=DiagnosticSeverity.WARNING,
             code="unused-import",
             message="Unused import",
             details=["os"],
         )
-        assert d.file == first_party_file
+        assert d.file == "src/main.py"
         assert d.range == range_
         assert d.severity == DiagnosticSeverity.WARNING
         assert "os" in d.details
 
-    def test_details_list(self, open_project) -> None:
+    def test_details_list(self) -> None:
         d = Diagnostic(
             message="test",
             details=["a", "b"],

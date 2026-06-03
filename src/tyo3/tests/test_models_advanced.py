@@ -6,6 +6,8 @@ Obligation groups:
 - Deferred spec recognition
 """
 
+from pathlib import PurePosixPath
+
 from tyo3.models.advanced import SemanticToken, SemanticTokenModifier, SemanticTokenType
 
 
@@ -57,23 +59,23 @@ class TestSemanticTokenModifier:
 class TestSemanticToken:
     """SemanticToken entity tests."""
 
-    def test_creation(self, open_project, first_party_file) -> None:
+    def test_creation(self) -> None:
         from tyo3.models.analysis import Position, Range
 
         token = SemanticToken(
-            file=first_party_file,
+            file=PurePosixPath("src/main.py"),
             range=Range(start=Position(line=1, column=1), end=Position(line=1, column=10)),
             token_type=SemanticTokenType.FUNCTION,
         )
-        assert token.file == first_party_file
+        assert token.file == PurePosixPath("src/main.py")
         assert token.token_type == SemanticTokenType.FUNCTION
         assert token.modifiers == set()
 
-    def test_with_modifiers(self, open_project, first_party_file) -> None:
+    def test_with_modifiers(self) -> None:
         from tyo3.models.analysis import Position, Range
 
         token = SemanticToken(
-            file=first_party_file,
+            file=PurePosixPath("src/main.py"),
             range=Range(start=Position(line=1, column=1), end=Position(line=1, column=10)),
             token_type=SemanticTokenType.FUNCTION,
             modifiers={SemanticTokenModifier.DEFINITION, SemanticTokenModifier.READONLY},

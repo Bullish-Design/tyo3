@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use ruff_db::files::File;
 use ruff_db::Db;
 use ruff_source_file::LineIndex;
 
@@ -19,11 +22,11 @@ pub fn convert_navigation_target(
 
     DefinitionTargetDto {
         path: file_path,
-        range: coordinates::range_to_dto_with_index(source_str, &line_index, target.focus_range()),
+        range: coordinates::range_to_dto_with_index(source_str, &line_index, target.full_range()),
         selection_range: Some(coordinates::range_to_dto_with_index(
             source_str,
             &line_index,
-            target.full_range(),
+            target.focus_range(),
         )),
         symbol: None,
         module_name: None,
@@ -44,32 +47,45 @@ pub fn convert_navigation_targets(
     result
 }
 
-/// Convert a ty_ide ReferenceTarget into a ReferenceDto.
-pub fn convert_reference(
-    db: &dyn Db,
-    reference: &ty_ide::ReferenceTarget,
-) -> ReferenceDto {
-    let file = reference.file();
-    let source = ruff_db::source::source_text(db, file);
-    let source_str = source.as_str();
-    let file_path = file.path(db).as_str().to_string();
-
-    ReferenceDto {
-        path: file_path,
-        range: coordinates::range_to_dto(source_str, reference.range()),
-        kind: convert_reference_kind(reference.kind()),
-    }
-}
-
 /// Convert a Vec of ty_ide ReferenceTarget into a Vec of ReferenceDto.
+///
+/// Caches `(source_text, LineIndex)` per file so that multiple references
+/// in the same file don't recompute the index.
 pub fn convert_references(
     db: &dyn Db,
     references: &[ty_ide::ReferenceTarget],
 ) -> Vec<ReferenceDto> {
+    let mut file_cache: HashMap<File, (String, LineIndex)> = HashMap::new();
     references
         .iter()
-        .map(|r| convert_reference(db, r))
+        .map(|r| {
+            let file = r.file();
+            let (source_str, line_index) = file_cache
+                .entry(file)
+                .or_insert_with(|| {
+                    let src = ruff_db::source::source_text(db, file);
+                    let s = src.as_str().to_string();
+                    let idx = LineIndex::from_source_text(&s);
+                    (s, idx)
+                });
+            convert_reference_with_index(db, r, source_str, line_index)
+        })
         .collect()
+}
+
+/// Convert a single reference using pre-computed source text and LineIndex.
+fn convert_reference_with_index(
+    db: &dyn Db,
+    reference: &ty_ide::ReferenceTarget,
+    source_str: &str,
+    line_index: &LineIndex,
+) -> ReferenceDto {
+    let file_path = reference.file().path(db).as_str().to_string();
+    ReferenceDto {
+        path: file_path,
+        range: coordinates::range_to_dto_with_index(source_str, line_index, reference.range()),
+        kind: convert_reference_kind(reference.kind()),
+    }
 }
 
 /// Map ty_ide ReferenceKind to our ReferenceKindDto.

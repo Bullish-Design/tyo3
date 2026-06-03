@@ -1,11 +1,11 @@
 """Python wrapper around the Rust PyTyProject extension.
 
-Wraps ``tyo3.TyProject`` (the PyO3 class) with JSON parsing and Pydantic
-model validation.  Each method:
+Wraps ``tyo3.TyProject`` (the PyO3 class) with Pydantic model validation.
+Each method:
 
-1. Calls the corresponding Rust method (which returns JSON or a native list)
-2. Parses the result
-3. Converts string paths into :class:`tyo3.models.core.Path` models
+1. Calls the corresponding Rust method (which returns native PyO3 DTO objects)
+2. Converts native objects to plain Python via :func:`_to_python`
+3. Validates the result through Pydantic's ``model_validate``
 4. Returns Pydantic-validated domain objects
 
 Usage::
@@ -21,10 +21,10 @@ See RUST_BACKEND_IMPLEMENTATION.md §6.1 for the design.
 
 from __future__ import annotations
 
-import json
 import warnings
 from pathlib import Path as StdPath
 from pathlib import PurePosixPath
+from typing import Any
 
 from tyo3.exceptions import (
     AnalysisError,
@@ -34,25 +34,9 @@ from tyo3.exceptions import (
     ProjectClosedError,
     ProjectOpenError,
 )
-from tyo3.models.analysis import (
-    CheckResult,
-    Diagnostic,
-    DiagnosticSeverity,
-    Position,
-    Range,
-)
-from tyo3.models.analysis import (
-    FileRange as ModelFileRange,
-)
-from tyo3.models.navigation import (
-    DefinitionTarget,
-    HoverContent,
-    HoverContentKind,
-    HoverResult,
-    Reference,
-    ReferenceKind,
-)
-from tyo3.models.symbols import Symbol, SymbolKind
+from tyo3.models.analysis import CheckResult
+from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
+from tyo3.models.symbols import Symbol
 
 # The PyO3 extension module — must match
 # #[pyo3(name = "_native_impl")] in rust/src/lib.rs
@@ -92,25 +76,73 @@ except ImportError:
         pass
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────
+# ── Conversion helpers ────────────────────────────────────────────────────
+# PyO3 enums (defined with #[pyclass(eq)]) are not Python str subclasses,
+# so Pydantic StrEnum fields reject them.  PyO3 frozen structs lack
+# __dict__, so Pydantic v2.13 from_attributes=True rejects them.
+# We recursively convert the PyO3 object graph to plain Python types
+# (dict, list, str) that Pydantic validates natively.
 
 
-def _string_path_to_typath(path_str: str) -> PurePosixPath:
-    """Convert a file-system path string into a :class:`PurePosixPath`."""
-    return PurePosixPath(path_str)
+# Cache of known PyO3 enum types from the native extension.
+# Built lazily on first use so the module can import without the .so.
+_ENUM_TYPES: set[type] = set()
+_ENUM_TYPES_BUILT: bool = False
 
 
-def _json_position_to_model(pos_data: dict) -> Position:
-    """Convert a ``PositionDto`` dict into a :class:`Position` model."""
-    return Position(line=pos_data["line"], column=pos_data["column"])
+def _build_enum_cache() -> None:
+    """Cache the PyO3 enum types from the native extension module."""
+    global _ENUM_TYPES, _ENUM_TYPES_BUILT
+    if _ENUM_TYPES_BUILT or _native is None:
+        return
+    for name in dir(_native):
+        if name.startswith("_"):
+            continue
+        # PyO3 enums have names ending in 'Kind' or are NativeSeverity
+        if name.endswith("Kind") or name == "NativeSeverity":
+            obj = getattr(_native, name)
+            if isinstance(obj, type):
+                _ENUM_TYPES.add(obj)
+    _ENUM_TYPES_BUILT = True
 
 
-def _json_range_to_model(range_data: dict) -> Range:
-    """Convert a ``RangeDto`` dict into a :class:`Range` model."""
-    return Range(
-        start=_json_position_to_model(range_data["start"]),
-        end=_json_position_to_model(range_data["end"]),
-    )
+def _is_native_enum(obj: Any) -> bool:
+    """Return True if *obj* is a PyO3 native enum variant."""
+    _build_enum_cache()
+    return type(obj) in _ENUM_TYPES
+
+
+def _to_python(obj: Any) -> Any:
+    """Recursively convert PyO3 native objects to plain Python types.
+
+    - PyO3 enums → ``str``
+    - PyO3 frozen structs → ``dict`` with field-name keys
+    - ``list`` → recursively converted list
+    - ``tuple`` → recursively converted list
+    - ``None``, ``str``, ``int``, ``float``, ``bool`` → passed through
+    """
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+
+    if isinstance(obj, (list, tuple)):
+        return [_to_python(item) for item in obj]
+
+    if _is_native_enum(obj):
+        return str(obj)
+
+    # PyO3 frozen struct: convert to dict via #[pyo3(get)] fields
+    result: dict[str, Any] = {}
+    for name in dir(obj):
+        if name.startswith("_"):
+            continue
+        try:
+            val = getattr(obj, name)
+            if not callable(val):
+                result[name] = _to_python(val)
+        except Exception:
+            pass
+
+    return result
 
 
 # ── RustProject ─────────────────────────────────────────────────────────────
@@ -139,10 +171,18 @@ class RustProject:
     def root(self) -> StdPath:
         return self._root
 
+    # ── Guard ──────────────────────────────────────────────────────
+
+    def _check_open(self) -> None:
+        """Raise ProjectClosedError if this project has been closed."""
+        if self._closed:
+            raise ProjectClosedError("Project is closed")
+
     # ── Files ────────────────────────────────────────────────────────
 
     def files(self) -> list[PurePosixPath]:
         """Return the file paths known to this project."""
+        self._check_open()
         try:
             raw: list[str] = self._inner.files()
         except _NativeClosedError as e:
@@ -155,8 +195,9 @@ class RustProject:
 
     def check(self) -> CheckResult:
         """Run the type-checker and return structured diagnostics."""
+        self._check_open()
         try:
-            raw_json: str = self._inner.check()
+            native_result = self._inner.check()
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativeAnalysisError as e:
@@ -164,37 +205,31 @@ class RustProject:
         except Exception as e:
             raise InternalTyError(f"Unexpected error in check(): {e}") from e
 
-        data = json.loads(raw_json)
-        diagnostics: list[Diagnostic] = []
+        return CheckResult.model_validate(_to_python(native_result))
 
-        for d in data.get("diagnostics", []):
-            range_ref = None
-            if d.get("range"):
-                range_ref = _json_range_to_model(d["range"])
+    def check_file(self, path: str | StdPath) -> CheckResult:
+        """Run the type-checker and return diagnostics for a single file."""
+        self._check_open()
+        try:
+            native_result = self._inner.check_file(str(path))
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except _NativeAnalysisError as e:
+            raise AnalysisError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in check_file(): {e}") from e
 
-            diagnostics.append(
-                Diagnostic(
-                    file=None,  # path-only for now
-                    range=range_ref,
-                    severity=DiagnosticSeverity(d.get("severity", "error")),
-                    code=d.get("code"),
-                    message=d.get("message", ""),
-                    details=d.get("details", []),
-                )
-            )
-
-        return CheckResult(
-            diagnostics=diagnostics,
-            files_checked=data.get("files_checked"),
-            elapsed_ms=data.get("elapsed_ms"),
-        )
+        return CheckResult.model_validate(_to_python(native_result))
 
     # ── Document Symbols ─────────────────────────────────────────────
 
     def document_symbols(self, path: str | StdPath) -> list[Symbol]:
         """Return symbols defined in the given file."""
+        self._check_open()
         try:
-            raw_json: str = self._inner.document_symbols(str(path))
+            native_symbols = self._inner.document_symbols(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
@@ -202,20 +237,23 @@ class RustProject:
         except Exception as e:
             raise InternalTyError(f"Unexpected error in document_symbols(): {e}") from e
 
-        return [self._parse_symbol(s) for s in json.loads(raw_json)]
+        return [Symbol.model_validate(_to_python(s)) for s in native_symbols]
 
     # ── Workspace Symbols ────────────────────────────────────────────
 
     def workspace_symbols(self, query: str) -> list[Symbol]:
         """Search for symbols matching *query* across the project."""
+        if not query:
+            return []
+        self._check_open()
         try:
-            raw_json: str = self._inner.workspace_symbols(query)
+            native_symbols = self._inner.workspace_symbols(query)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in workspace_symbols(): {e}") from e
 
-        return [self._parse_symbol(s) for s in json.loads(raw_json)]
+        return [Symbol.model_validate(_to_python(s)) for s in native_symbols]
 
     # ── Goto Definition ──────────────────────────────────────────────
 
@@ -237,8 +275,9 @@ class RustProject:
 
     def _goto(self, method: str, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Shared implementation for all goto-* methods."""
+        self._check_open()
         try:
-            raw_json: str = getattr(self._inner, method)(str(path), line, column)
+            native_targets = getattr(self._inner, method)(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -250,7 +289,7 @@ class RustProject:
         except Exception as e:
             raise InternalTyError(f"Unexpected error in {method}(): {e}") from e
 
-        return [self._parse_definition_target(t) for t in json.loads(raw_json)]
+        return [DefinitionTarget.model_validate(_to_python(t)) for t in native_targets]
 
     # ── Find References ─────────────────────────────────────────────
 
@@ -262,8 +301,9 @@ class RustProject:
         include_declaration: bool = True,
     ) -> list[Reference]:
         """Find all references to the symbol at *(line, column)*."""
+        self._check_open()
         try:
-            raw_json: str = self._inner.find_references(str(path), line, column, include_declaration)
+            native_refs = self._inner.find_references(str(path), line, column, include_declaration)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -271,17 +311,7 @@ class RustProject:
         except Exception as e:
             raise InternalTyError(f"Unexpected error in find_references(): {e}") from e
 
-        data = json.loads(raw_json)
-        refs: list[Reference] = []
-        for r in data:
-            refs.append(
-                Reference(
-                    path=_string_path_to_typath(r["path"]),
-                    range=_json_range_to_model(r["range"]),
-                    kind=ReferenceKind(r.get("kind", "other")),
-                )
-            )
-        return refs
+        return [Reference.model_validate(_to_python(r)) for r in native_refs]
 
     # ── Hover ────────────────────────────────────────────────────────
 
@@ -290,8 +320,9 @@ class RustProject:
 
         Returns ``None`` when no hover information is available.
         """
+        self._check_open()
         try:
-            raw_json: str | None = self._inner.hover(str(path), line, column)
+            native_hover = self._inner.hover(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -299,64 +330,16 @@ class RustProject:
         except Exception as e:
             raise InternalTyError(f"Unexpected error in hover(): {e}") from e
 
-        if raw_json is None:
+        if native_hover is None:
             return None
 
-        data = json.loads(raw_json)
-        loc_data = data["location"]
-        location = ModelFileRange(
-            path=_string_path_to_typath(loc_data["path"]),
-            range=_json_range_to_model(loc_data["range"]),
-        )
-
-        contents: list[HoverContent] = []
-        for c in data.get("contents", []):
-            kind_str = c.get("kind", "plain_text")
-            try:
-                kind = HoverContentKind(kind_str)
-            except ValueError:
-                kind = HoverContentKind.PLAIN_TEXT
-            contents.append(HoverContent(kind=kind, value=c.get("value", "")))
-
-        return HoverResult(location=location, contents=contents)
-
-    # ── JSON parsing helpers ─────────────────────────────────────────
-
-    def _parse_symbol(self, s: dict) -> Symbol:
-        """Parse a SymbolDto JSON dict into a Symbol model."""
-        location_data = s["location"]
-        loc = ModelFileRange(
-            path=_string_path_to_typath(location_data["path"]),
-            range=_json_range_to_model(location_data["range"]),
-        )
-        sel_range = _json_range_to_model(s["selection_range"]) if s.get("selection_range") else None
-        return Symbol(
-            name=s["name"],
-            qualified_name=s.get("qualified_name"),
-            kind=SymbolKind(s.get("kind", "unknown")),
-            location=loc,
-            selection_range=sel_range,
-            container_name=s.get("container_name"),
-            deprecated=s.get("deprecated", False),
-        )
-
-    def _parse_definition_target(self, t: dict) -> DefinitionTarget:
-        """Parse a DefinitionTargetDto JSON dict into a DefinitionTarget model."""
-        sel_range = _json_range_to_model(t["selection_range"]) if t.get("selection_range") else None
-        symbol = self._parse_symbol(t["symbol"]) if t.get("symbol") else None
-
-        return DefinitionTarget(
-            path=_string_path_to_typath(t["path"]),
-            range=_json_range_to_model(t["range"]),
-            selection_range=sel_range,
-            symbol=symbol,
-            module_name=t.get("module_name"),
-        )
+        return HoverResult.model_validate(_to_python(native_hover))
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
     def reload(self) -> None:
         """Reload the project, clearing cached diagnostics and re-scanning."""
+        self._check_open()
         try:
             self._inner.reload()
         except _NativeClosedError as e:
@@ -381,6 +364,10 @@ class RustProject:
         self.close()
 
     def __del__(self) -> None:
+        # Guard against interpreter shutdown — if the native module is already
+        # unloaded, self._inner will be None and we must not call into Rust.
+        if getattr(self, "_inner", None) is None:
+            return
         if not getattr(self, "_closed", True):
             warnings.warn(
                 "RustProject was not closed explicitly. "

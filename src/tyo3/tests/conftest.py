@@ -124,9 +124,9 @@ def range_() -> Range:
 
 
 @pytest.fixture
-def diagnostic(open_project: TyProject, first_party_file: ProjectFile) -> Diagnostic:
+def diagnostic() -> Diagnostic:
     return Diagnostic(
-        file=first_party_file,
+        file="home/user/project/main.py",
         range=Range(start=Position(line=5, column=1), end=Position(line=5, column=20)),
         severity=DiagnosticSeverity.ERROR,
         code="type-arg",
@@ -169,9 +169,9 @@ def reference(open_project: TyProject) -> Reference:
 
 
 @pytest.fixture
-def semantic_token(open_project: TyProject, first_party_file: ProjectFile) -> SemanticToken:
+def semantic_token() -> SemanticToken:
     return SemanticToken(
-        file=first_party_file,
+        file=make_path(["home", "user", "project", "main.py"]),
         range=Range(start=Position(line=1, column=1), end=Position(line=1, column=10)),
         token_type=SemanticTokenType.FUNCTION,
         modifiers={SemanticTokenModifier.DEFINITION},

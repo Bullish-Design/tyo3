@@ -1,6 +1,9 @@
-"""Core domain models: project lifecycle, configuration, file management.
+"""Core domain models: project lifecycle, file management.
 
 Derived from tyo3-core.allium
+
+> ``TyProjectConfig`` and ``BackendInfo`` are spec-anticipation models
+> moved to ``tyo3.models._spec`` until a backend implementation arrives.
 """
 
 from __future__ import annotations
@@ -11,29 +14,8 @@ from pathlib import PurePosixPath
 
 from pydantic import BaseModel, Field
 
-# ── Value Types ──────────────────────────────────────────────────────────
-
-
-class TyProjectConfig(BaseModel):
-    """Configuration for opening a TyO3 project."""
-
-    python_version: str | None = None
-    config_path: PurePosixPath | None = None
-    extra_search_paths: set[PurePosixPath] = Field(default_factory=set)
-    respect_gitignore: bool = True
-    force_exclude: bool = False
-    check_all_files: bool = True
-
-
-class BackendInfo(BaseModel):
-    """Metadata about the ty backend."""
-
-    tyo3_version: str
-    ty_version: str
-    ty_commit: str
-    ruff_submodule_commit: str
-    backend_source: str
-
+# Re-export from _spec for backward compatibility until callers migrate.
+from tyo3.models._spec import BackendInfo, TyProjectConfig  # noqa: F401
 
 # ── Enums ────────────────────────────────────────────────────────────────
 
@@ -98,11 +80,12 @@ class ProjectFile(BaseModel):
     last_checked_at: datetime | None = None
 
 __all__ = [
-    "TyProjectConfig",
-    "BackendInfo",
     "ProjectStatus",
     "FileCategory",
     "CoordinateMode",
     "TyProject",
     "ProjectFile",
+    # Re-exported from _spec (backward compat):
+    "BackendInfo",
+    "TyProjectConfig",
 ]

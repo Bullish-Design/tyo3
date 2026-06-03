@@ -5,35 +5,47 @@ use crate::dto::{PositionDto, RangeDto};
 
 /// Convert a 1-based Python Position to a ruff TextSize byte offset.
 ///
-/// Returns an error if:
-/// - line or column is < 1
-/// - line exceeds the file's total number of lines
-/// - column exceeds the line's length
+/// Convenience wrapper around [`position_to_offset_with_index`] that
+/// computes a `LineIndex` internally.
 pub fn position_to_offset(
     source: &str,
     pos: &PositionDto,
 ) -> Result<TextSize, String> {
     let line_index = LineIndex::from_source_text(source);
+    position_to_offset_with_index(source, &line_index, pos.line, pos.column)
+}
 
-    let line = pos
-        .line
+/// Convert a 1-based Python Position to a ruff TextSize byte offset,
+/// using a pre-computed [`LineIndex`] (avoids recomputing for multiple
+/// positions in the same file).
+///
+/// Returns an error if:
+/// - line or column is < 1
+/// - line exceeds the file's total number of lines
+/// - column exceeds the line's length
+pub fn position_to_offset_with_index(
+    source: &str,
+    line_index: &LineIndex,
+    line: u32,
+    column: u32,
+) -> Result<TextSize, String> {
+    let line_idx = line
         .checked_sub(1)
         .ok_or_else(|| "Line must be >= 1".to_string())? as usize;
-    let col = pos
-        .column
+    let col = column
         .checked_sub(1)
         .ok_or_else(|| "Column must be >= 1".to_string())? as usize;
 
     // Validate line is within file bounds
     let total_lines = line_index.line_count();
-    if line >= total_lines {
+    if line_idx >= total_lines {
         return Err(format!(
             "Line {} exceeds file length ({} lines)",
-            pos.line, total_lines
+            line, total_lines
         ));
     }
 
-    let line_start = line_index.line_start(OneIndexed::from_zero_indexed(line), source);
+    let line_start = line_index.line_start(OneIndexed::from_zero_indexed(line_idx), source);
 
     // Convert column (Unicode codepoints) to byte offset
     let line_start_usize: usize = line_start.to_usize();
@@ -44,8 +56,8 @@ pub fn position_to_offset(
     if usize::from(byte_col) > line_text.len() {
         return Err(format!(
             "Column {} exceeds line {} length ({} bytes)",
-            pos.column,
-            pos.line,
+            column,
+            line,
             line_text.len()
         ));
     }
@@ -96,10 +108,9 @@ pub fn range_to_dto_with_index(
     }
 }
 
-/// Convert a ruff TextRange to a Python-friendly RangeDto using 1-based line/column.
-///
-/// Convenience wrapper that computes a LineIndex internally.
-/// Use `range_to_dto_with_index` when converting multiple ranges for the same source.
+/// Convenience wrapper that computes a `LineIndex` internally.
+/// Use `range_to_dto_with_index` when converting multiple ranges
+/// for the same source.
 pub fn range_to_dto(
     source: &str,
     range: ruff_text_size::TextRange,

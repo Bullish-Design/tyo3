@@ -1,7 +1,11 @@
 """Tests for TyO3Session.check_file() path filtering."""
 
-from datetime import datetime
+from __future__ import annotations
+
+from pathlib import Path as StdPath
 from pathlib import PurePosixPath
+
+import pytest
 
 from tyo3.models.analysis import (
     CheckResult,
@@ -10,26 +14,33 @@ from tyo3.models.analysis import (
     Position,
     Range,
 )
-from tyo3.models.core import FileCategory, ProjectFile, ProjectStatus, TyProject
+
+# Check if native extension is available
+try:
+    from tyo3.rust_project import RustProject
+
+    _HAS_NATIVE = True
+except ImportError:
+    _HAS_NATIVE = False
+
+from tyo3.exceptions import ProjectClosedError
+
+# ── Path helpers ──────────────────────────────────────────────────────────
+
+FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 
-def _make_project():
-    return TyProject(
-        root=PurePosixPath("/proj"),
-        status=ProjectStatus.OPEN,
-        opened_at=datetime.now(),
-    )
+def fixture_path(name: str) -> str:
+    """Return the absolute path to a fixture directory."""
+    return str((FIXTURES_DIR / name).resolve())
+
+
+needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
 
 def _make_diagnostic(file_path: str) -> Diagnostic:
-    proj = _make_project()
-    pf = ProjectFile(
-        path=PurePosixPath(file_path),
-        project=proj,
-        file_category=FileCategory.FIRST_PARTY,
-    )
     return Diagnostic(
-        file=pf,
+        file=file_path,
         range=Range(
             start=Position(line=1, column=1),
             end=Position(line=1, column=10),
@@ -49,33 +60,27 @@ class TestCheckFileFiltering:
         result = CheckResult(diagnostics=[d1, d2], files_checked=2)
 
         # Simulate what check_file does: filter by path
-        target = PurePosixPath("src/main.py")
+        target = "src/main.py"
         filtered = [
             d
             for d in result.diagnostics
             if d.file is not None
-            and (
-                d.file.path == target
-                or str(d.file.path).endswith(str(target))
-            )
+            and str(d.file) == target
         ]
         assert len(filtered) == 1
-        assert filtered[0].file.path == PurePosixPath("src/main.py")
+        assert filtered[0].file == "src/main.py"
 
     def test_filter_excludes_other_files(self):
         """Diagnostics for other files should be excluded."""
         d1 = _make_diagnostic("src/other.py")
         result = CheckResult(diagnostics=[d1], files_checked=1)
 
-        target = PurePosixPath("src/main.py")
+        target = "src/main.py"
         filtered = [
             d
             for d in result.diagnostics
             if d.file is not None
-            and (
-                d.file.path == target
-                or str(d.file.path).endswith(str(target))
-            )
+            and str(d.file) == target
         ]
         assert len(filtered) == 0
 
@@ -84,14 +89,82 @@ class TestCheckFileFiltering:
         d = Diagnostic(message="generic error")
         result = CheckResult(diagnostics=[d])
 
-        target = PurePosixPath("src/main.py")
+        target = "src/main.py"
         filtered = [
             d
             for d in result.diagnostics
             if d.file is not None
-            and (
-                d.file.path == target
-                or str(d.file.path).endswith(str(target))
-            )
+            and str(d.file) == target
         ]
         assert len(filtered) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Integration tests — exercise the Rust check_file() backend
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@needs_native
+class TestCheckFileIntegration:
+    """Test check_file() through the real Rust backend."""
+
+    def test_check_file_returns_result(self) -> None:
+        """check_file() should return a CheckResult for the target file."""
+        rp = RustProject(fixture_path("diagnostic_targets"))
+        result = rp.check_file("errors.py")
+        assert result is not None
+        assert isinstance(result.diagnostics, list)
+        assert result.files_checked == 1
+        rp.close()
+
+    def test_check_file_returns_only_target_diagnostics(self) -> None:
+        """All diagnostics returned by check_file() should be for the target file."""
+        rp = RustProject(fixture_path("diagnostic_targets"))
+        result = rp.check_file("errors.py")
+        for d in result.diagnostics:
+            assert d.file is not None, f"Diagnostic has no file: {d.message}"
+            assert "errors.py" in d.file, (
+                f"Diagnostic file '{d.file}' does not match 'errors.py'"
+            )
+        rp.close()
+
+    def test_check_file_on_multi_file_project(self) -> None:
+        """check_file() on a multi-file project filters correctly."""
+        rp = RustProject(fixture_path("imports"))
+        # math_ops.py is a clean file — should have 0 diagnostics
+        result = rp.check_file("math_ops.py")
+        for d in result.diagnostics:
+            assert "math_ops.py" in d.file, (
+                f"Got diagnostic for wrong file: {d.file} -> {d.message}"
+            )
+        rp.close()
+
+    def test_check_file_after_close_raises(self) -> None:
+        """check_file() should raise ProjectClosedError after close()."""
+        rp = RustProject(fixture_path("simple_package"))
+        rp.close()
+        with pytest.raises(ProjectClosedError):
+            rp.check_file("main.py")
+
+    def test_check_file_nonexistent_raises(self) -> None:
+        """check_file() should raise on a nonexistent file path."""
+        from tyo3.exceptions import PathResolutionError
+
+        rp = RustProject(fixture_path("simple_package"))
+        with pytest.raises(PathResolutionError):
+            rp.check_file("nonexistent.py")
+        rp.close()
+
+    def test_check_file_vs_check_consistency(self) -> None:
+        """check() should include all diagnostics that check_file() returns for any file."""
+        rp = RustProject(fixture_path("diagnostic_targets"))
+        full_result = rp.check()
+        file_result = rp.check_file("errors.py")
+
+        # Every diagnostic from check_file() should be present in check()
+        full_messages = {d.message for d in full_result.diagnostics}
+        for d in file_result.diagnostics:
+            assert d.message in full_messages, (
+                f"check_file diagnostic not found in check: {d.message}"
+            )
+        rp.close()

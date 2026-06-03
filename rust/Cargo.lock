@@ -2335,7 +2335,6 @@ dependencies = [
  "ruff_source_file",
  "ruff_text_size",
  "serde",
- "serde_json",
  "ty_ide",
  "ty_module_resolver",
  "ty_project",

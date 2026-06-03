@@ -8,15 +8,15 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import PurePosixPath
 
-from pydantic import BaseModel, Field, model_validator
-
-from tyo3.models.core import ProjectFile
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ── Value Types ──────────────────────────────────────────────────────────
 
 
 class Position(BaseModel):
     """A 1-based position in a file."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     line: int  # 1-based
     column: int  # 1-based, Unicode codepoints
@@ -32,6 +32,8 @@ class Position(BaseModel):
 
 class Range(BaseModel):
     """A range between two positions."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     start: Position
     end: Position
@@ -50,12 +52,16 @@ class Range(BaseModel):
 class FileRange(BaseModel):
     """A range within a specific file."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     path: PurePosixPath
     range: Range
 
 
 class CheckResult(BaseModel):
     """Result of a type-check invocation."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     diagnostics: list[Diagnostic] = Field(default_factory=list)
     files_checked: int | None = None
@@ -81,7 +87,9 @@ class DiagnosticSeverity(StrEnum):
 class Diagnostic(BaseModel):
     """A type-checking diagnostic for a specific location in a project file."""
 
-    file: ProjectFile | None = None
+    model_config = ConfigDict(from_attributes=True)
+
+    file: str | None = None
     range: Range | None = None
     severity: DiagnosticSeverity = DiagnosticSeverity.ERROR
     code: str | None = None

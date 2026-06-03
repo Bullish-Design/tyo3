@@ -3,7 +3,7 @@
 Invariants to verify:
 - ProjectCannotBeReopened: no two open projects share a root
 - FilesBelongToOpenProject: every ProjectFile's project is open
-- DiagnosticFileInOpenProject: when a Diagnostic has a file, the file's project is open
+- DiagnosticHasFileOrNone: Diagnostic.file is a string path or None
 - SymbolLocationPointsToProjectFile
 """
 
@@ -67,16 +67,16 @@ class TestFilesBelongToOpenProject:
         assert pf.project.status != ProjectStatus.OPEN
 
 
-class TestDiagnosticFileInOpenProject:
-    """invariant: when a Diagnostic has a file, the file's project must be open."""
+class TestDiagnosticFileOrNone:
+    """Diagnostic.file is a string path (from Rust backend) or None."""
 
-    def test_diagnostic_with_file_has_open_project(self, open_project, first_party_file) -> None:
+    def test_diagnostic_with_file_string(self) -> None:
         d = Diagnostic(
-            file=first_party_file,
+            file="src/main.py",
             message="test",
         )
-        assert d.file is not None
-        assert d.file.project.status == ProjectStatus.OPEN
+        assert d.file == "src/main.py"
+        assert d.message == "test"
 
     def test_diagnostic_without_file(self) -> None:
         d = Diagnostic(message="test")
@@ -85,31 +85,20 @@ class TestDiagnosticFileInOpenProject:
 
 
 class TestDiagnosticFileConsistency:
-    """invariant: if a Diagnostic has a file, that file must belong to a valid project."""
+    """Diagnostic.file can be any path string representing the source file."""
 
-    def test_file_belongs_to_valid_project(self, open_project, first_party_file) -> None:
+    def test_file_is_valid_path_string(self) -> None:
         d = Diagnostic(
-            file=first_party_file,
+            file="src/package/module.py",
             message="test",
         )
         assert d.file is not None
-        assert d.file.project.root is not None
+        assert isinstance(d.file, str)
+        assert "/" in d.file
 
-    def test_file_from_different_project(self, open_project) -> None:
-        other = TyProject(
-            root=PurePosixPath("other"),
-            status=ProjectStatus.OPEN,
-            opened_at=datetime.now(UTC),
-        )
-        other_file = ProjectFile(
-            path=PurePosixPath("other.py"),
-            project=other,
-            file_category=FileCategory.FIRST_PARTY,
-        )
-        d = Diagnostic(file=other_file, message="test")
-        # Diagnostic's file belongs to a different project — that's fine
-        # (Diagnostic no longer owns a project reference)
-        assert d.file.project.root != open_project.root
+    def test_diagnostic_with_different_file(self) -> None:
+        d = Diagnostic(file="other.py", message="test")
+        assert d.file == "other.py"
 
 
 class TestSymbolLocationHasPath:

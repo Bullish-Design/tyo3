@@ -10,7 +10,7 @@ from pathlib import Path as StdPath
 from pathlib import PurePosixPath
 
 from tyo3.exceptions import PositionError
-from tyo3.models.analysis import CheckResult, Diagnostic
+from tyo3.models.analysis import CheckResult
 from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
 from tyo3.models.symbols import Symbol
 from tyo3.rust_project import RustProject
@@ -66,25 +66,11 @@ class TyO3Session:
     def check_file(self, path: str | StdPath) -> CheckResult:
         """Run the type checker and return diagnostics for a single file.
 
-        Runs a full project check, then filters diagnostics to those
-        whose file path matches *path*. The path is compared as a
-        POSIX path suffix so both absolute and project-relative paths work.
+        Runs a full project check, then filters diagnostics in Rust
+        before they cross the boundary — only diagnostics for the
+        target file are returned.
         """
-        target = PurePosixPath(path)
-        result = self._rp.check()
-
-        def _matches(d: Diagnostic) -> bool:
-            if d.file is None or d.file.path is None:
-                return False
-            # Support both exact match and suffix match (relative vs absolute)
-            return d.file.path == target or str(d.file.path).endswith(str(target))
-
-        filtered = [d for d in result.diagnostics if _matches(d)]
-        return CheckResult(
-            diagnostics=filtered,
-            files_checked=1,
-            elapsed_ms=result.elapsed_ms,
-        )
+        return self._rp.check_file(path)
 
     # ── Symbols ──────────────────────────────────────────────
 

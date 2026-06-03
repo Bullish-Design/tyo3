@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -9,6 +10,7 @@ use crate::{ProjectClosedError, PathResolutionError, PositionError};
 use ruff_db::files::File;
 use ruff_db::source::source_text;
 use ruff_db::system::{OsSystem, SystemPathBuf};
+use ruff_source_file::LineIndex;
 
 use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
@@ -28,7 +30,7 @@ struct TyProjectState {
 
 /// Python-facing wrapper.  The inner `Option` is `None` after `close()`;
 /// every operation checks this first and raises if the project is closed.
-#[pyclass(name = "TyProject")]
+#[pyclass(name = "TyProject", module = "tyo3._native_impl")]
 pub struct PyTyProject {
     inner: Mutex<Option<TyProjectState>>,
 }
@@ -74,7 +76,7 @@ fn resolve_file_and_source(
 /// Shared implementation for goto_definition, goto_declaration,
 /// goto_type_definition.  Resolves the path, computes the source offset,
 /// calls the provided navigation function, converts the results, and
-/// serialises to JSON.
+/// returns native DefinitionTargetDto objects.
 fn navigate_to_targets(
     inner: &Mutex<Option<TyProjectState>>,
     op_name: &str,
@@ -86,15 +88,17 @@ fn navigate_to_targets(
         File,
         ruff_text_size::TextSize,
     ) -> Option<ty_ide::RangedValue<ty_ide::NavigationTargets>>,
-) -> PyResult<String> {
+) -> PyResult<Vec<dto::DefinitionTargetDto>> {
     let guard = lock_state(inner, op_name)?;
     let state = guard.as_ref().unwrap();
 
     let (file, source_str) = resolve_file_and_source(state, path)?;
 
-    let pos = dto::PositionDto { line, column };
-    let offset = coordinates::position_to_offset(&source_str, &pos)
-        .map_err(|e| PositionError::new_err(e))?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(|e| PositionError::new_err(e))?;
 
     let result = navigate_fn(&state.db, file, offset);
 
@@ -105,8 +109,7 @@ fn navigate_to_targets(
         None => Vec::new(),
     };
 
-    serde_json::to_string(&targets)
-        .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+    Ok(targets)
 }
 
 /// Recursively collect document symbols from a hierarchical symbol tree.
@@ -197,15 +200,15 @@ impl PyTyProject {
 
     /// Reload the project: drop the current database and re-create it.
     /// Clears all cached diagnostics and symbol data.
+    ///
+    /// Holds the lock throughout — no window where concurrent callers
+    /// see a closed project.
     fn reload(&self) -> PyResult<()> {
         let mut guard = lock_state(&self.inner, "reload")?;
         let root = guard.as_ref().unwrap().root.clone();
 
-        // Drop the old database
-        *guard = None;
-        drop(guard);
-
-        // Re-create with the same root
+        // Create the new database while still holding the lock.
+        // This is CPU-bound work with no lock-contention risk.
         let system = OsSystem::new(root.clone());
         let metadata = ProjectMetadata::new(
             ruff_python_ast::name::Name::new("tyo3-project"),
@@ -213,9 +216,7 @@ impl PyTyProject {
         );
         let db = ProjectDatabase::use_defaults(metadata, system);
 
-        let mut guard = self.inner.lock().map_err(|e| {
-            PyRuntimeError::new_err(format!("Lock poisoned: {}", e))
-        })?;
+        // Atomically swap — old database drops when guard's previous value drops
         *guard = Some(TyProjectState { db, root });
         Ok(())
     }
@@ -223,17 +224,13 @@ impl PyTyProject {
     // ── Lifecycle: Close ─────────────────────────────────────────────
 
     /// Close the project and free all resources.
-    /// Subsequent operations will raise an error.
+    /// Idempotent — closing an already-closed project is a no-op.
     fn close(&self) -> PyResult<()> {
         let mut guard = self.inner.lock().map_err(|e| {
             PyRuntimeError::new_err(format!("Lock poisoned: {}", e))
         })?;
 
-        if guard.is_none() {
-            return Err(ProjectClosedError::new_err("Project is already closed"));
-        }
-
-        // Drop the database
+        // Setting None on an already-None guard is harmless.
         *guard = None;
         Ok(())
     }
@@ -258,12 +255,12 @@ impl PyTyProject {
     // ── Check ────────────────────────────────────────────────────────
 
     /// Run the type checker on the entire project.
-    fn check(&self) -> PyResult<String> {
+    fn check(&self) -> PyResult<dto::CheckResultDto> {
         let guard = lock_state(&self.inner, "check")?;
         let state = guard.as_ref().unwrap();
 
         let result = state.db.check();
-        let diagnostics = convert::diagnostics::convert_diagnostics(&result);
+        let diagnostics = convert::diagnostics::convert_diagnostics(&state.db, &result);
 
         let check_result = dto::CheckResultDto {
             diagnostics,
@@ -271,14 +268,49 @@ impl PyTyProject {
             elapsed_ms: None,
         };
 
-        serde_json::to_string(&check_result)
-            .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+        Ok(check_result)
+    }
+
+    /// Run the type checker and return diagnostics for a single file.
+    ///
+    /// Runs a full project check (Salsa-cached if unchanged), then filters
+    /// diagnostics in Rust before constructing DTOs — only matching file
+    /// diagnostics are converted and returned across the boundary.
+    fn check_file(&self, path: &str) -> PyResult<dto::CheckResultDto> {
+        let guard = lock_state(&self.inner, "check_file")?;
+        let state = guard.as_ref().unwrap();
+
+        // Resolve the target file path for comparison
+        let (file, _) = resolve_file_and_source(state, path)?;
+        let target_path = file.path(&state.db).as_str().to_string();
+
+        // Full project check (Salsa-cached if unchanged)
+        let all_diagnostics = state.db.check();
+
+        // Filter in Rust — only convert matching diagnostics to DTOs
+        let matching: Vec<_> = all_diagnostics
+            .iter()
+            .filter(|d| {
+                convert::diagnostics::diagnostic_matches_file(
+                    &state.db, d, &target_path,
+                )
+            })
+            .collect();
+
+        let diagnostics =
+            convert::diagnostics::convert_diagnostic_refs(&state.db, &matching);
+
+        Ok(dto::CheckResultDto {
+            diagnostics,
+            files_checked: Some(1),
+            elapsed_ms: None,
+        })
     }
 
     // ── Document Symbols ─────────────────────────────────────────────
 
     /// Get document symbols for a file in the project.
-    fn document_symbols(&self, path: &str) -> PyResult<String> {
+    fn document_symbols(&self, path: &str) -> PyResult<Vec<dto::SymbolDto>> {
         let guard = lock_state(&self.inner, "document_symbols")?;
         let state = guard.as_ref().unwrap();
 
@@ -304,30 +336,36 @@ impl PyTyProject {
             );
         }
 
-        serde_json::to_string(&symbols)
-            .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+        Ok(symbols)
     }
 
     // ── Workspace Symbols ────────────────────────────────────────────
 
     /// Search for symbols matching a query across all workspace files.
-    fn workspace_symbols(&self, query: &str) -> PyResult<String> {
+    fn workspace_symbols(&self, query: &str) -> PyResult<Vec<dto::SymbolDto>> {
         let guard = lock_state(&self.inner, "workspace_symbols")?;
         let state = guard.as_ref().unwrap();
 
         let results = ty_ide::workspace_symbols(&state.db, query);
 
-        let mut symbols: Vec<dto::SymbolDto> = Vec::new();
+        // Cache source text and LineIndex per file — workspace symbol results
+        // from the same file reuse the precomputed LineIndex instead of rebuilding.
+        let mut file_cache: HashMap<File, (String, LineIndex)> = HashMap::new();
+        let mut symbols: Vec<dto::SymbolDto> = Vec::with_capacity(results.len());
         for ws_info in &results {
-            let src = source_text(&state.db, ws_info.file);
-            let source_str = src.as_str().to_string();
+            let (source_str, line_index) = file_cache
+                .entry(ws_info.file)
+                .or_insert_with(|| {
+                    let src = source_text(&state.db, ws_info.file);
+                    let s = src.as_str().to_string();
+                    let idx = LineIndex::from_source_text(&s);
+                    (s, idx)
+                });
             let file_path = ws_info.file.path(&state.db).as_str().to_string();
 
-            let line_index = ruff_source_file::LineIndex::from_source_text(&source_str);
-
             let sym = convert::symbols::convert_symbol(
-                &source_str,
-                &line_index,
+                source_str,
+                line_index,
                 &file_path,
                 &ws_info.symbol.name,
                 &ws_info.symbol.kind,
@@ -344,8 +382,7 @@ impl PyTyProject {
             symbols.push(sym);
         }
 
-        serde_json::to_string(&symbols)
-            .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+        Ok(symbols)
     }
 
     // ── Goto Definition ──────────────────────────────────────────────
@@ -356,7 +393,7 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<String> {
+    ) -> PyResult<Vec<dto::DefinitionTargetDto>> {
         navigate_to_targets(
             &self.inner,
             "goto_definition",
@@ -375,7 +412,7 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<String> {
+    ) -> PyResult<Vec<dto::DefinitionTargetDto>> {
         navigate_to_targets(
             &self.inner,
             "goto_declaration",
@@ -394,7 +431,7 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<String> {
+    ) -> PyResult<Vec<dto::DefinitionTargetDto>> {
         navigate_to_targets(
             &self.inner,
             "goto_type_definition",
@@ -414,15 +451,17 @@ impl PyTyProject {
         line: u32,
         column: u32,
         include_declaration: bool,
-    ) -> PyResult<String> {
+    ) -> PyResult<Vec<dto::ReferenceDto>> {
         let guard = lock_state(&self.inner, "find_references")?;
         let state = guard.as_ref().unwrap();
 
         let (file, source_str) = resolve_file_and_source(state, path)?;
 
-        let pos = dto::PositionDto { line, column };
-        let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PositionError::new_err(e))?;
+        let line_index = LineIndex::from_source_text(&source_str);
+        let offset = coordinates::position_to_offset_with_index(
+            &source_str, &line_index, line, column,
+        )
+        .map_err(|e| PositionError::new_err(e))?;
 
         let result = ty_ide::find_references(
             &state.db,
@@ -436,15 +475,14 @@ impl PyTyProject {
             None => Vec::new(),
         };
 
-        serde_json::to_string(&references)
-            .map_err(|e| PyRuntimeError::new_err(format!("Serialisation failed: {}", e)))
+        Ok(references)
     }
 
     // ── Hover ────────────────────────────────────────────────────────
 
     /// Get hover information for the symbol at the given position.
     ///
-    /// Returns a JSON-encoded HoverDto, or None if no hover info is available.
+    /// Returns a native HoverDto, or None if no hover info is available.
     ///
     /// NOTE: ty_ide does not publicly re-export Hover/HoverContent, so the
     /// entire hover is rendered as Markdown and returned as a single content
@@ -454,15 +492,17 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<Option<String>> {
+    ) -> PyResult<Option<dto::HoverDto>> {
         let guard = lock_state(&self.inner, "hover")?;
         let state = guard.as_ref().unwrap();
 
         let (file, source_str) = resolve_file_and_source(state, path)?;
 
-        let pos = dto::PositionDto { line, column };
-        let offset = coordinates::position_to_offset(&source_str, &pos)
-            .map_err(|e| PositionError::new_err(e))?;
+        let line_index = LineIndex::from_source_text(&source_str);
+        let offset = coordinates::position_to_offset_with_index(
+            &source_str, &line_index, line, column,
+        )
+        .map_err(|e| PositionError::new_err(e))?;
 
         let result = ty_ide::hover(&state.db, file, offset);
 
@@ -477,22 +517,15 @@ impl PyTyProject {
                     .display(&state.db, ty_ide::MarkupKind::Markdown)
                     .to_string();
 
-                let hover_dto = convert::hover::convert_hover_markdown(
+                let hover_dto = convert::hover::convert_hover_markdown_with_index(
                     &source_str,
+                    &line_index,
                     file_path,
                     file_range,
                     rendered,
                 );
 
-                let json = serde_json::to_string(&hover_dto)
-                    .map_err(|e| {
-                        PyRuntimeError::new_err(format!(
-                            "Serialisation failed: {}",
-                            e
-                        ))
-                    })?;
-
-                Ok(Some(json))
+                Ok(Some(hover_dto))
             }
         }
     }

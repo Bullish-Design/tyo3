@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from tyo3.models.analysis import FileRange, Range
 
@@ -32,11 +32,19 @@ class SymbolKind(StrEnum):
     UNKNOWN = "unknown"
 
 
+# Aliases for convenience — avoid trailing underscore for non-keyword contexts.
+# Users can write SymbolKind.CLASS instead of SymbolKind.CLASS_.
+SymbolKind.CLASS = SymbolKind.CLASS_  # type: ignore[attr-defined]
+SymbolKind.IMPORT = SymbolKind.IMPORT_  # type: ignore[attr-defined]
+
+
 # ── Entities ─────────────────────────────────────────────────────────────
 
 
 class Symbol(BaseModel):
     """A code symbol discovered in a TyO3 project."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     name: str
     qualified_name: str | None = None

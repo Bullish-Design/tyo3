@@ -1,16 +1,20 @@
 """Advanced semantic analysis domain models: semantic tokens, type hierarchy.
 
 Derived from tyo3-advanced.allium
+
+> These are spec-anticipation models with no backend implementation yet.
+> ``SemanticToken.file`` uses ``PurePosixPath`` instead of ``ProjectFile``
+> until the project-file relationship has a backend source.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel, Field
 
 from tyo3.models.analysis import Range
-from tyo3.models.core import ProjectFile
 
 # ── Enums ────────────────────────────────────────────────────────────────
 
@@ -50,7 +54,7 @@ class SemanticTokenModifier(StrEnum):
 class SemanticToken(BaseModel):
     """A classified semantic token within a project file."""
 
-    file: ProjectFile
+    file: PurePosixPath
     range: Range
     token_type: SemanticTokenType
     modifiers: set[SemanticTokenModifier] = Field(default_factory=set)

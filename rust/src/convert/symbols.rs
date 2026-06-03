@@ -47,9 +47,9 @@ pub fn convert_symbol(
         kind: symbol_kind_to_dto(kind),
         location: FileRangeDto {
             path: file_path.to_string(),
-            range: name_range_dto,
+            range: full_range_dto,
         },
-        selection_range: Some(full_range_dto),
+        selection_range: Some(name_range_dto),
         container_name: container_name.map(|s| s.to_string()),
         deprecated,
     }
