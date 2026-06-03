@@ -172,6 +172,20 @@ class TestRustCoordinateConversion:
                     f" < start {sym.location.range.start.column}"
                 )
 
+    def test_column_beyond_current_line_rejected(self) -> None:
+        """Column 500 on line 1 must raise PositionError, not clamp silently.
+
+        This test captures the bug described in TyO3_REVIEW_2_REFACTORING_GUIDE.md
+        §Phase 1.1: the Rust coordinate converter currently slices from
+        line_start to EOF instead of extracting the current line only,
+        so a column value beyond the current line can walk into later
+        lines instead of being rejected.
+
+        This test should fail before Phase 1 fixes land.
+        """
+        with pytest.raises(PositionError):
+            self.rp.goto_definition("main.py", 1, 500)
+
 
 @needs_native
 class TestUnicodeCoordinateConversion:
