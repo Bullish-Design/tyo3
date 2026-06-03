@@ -9,6 +9,7 @@ from typing import Any
 
 import rustworkx as rx
 
+from tyo3.graph.dependency import DependencyGraph
 from tyo3.graph.identity import file_from_symbol_id, symbol_id_from_symbol
 from tyo3.graph.models import EdgeData, EdgeKind, ReferenceRole, SymbolNode
 from tyo3.models.analysis import Diagnostic, Range
@@ -31,6 +32,9 @@ class CodeGraph:
 
         # Diagnostics (separate from graph)
         self._diagnostics: dict[str, list[Diagnostic]] = {}
+
+        # Dependency graph cache for external packages
+        self._dependency_cache: dict[str, DependencyGraph] = {}
 
     # ── Construction ──────────────────────────────────────────
 
@@ -254,9 +258,13 @@ class CodeGraph:
                 # No symbol info — skip this reference
                 continue
 
-            # Ensure the target node exists (may be in another file or external)
+            # Ensure the target node exists — create a stub if external
             if target_sid not in self._id_to_index:
-                continue
+                target_sid = self._ensure_target_node(
+                    target_file, target_sid, target
+                )
+                if target_sid is None:
+                    continue
 
             # Determine the enclosing symbol at this token's location
             enclosing_id = self._find_enclosing_symbol(file_str, token.range)
@@ -279,6 +287,65 @@ class CodeGraph:
                 role=role,
             )
             self._add_edge(enclosing_id, target_sid, edge, file_str)
+
+    def _ensure_target_node(
+        self,
+        target_file: str,
+        target_sid: str,
+        target: Any,
+    ) -> str | None:
+        """Ensure a reference target exists as a node.
+
+        If the target is external (not in project files), creates a stub
+        node for it. Returns the effective symbol_id to use for edge
+        creation, or None if the target cannot be represented.
+        """
+        # If it's already indexed in this session's files, it may be
+        # from a file that just hasn't been processed yet — skip for now.
+        # Only create stubs for truly external paths (not in any project file).
+        if target_file not in self._file_to_nodes:
+            package = self._infer_package(target_file)
+            kind = SymbolKind.UNKNOWN
+            name = target_sid.split("::")[-1]
+            qn = name
+            if hasattr(target, "symbol") and target.symbol:
+                kind = target.symbol.kind
+                name = target.symbol.name
+                qn = target.symbol.qualified_name or name
+
+            ext_sid = f"{package}::{qn}" if package else target_sid
+            self._add_stub_node(
+                symbol_id=ext_sid,
+                name=name,
+                qualified_name=qn,
+                kind=kind,
+                package=package or "unknown",
+            )
+            return ext_sid
+        # In-project but not yet indexed — will be picked up later
+        return None
+
+    def _infer_package(self, file_path: str) -> str | None:
+        """Infer the package name from an external file path.
+
+        Heuristic: look for common patterns like site-packages/foo/...,
+        or lib/python3.x/... for stdlib.
+        """
+        if "site-packages/" in file_path:
+            parts = file_path.split("site-packages/")[1].split("/")
+            if parts:
+                return parts[0]
+        if "/lib/python" in file_path or "typeshed" in file_path:
+            return "stdlib"
+        # Look for .venv or venv patterns
+        if "/.venv/" in file_path or "/venv/" in file_path:
+            parts = file_path.split("/.venv/" if "/.venv/" in file_path else "/venv/")[1].split("/")
+            if len(parts) > 2 and parts[0] == "lib":
+                # .venv/lib/python3.x/site-packages/foo/...
+                for i, part in enumerate(parts):
+                    if part == "site-packages" and i + 1 < len(parts):
+                        return parts[i + 1]
+        return None
 
     def _resolve_inheritance(
         self,
@@ -307,8 +374,26 @@ class CodeGraph:
                 super_file = str(supertype.path)
                 super_sid = self._find_symbol_in_file(super_file, supertype.name)
 
+                # If not found locally, create an external stub node
                 if super_sid is None:
-                    continue
+                    package = self._infer_package(super_file)
+                    if package is None and super_file not in self._file_to_nodes:
+                        # Truly external, use the file stem as package hint
+                        package = "unknown"
+                    if package:
+                        ext_sid = f"{package}::{supertype.name}"
+                        kind = SymbolKind.CLASS  # supertypes are classes
+                        super_sid = ext_sid
+                        if ext_sid not in self._id_to_index:
+                            self._add_stub_node(
+                                symbol_id=ext_sid,
+                                name=supertype.name,
+                                qualified_name=f"{package}.{supertype.name}",
+                                kind=kind,
+                                package=package,
+                            )
+                    else:
+                        continue
 
                 edge = EdgeData(kind=EdgeKind.INHERITS)
                 self._add_edge(sid, super_sid, edge, file_str)
@@ -587,6 +672,50 @@ class CodeGraph:
             if (src in nodes_a and tgt in nodes_b) or (src in nodes_b and tgt in nodes_a):
                 count += 1
         return count
+
+    # ── External symbol resolution ───────────────────────────
+
+    def external_symbols(self) -> list[SymbolNode]:
+        """All stub nodes for external (dependency) symbols."""
+        return [
+            self._graph[i]
+            for i in self._graph.node_indices()
+            if self._graph[i].external
+        ]
+
+    def external_symbols_by_package(self) -> dict[str, list[SymbolNode]]:
+        """Group external symbol stub nodes by package."""
+        result: dict[str, list[SymbolNode]] = {}
+        for node in self.external_symbols():
+            pkg = node.package or "unknown"
+            if pkg not in result:
+                result[pkg] = []
+            result[pkg].append(node)
+        return result
+
+    def resolve_external(self, symbol_id: str) -> SymbolNode | None:
+        """Resolve an external symbol by loading its dependency graph.
+
+        If the symbol is external and its dependency graph is cached
+        on disk, loads it and returns the fully-resolved node.
+        Otherwise returns the stub node as-is.
+        """
+        node = self.symbol(symbol_id)
+        if node is None or not node.external or not node.package:
+            return node
+
+        if node.package not in self._dependency_cache:
+            # Try loading from disk cache
+            dep = DependencyGraph.load(node.package, "unknown")
+            if dep is not None:
+                self._dependency_cache[node.package] = dep
+
+        dep = self._dependency_cache.get(node.package)
+        if dep is None:
+            return node  # Return the stub
+
+        resolved = dep.lookup(symbol_id)
+        return resolved if resolved is not None else node
 
     # ── Diagnostics ───────────────────────────────────────────
 
