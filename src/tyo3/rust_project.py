@@ -305,8 +305,6 @@ class RustProject:
 
     def workspace_symbols(self, query: str) -> list[Symbol]:
         """Search for symbols matching *query* across the project."""
-        if not query:
-            return []
         self._check_open()
         try:
             native_symbols = self._inner.workspace_symbols(query)
@@ -369,6 +367,10 @@ class RustProject:
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
             raise PositionError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in find_references(): {e}") from e
@@ -433,6 +435,10 @@ class RustProject:
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
             raise PositionError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in hover(): {e}") from e

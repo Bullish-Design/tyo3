@@ -266,3 +266,43 @@ class TestEmptyFileEdgeCases:
         result = self.rp.check()
         assert result is not None
         assert isinstance(result.diagnostics, list)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 2: Exception mapping tests (requires native extension)
+# ═══════════════════════════════════════════════════════════════════════════
+
+from tyo3.exceptions import PathResolutionError
+
+
+@needs_native
+def test_find_references_bad_path_raises_path_error() -> None:
+    """A missing file path in find_references raises PathResolutionError."""
+    rp = RustProject(fixture_path("simple_package"))
+    try:
+        with pytest.raises(PathResolutionError):
+            rp.find_references("missing.py", 1, 1)
+    finally:
+        rp.close()
+
+
+@needs_native
+def test_hover_bad_path_raises_path_error() -> None:
+    """A missing file path in hover raises PathResolutionError."""
+    rp = RustProject(fixture_path("simple_package"))
+    try:
+        with pytest.raises(PathResolutionError):
+            rp.hover("missing.py", 1, 1)
+    finally:
+        rp.close()
+
+
+@needs_native
+def test_find_references_negative_position_raises_position_error() -> None:
+    """A negative position in find_references raises PositionError."""
+    rp = RustProject(fixture_path("simple_package"))
+    try:
+        with pytest.raises(PositionError):
+            rp.find_references("main.py", -1, 1)
+    finally:
+        rp.close()

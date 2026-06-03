@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path as StdPath
 from pathlib import PurePosixPath
 
-from tyo3.exceptions import PositionError
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult
 from tyo3.models.navigation import (
@@ -95,17 +94,14 @@ class TyO3Session:
 
     def goto_definition(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the definition of the symbol at (line, column)."""
-        self._validate_position(line, column)
         return self._rp.goto_definition(path, line, column)
 
     def goto_declaration(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the declaration of the symbol at (line, column)."""
-        self._validate_position(line, column)
         return self._rp.goto_declaration(path, line, column)
 
     def goto_type_definition(self, path: str | StdPath, line: int, column: int) -> list[DefinitionTarget]:
         """Navigate to the type definition of the symbol at (line, column)."""
-        self._validate_position(line, column)
         return self._rp.goto_type_definition(path, line, column)
 
     def find_references(
@@ -116,12 +112,10 @@ class TyO3Session:
         include_declaration: bool = True,
     ) -> list[Reference]:
         """Find all references to the symbol at (line, column)."""
-        self._validate_position(line, column)
         return self._rp.find_references(path, line, column, include_declaration)
 
     def hover(self, path: str | StdPath, line: int, column: int) -> HoverResult | None:
         """Get hover information for the symbol at (line, column)."""
-        self._validate_position(line, column)
         return self._rp.hover(path, line, column)
 
     # ── Type Hierarchy ───────────────────────────────────────
@@ -130,7 +124,6 @@ class TyO3Session:
         self, path: str | StdPath, line: int, column: int
     ) -> TypeHierarchy | None:
         """Query type hierarchy at a position."""
-        self._validate_position(line, column)
         return self._rp.type_hierarchy(path, line, column)
 
     # ── Semantic Tokens ───────────────────────────────────────
@@ -150,9 +143,4 @@ class TyO3Session:
         """
         return self._rp.file_occurrences(path)
 
-    # ── Validation ───────────────────────────────────────────
 
-    @staticmethod
-    def _validate_position(line: int, column: int) -> None:
-        if line < 1 or column < 1:
-            raise PositionError("Position must be 1-based (line >= 1, column >= 1)")
