@@ -36,7 +36,13 @@ from tyo3.exceptions import (
 )
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult
-from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference, TypeHierarchy
+from tyo3.models.navigation import (
+    DefinitionTarget,
+    HoverResult,
+    NameOccurrence,
+    Reference,
+    TypeHierarchy,
+)
 from tyo3.models.symbols import Symbol
 
 # The PyO3 extension module — must match
@@ -105,6 +111,7 @@ def _build_enum_cache() -> None:
             name.endswith("Kind")
             or name.endswith("Type")
             or name.endswith("Modifier")
+            or name.endswith("Role")
             or name == "NativeSeverity"
         ):
             obj = getattr(_native, name)
@@ -341,6 +348,29 @@ class RustProject:
             d["file"] = path_posix
             result.append(SemanticToken.model_validate(d))
         return result
+
+    # ── File Occurrences ─────────────────────────────────────────
+
+    def file_occurrences(self, path: str | StdPath) -> list[NameOccurrence]:
+        """Batch-resolve all name occurrences in a file.
+
+        Returns every name-like token in the file, each resolved to
+        its definition target and classified by reference role.
+
+        This replaces per-token ``goto_definition`` calls with a single
+        Rust call — O(1) FFI calls instead of O(tokens).
+        """
+        self._check_open()
+        try:
+            native_result = self._inner.file_occurrences(str(path))
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in file_occurrences(): {e}") from e
+
+        return [NameOccurrence.model_validate(_to_python(o)) for o in native_result]
 
     # ── Hover ────────────────────────────────────────────────────────
 

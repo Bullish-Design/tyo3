@@ -13,6 +13,7 @@ from tyo3.graph.dependency import DependencyGraph
 from tyo3.graph.identity import file_from_symbol_id, symbol_id_from_symbol
 from tyo3.graph.models import EdgeData, EdgeKind, ReferenceRole, SymbolNode
 from tyo3.models.analysis import Diagnostic, Range
+from tyo3.models.navigation import NameOccurrence, OccurrenceRole
 from tyo3.models.symbols import Symbol, SymbolKind
 from tyo3.session import TyO3Session
 
@@ -82,9 +83,9 @@ class CodeGraph:
         for symbol in symbols:
             self._add_symbol_node(file_str, symbol, module_id)
 
-        # 2. Build reference edges using semantic tokens + goto_definition
-        #    (Phase 2: replaces the slow per-symbol find_references loop)
-        self._resolve_references_via_tokens(session, file_str)
+        # 2. Build reference edges using the batch occurrence API
+        #    (Phase 5: single Rust call per file, O(1) FFI instead of O(tokens))
+        self._resolve_references_via_occurrences(session, file_str)
 
         # 3. Get diagnostics
         try:
@@ -199,6 +200,99 @@ class CodeGraph:
                 role=role,
             )
             self._add_edge(enclosing_id, sid, edge, ref_file)
+
+    def _resolve_references_via_occurrences(
+        self, session: TyO3Session, file_str: str
+    ) -> None:
+        """Resolve references using the batch file_occurrences API.
+
+        Makes a single Rust call per file that resolves every name-like
+        token to its definition target. Replaces the per-token
+        ``goto_definition`` approach with O(1) FFI calls.
+        """
+        try:
+            occurrences = session.file_occurrences(file_str)
+        except Exception:
+            logger.warning(
+                "Failed to get file occurrences for %s, falling back", file_str
+            )
+            # Fall back to the token-based approach
+            self._resolve_references_via_tokens(session, file_str)
+            return
+
+        for occ in occurrences:
+            if occ.target_file is None or occ.target_name is None:
+                continue
+
+            target_file = occ.target_file
+            target_name = occ.target_name
+
+            # Build the target's symbol_id
+            target_sid = f"{target_file}::{target_name}"
+
+            # Ensure the target node exists — create a stub if external
+            if target_sid not in self._id_to_index:
+                target_sid_ensured = self._ensure_target_node_simple(
+                    target_file, target_sid, target_name
+                )
+                if target_sid_ensured is None:
+                    continue
+                target_sid = target_sid_ensured
+
+            # Determine the enclosing symbol at this occurrence's location
+            enclosing_id = self._find_enclosing_symbol(file_str, occ.range)
+            if enclosing_id is None:
+                continue
+
+            # Don't create self-references for definition sites
+            if enclosing_id == target_sid:
+                continue
+
+            # Map OccurrenceRole to ReferenceRole
+            role_map = {
+                OccurrenceRole.READ: ReferenceRole.READ,
+                OccurrenceRole.WRITE: ReferenceRole.WRITE,
+                OccurrenceRole.IMPORT: ReferenceRole.IMPORT,
+                OccurrenceRole.DEFINITION: ReferenceRole.DEFINITION,
+                OccurrenceRole.OTHER: ReferenceRole.OTHER,
+            }
+            role = role_map.get(occ.role, ReferenceRole.OTHER)
+
+            edge = EdgeData(
+                kind=EdgeKind.REFERENCES,
+                file=file_str,
+                range=occ.range,
+                role=role,
+            )
+            self._add_edge(enclosing_id, target_sid, edge, file_str)
+
+    def _ensure_target_node_simple(
+        self,
+        target_file: str,
+        target_sid: str,
+        target_name: str,
+    ) -> str | None:
+        """Ensure a reference target exists as a node.
+
+        Simplified version for the batch occurrence API that only has
+        target_file and target_name (no full symbol info).
+        """
+        # If it's already in project files, skip — it'll be picked up later
+        if target_file in self._file_to_nodes:
+            return None
+
+        # It's external — create a stub node
+        package = self._infer_package(target_file)
+        ext_sid = f"{package}::{target_name}" if package else target_sid
+        if ext_sid not in self._id_to_index:
+            self._add_stub_node(
+                symbol_id=ext_sid,
+                name=target_name,
+                qualified_name=target_name,
+                kind=SymbolKind.UNKNOWN,
+                package=package or "unknown",
+            )
+        return ext_sid
 
     def _resolve_references_via_tokens(
         self, session: TyO3Session, file_str: str
@@ -658,6 +752,181 @@ class CodeGraph:
         return {self._graph[i].symbol_id for i in reachable}
 
     # ── Graph algorithms ──────────────────────────────────────
+
+    def import_cycles(self) -> list[list[str]]:
+        """Detect circular import chains in the module dependency graph.
+
+        Builds a module-level dependency graph by aggregating all
+        inter-file edges (IMPORTS, REFERENCES).  Two modules are
+        adjacent if any symbol in module *A* references a symbol in
+        module *B*.
+
+        Returns a list of cycles, where each cycle is a list of
+        module symbol_ids in order.
+        """
+        module_indices = [
+            i for i in self._graph.node_indices()
+            if self._graph[i].kind == SymbolKind.MODULE
+        ]
+        if len(module_indices) < 2:
+            return []
+
+        # Map every node index to the MODULE node for its file.
+        # This lets us aggregate per-symbol edges into module-level deps.
+        node_to_module: dict[int, str] = {}
+        for mi in module_indices:
+            module_sid = self._graph[mi].symbol_id
+            file = file_from_symbol_id(module_sid)
+            for ni in self._graph.node_indices():
+                if self._graph[ni].file == file:
+                    node_to_module[ni] = module_sid
+
+        dep_kinds = {EdgeKind.IMPORTS, EdgeKind.REFERENCES}
+        adj: dict[str, set[str]] = {
+            self._graph[i].symbol_id: set() for i in module_indices
+        }
+
+        for edge_idx in self._graph.edge_indices():
+            try:
+                data: EdgeData = self._graph.get_edge_data_by_index(edge_idx)
+            except Exception:
+                continue
+            if data.kind not in dep_kinds:
+                continue
+            src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
+            src_mod = node_to_module.get(src)
+            tgt_mod = node_to_module.get(tgt)
+            if src_mod is None or tgt_mod is None:
+                continue
+            if src_mod != tgt_mod:
+                adj[src_mod].add(tgt_mod)
+
+        # DFS-based cycle detection
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color: dict[str, int] = {sid: WHITE for sid in adj}
+        cycles: list[list[str]] = []
+
+        def dfs(u: str, stack: list[str], stack_set: set[str]) -> None:
+            color[u] = GRAY
+            stack.append(u)
+            stack_set.add(u)
+            for v in adj.get(u, set()):
+                if color.get(v) == GRAY:
+                    # Found a cycle: extract from v's position to end
+                    cycle_start = stack.index(v)
+                    cycles.append(list(stack[cycle_start:]))
+                elif color.get(v) == WHITE:
+                    dfs(v, stack, stack_set)
+            stack.pop()
+            stack_set.discard(u)
+            color[u] = BLACK
+
+        for sid in adj:
+            if color[sid] == WHITE:
+                dfs(sid, [], set())
+
+        return cycles
+
+    def hub_symbols(self, top_n: int = 10) -> list[tuple[str, float]]:
+        """Find "hub" symbols using betweenness centrality.
+
+        Hub symbols are those that bridge disconnected parts of
+        the graph — they sit on many shortest paths between
+        other symbols. High centrality often indicates a symbol
+        that would cause widespread breakage if changed.
+
+        Computes betweenness centrality over the full directed
+        graph and returns the top *top_n* (symbol_id, score)
+        pairs, sorted descending by score.
+        """
+        try:
+            # rustworkx betweenness_centrality returns a dict-like
+            # mapping node_index -> float
+            centrality = rx.betweenness_centrality(self._graph)
+        except Exception:
+            return []
+
+        scored = [
+            (self._graph[i].symbol_id, score)
+            for i, score in centrality.items()
+            if score > 0.0
+        ]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_n]
+
+    def subgraph_for_file(self, file_path: str) -> rx.PyDiGraph:
+        """Extract a subgraph containing all symbols defined in a file
+        and their immediate reference neighbours (within the project).
+
+        Returns a new PyDiGraph that can be queried, exported, or
+        visualized independently of the main graph.
+        """
+        core_indices = set(self._file_to_nodes.get(file_path, []))
+        if not core_indices:
+            return rx.PyDiGraph()
+
+        # Include immediate neighbours (referenced symbols and referrers)
+        included = set(core_indices)
+        for ci in core_indices:
+            for succ in self._graph.neighbors(ci):
+                included.add(succ)
+            for pred in self._graph.predecessor_indices(ci):
+                included.add(pred)
+
+        sub = rx.PyDiGraph()
+        old_to_new: dict[int, int] = {}
+        for idx in included:
+            new_idx = sub.add_node(self._graph[idx])
+            old_to_new[idx] = new_idx
+
+        for edge_idx in self._graph.edge_indices():
+            src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
+            if src in old_to_new and tgt in old_to_new:
+                data = self._graph.get_edge_data_by_index(edge_idx)
+                sub.add_edge(old_to_new[src], old_to_new[tgt], data)
+
+        return sub
+
+    # ── Incremental updates ───────────────────────────────────
+
+    def update_file(self, session: TyO3Session, path: str) -> None:
+        """Re-index a single file and update the graph in-place.
+
+        Removes all nodes and edges associated with *path*, then re-runs
+        :meth:`_index_file` to pick up changes.  Incoming edges from
+        other files that reference symbols defined in *path* are
+        naturally recreated during re-indexing because
+        :meth:`_resolve_references_via_occurrences` calls
+        ``goto_definition`` / ``file_occurrences`` again.
+        """
+        # 1. Remove all nodes defined in this file
+        old_indices = list(self._file_to_nodes.get(path, []))
+        old_ids = [self._graph[i].symbol_id for i in old_indices]
+        for idx in sorted(old_indices, reverse=True):
+            try:
+                self._graph.remove_node(idx)
+            except Exception:
+                pass
+        for sid in old_ids:
+            self._id_to_index.pop(sid, None)
+        self._file_to_nodes.pop(path, None)
+
+        # 2. Remove all edges originating from this file
+        old_edge_indices = list(self._file_to_edges.get(path, []))
+        for edge_idx in sorted(old_edge_indices, reverse=True):
+            try:
+                self._graph.remove_edge_from_index(edge_idx)
+            except Exception:
+                pass
+        self._file_to_edges.pop(path, None)
+
+        # 3. Remove diagnostics for this file
+        self._diagnostics.pop(path, None)
+
+        # 4. Re-index
+        self._index_file(session, path)
+
+    # ── Previously implemented algorithms ─────────────────────
 
     def coupling_between(self, file_a: str, file_b: str) -> int:
         """Count REFERENCES edges between two files."""

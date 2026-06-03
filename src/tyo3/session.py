@@ -12,7 +12,13 @@ from pathlib import PurePosixPath
 from tyo3.exceptions import PositionError
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult
-from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference, TypeHierarchy
+from tyo3.models.navigation import (
+    DefinitionTarget,
+    HoverResult,
+    NameOccurrence,
+    Reference,
+    TypeHierarchy,
+)
 from tyo3.models.symbols import Symbol
 from tyo3.rust_project import RustProject
 
@@ -132,6 +138,17 @@ class TyO3Session:
     def semantic_tokens(self, path: str | StdPath) -> list[SemanticToken]:
         """Return semantic tokens for a file."""
         return self._rp.semantic_tokens(path)
+
+    # ── File Occurrences ─────────────────────────────────────
+
+    def file_occurrences(self, path: str | StdPath) -> list[NameOccurrence]:
+        """Batch-resolve all name occurrences in a file.
+
+        Returns every name-like token in the file, each resolved to
+        its definition target and classified by reference role
+        (read, write, import, definition, or other).
+        """
+        return self._rp.file_occurrences(path)
 
     # ── Validation ───────────────────────────────────────────
 

@@ -25,6 +25,8 @@ from tyo3.models.navigation import (
     HoverContent,
     HoverContentKind,
     HoverResult,
+    NameOccurrence,
+    OccurrenceRole,
     Reference,
     ReferenceKind,
     TypeHierarchy,
@@ -67,4 +69,7 @@ __all__ = [  # noqa: F405
     "SemanticTokenType",
     "SemanticTokenModifier",
     "SemanticToken",
+    # Occurrences
+    "OccurrenceRole",
+    "NameOccurrence",
 ]

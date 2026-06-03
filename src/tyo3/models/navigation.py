@@ -24,6 +24,35 @@ class ReferenceKind(StrEnum):
     OTHER = "other"
 
 
+class OccurrenceRole(StrEnum):
+    """How a name occurrence is used at a reference site.
+
+    Mirrors :class:`tyo3.graph.models.ReferenceRole`.
+    """
+
+    READ = "Read"
+    WRITE = "Write"
+    IMPORT = "Import"
+    DEFINITION = "Definition"
+    OTHER = "Other"
+
+
+class NameOccurrence(BaseModel):
+    """A single resolved name occurrence in a file.
+
+    Records where a name appears, what symbol it resolves to, and
+    the reference role (read, write, import, or definition).
+    Produced by :meth:`TyO3Session.file_occurrences`.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    range: Range
+    target_file: str | None = None
+    target_name: str | None = None
+    role: OccurrenceRole
+
+
 class HoverContentKind(StrEnum):
     """Kind of hover content returned by the ty engine.
 
@@ -105,6 +134,8 @@ class TypeHierarchy(BaseModel):
 
 __all__ = [
     "ReferenceKind",
+    "OccurrenceRole",
+    "NameOccurrence",
     "HoverContentKind",
     "DefinitionTarget",
     "Reference",

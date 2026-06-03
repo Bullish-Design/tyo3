@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from tyo3.graph.dependency import DependencyGraph
+from tyo3.graph.export import to_dot, to_json
 from tyo3.graph.graph import CodeGraph
 from tyo3.graph.models import EdgeData, EdgeKind, ReferenceRole, SymbolNode
 
@@ -13,4 +14,6 @@ __all__ = [
     "EdgeKind",
     "ReferenceRole",
     "SymbolNode",
+    "to_dot",
+    "to_json",
 ]

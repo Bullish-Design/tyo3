@@ -497,6 +497,31 @@ impl PyTyProject {
         ))
     }
 
+    // ── File Occurrences ─────────────────────────────────────────
+
+    /// Batch-resolve all name occurrences in a file.
+    ///
+    /// Returns a list of `NameOccurrenceDto` describing every name-like
+    /// token in the file, including its location, the symbol it resolves
+    /// to (target file + target name), and the reference role.
+    ///
+    /// This replaces the per-token `goto_definition` approach with a
+    /// single Rust call per file — O(1) FFI calls instead of O(tokens).
+    fn file_occurrences(&self, path: &str) -> PyResult<Vec<dto::NameOccurrenceDto>> {
+        let guard = lock_state(&self.inner, "file_occurrences")?;
+        let state = guard.as_ref().unwrap();
+
+        let (file, source_str) = resolve_file_and_source(state, path)?;
+        let line_index = LineIndex::from_source_text(&source_str);
+
+        Ok(convert::occurrences::convert_file_occurrences(
+            &state.db,
+            file,
+            &source_str,
+            &line_index,
+        ))
+    }
+
     // ── Type Hierarchy ──────────────────────────────────────────
 
     /// Query type hierarchy at a position: returns the item with supertypes and subtypes.
