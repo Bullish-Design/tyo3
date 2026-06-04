@@ -314,15 +314,34 @@ fn compute_find_references(
     Ok(references)
 }
 
-/// Return semantic tokens for a file.
+/// Return semantic tokens for a file, optionally scoped to a range.
 fn compute_semantic_tokens(
     state: &TyProjectState,
     path: &str,
+    start_line: Option<u32>,
+    start_col: Option<u32>,
+    end_line: Option<u32>,
+    end_col: Option<u32>,
 ) -> Result<Vec<dto::SemanticTokenDto>, AnalysisError> {
     let (file, source_str) = resolve_file_and_source(state, path)?;
     let line_index = LineIndex::from_source_text(&source_str);
 
-    let tokens = ty_ide::semantic_tokens(&state.db, file, None);
+    let range = match (start_line, start_col, end_line, end_col) {
+        (Some(sl), Some(sc), Some(el), Some(ec)) => {
+            let start = coordinates::position_to_offset_with_index(
+                &source_str, &line_index, sl, sc,
+            )
+            .map_err(AnalysisError::Position)?;
+            let end = coordinates::position_to_offset_with_index(
+                &source_str, &line_index, el, ec,
+            )
+            .map_err(AnalysisError::Position)?;
+            Some(ruff_text_size::TextRange::new(start, end))
+        }
+        _ => None,
+    };
+
+    let tokens = ty_ide::semantic_tokens(&state.db, file, range);
 
     let result = convert::tokens::convert_semantic_tokens(
         &source_str,
@@ -912,12 +931,23 @@ impl PyTyProject {
 
     // ── Semantic Tokens ─────────────────────────────────────────
 
-    /// Return semantic tokens for a file.
-    fn semantic_tokens<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+    /// Return semantic tokens for a file, optionally scoped to a range.
+    #[pyo3(signature = (path, *, start_line = None, start_col = None, end_line = None, end_col = None))]
+    fn semantic_tokens<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        start_line: Option<u32>,
+        start_col: Option<u32>,
+        end_line: Option<u32>,
+        end_col: Option<u32>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let state = clone_locked_state(&self.inner, "semantic_tokens")?;
         let path = path.to_owned();
-        let dtos = py.detach(move || compute_semantic_tokens(&state, &path))
-            .map_err(AnalysisError::into_pyerr)?;
+        let dtos = py.detach(move || {
+            compute_semantic_tokens(&state, &path, start_line, start_col, end_line, end_col)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
         pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
@@ -1313,12 +1343,23 @@ impl PySnapshot {
 
     // ── Semantic Tokens ─────────────────────────────────────
 
-    /// Return semantic tokens for a file.
-    fn semantic_tokens<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+    /// Return semantic tokens for a file, optionally scoped to a range.
+    #[pyo3(signature = (path, *, start_line = None, start_col = None, end_line = None, end_col = None))]
+    fn semantic_tokens<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        start_line: Option<u32>,
+        start_col: Option<u32>,
+        end_line: Option<u32>,
+        end_col: Option<u32>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let state = clone_locked_state(&self.inner, "semantic_tokens")?;
         let path = path.to_owned();
-        let dtos = py.detach(move || compute_semantic_tokens(&state, &path))
-            .map_err(AnalysisError::into_pyerr)?;
+        let dtos = py.detach(move || {
+            compute_semantic_tokens(&state, &path, start_line, start_col, end_line, end_col)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
         pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }

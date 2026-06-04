@@ -449,15 +449,31 @@ class _ReadOps:
 
     # ── Semantic Tokens ──────────────────────────────────────────
 
-    def semantic_tokens(self, path: str | StdPath) -> list[SemanticToken]:
-        """Return semantic tokens for a file."""
+    def semantic_tokens(
+        self,
+        path: str | StdPath,
+        *,
+        start_line: int | None = None,
+        start_col: int | None = None,
+        end_line: int | None = None,
+        end_col: int | None = None,
+    ) -> list[SemanticToken]:
+        """Return semantic tokens for a file, optionally scoped to a range."""
         self._check_open()
         try:
-            native_result = self._inner.semantic_tokens(str(path))
+            native_result = self._inner.semantic_tokens(
+                str(path),
+                start_line=start_line,
+                start_col=start_col,
+                end_line=end_line,
+                end_col=end_col,
+            )
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
             raise PathResolutionError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in semantic_tokens(): {e}") from e
 
