@@ -6,6 +6,7 @@ mod hover;
 mod hierarchy;
 mod occurrences;
 mod tokens;
+mod rename;
 pub use coordinates::*;
 pub use diagnostics::*;
 pub use hierarchy::*;
@@ -14,6 +15,7 @@ pub use symbols::*;
 pub use navigation::*;
 pub use hover::*;
 pub use tokens::*;
+pub use rename::*;
 
 /// Result of a project check.  Serialized to a Python dict via pythonize.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

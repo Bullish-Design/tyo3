@@ -127,6 +127,24 @@ class TypeHierarchy(BaseModel):
     subtypes: list[TypeHierarchyItem] = []
 
 
+class RenameEdit(BaseModel):
+    """A single rename edit at a file location."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    path: PurePosixPath
+    range: Range
+
+
+class WorkspaceEdit(BaseModel):
+    """Complete workspace edit for a rename operation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    new_name: str
+    edits: list[RenameEdit]
+
+
 __all__ = [
     "ReferenceKind",
     "ReferenceRole",
@@ -138,4 +156,6 @@ __all__ = [
     "HoverResult",
     "TypeHierarchyItem",
     "TypeHierarchy",
+    "RenameEdit",
+    "WorkspaceEdit",
 ]

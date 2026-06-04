@@ -390,6 +390,51 @@ fn compute_type_hierarchy(
     }))
 }
 
+/// Return the editable range of the symbol at the position, or None.
+fn compute_can_rename(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+) -> Result<Option<dto::RangeDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    let range = ty_ide::can_rename(&state.db, file, offset);
+    Ok(range.map(|r| {
+        coordinates::range_to_dto_with_index(&source_str, &line_index, r)
+    }))
+}
+
+/// Perform a rename operation, returning all edit locations.
+fn compute_rename(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+    new_name: &str,
+) -> Result<Option<dto::WorkspaceEditDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    match ty_ide::rename(&state.db, file, offset, new_name) {
+        Some(targets) => {
+            Ok(Some(convert::rename::convert_rename_edits(
+                &state.db, &targets, new_name,
+            )))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Find document highlights for the symbol at the given position.
 ///
 /// Highlights are identical to references but scoped to the current file.
@@ -760,6 +805,48 @@ impl PyTyProject {
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
+    // ── Rename ───────────────────────────────────────────────────────
+
+    /// Check if the symbol at the given position can be renamed.
+    fn can_rename<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "can_rename")?;
+        let path = path.to_owned();
+        match py.detach(move || compute_can_rename(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(range) => pythonize(py, &range)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    /// Rename the symbol at the given position.
+    fn rename<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+        new_name: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "rename")?;
+        let path = path.to_owned();
+        let new_name = new_name.to_owned();
+        match py.detach(move || compute_rename(&state, &path, line, column, &new_name))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(dto) => pythonize(py, &dto)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
     // ── Hover ────────────────────────────────────────────────────────
 
     /// Get hover information for the symbol at the given position.
@@ -991,6 +1078,48 @@ impl PySnapshot {
             .map_err(AnalysisError::into_pyerr)?;
         pythonize(py, &refs)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Rename ───────────────────────────────────────────────
+
+    /// Check if the symbol at the given position can be renamed.
+    fn can_rename<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "can_rename")?;
+        let path = path.to_owned();
+        match py.detach(move || compute_can_rename(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(range) => pythonize(py, &range)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    /// Rename the symbol at the given position.
+    fn rename<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+        new_name: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "rename")?;
+        let path = path.to_owned();
+        let new_name = new_name.to_owned();
+        match py.detach(move || compute_rename(&state, &path, line, column, &new_name))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(dto) => pythonize(py, &dto)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
     }
 
     // ── Hover ────────────────────────────────────────────────

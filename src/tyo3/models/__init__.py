@@ -22,8 +22,10 @@ from tyo3.models.navigation import (
     Reference,
     ReferenceKind,
     ReferenceRole,
+    RenameEdit,
     TypeHierarchy,
     TypeHierarchyItem,
+    WorkspaceEdit,
 )
 from tyo3.models.symbols import Symbol, SymbolKind
 
@@ -54,4 +56,7 @@ __all__ = [  # noqa: F405
     # Occurrences
     "ReferenceRole",
     "NameOccurrence",
+    # Rename
+    "RenameEdit",
+    "WorkspaceEdit",
 ]

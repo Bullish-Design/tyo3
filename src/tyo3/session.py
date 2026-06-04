@@ -30,13 +30,14 @@ from tyo3.exceptions import (
     ProjectOpenError,
 )
 from tyo3.models.advanced import SemanticToken
-from tyo3.models.analysis import CheckResult
+from tyo3.models.analysis import CheckResult, Range
 from tyo3.models.navigation import (
     DefinitionTarget,
     HoverResult,
     NameOccurrence,
     Reference,
     TypeHierarchy,
+    WorkspaceEdit,
 )
 from tyo3.models.symbols import Symbol
 
@@ -252,6 +253,50 @@ class _ReadOps:
             raise InternalTyError(f"Unexpected error in document_highlights(): {e}") from e
 
         return [Reference.model_validate(r) for r in native_refs]
+
+    # ── Rename ───────────────────────────────────────────────────────
+
+    def can_rename(self, path: str | StdPath, line: int, column: int) -> Range | None:
+        """Return the editable range if the symbol at *(line, column)* can be renamed."""
+        self._check_open()
+        try:
+            native_range = self._inner.can_rename(str(path), line, column)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in can_rename(): {e}") from e
+
+        if native_range is None:
+            return None
+        return Range.model_validate(native_range)
+
+    def rename(
+        self, path: str | StdPath, line: int, column: int, new_name: str
+    ) -> WorkspaceEdit | None:
+        """Compute the workspace edit to rename the symbol at *(line, column)*."""
+        self._check_open()
+        try:
+            native_edit = self._inner.rename(str(path), line, column, new_name)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in rename(): {e}") from e
+
+        if native_edit is None:
+            return None
+        return WorkspaceEdit.model_validate(native_edit)
 
     # ── Semantic Tokens ──────────────────────────────────────────
 
