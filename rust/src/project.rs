@@ -21,16 +21,40 @@ use crate::coordinates;
 use crate::dto;
 use crate::files as file_resolver;
 
+// ── Analysis error ───────────────────────────────────────────────────────
+
+/// Analysis-layer error, free of any Python state so it can be produced inside
+/// `py.detach(...)`. Converted to a concrete `PyErr` by the method wrapper.
+///
+/// Both variants wrap a `String` so they can be used directly as `map_err` fns,
+/// e.g. `resolve_file(...).map_err(AnalysisError::Path)?`.
+enum AnalysisError {
+    Path(String),
+    Position(String),
+}
+
+impl AnalysisError {
+    fn into_pyerr(self) -> PyErr {
+        match self {
+            AnalysisError::Path(s) => PathResolutionError::new_err(s),
+            AnalysisError::Position(s) => PositionError::new_err(s),
+        }
+    }
+}
+
 // ── State ────────────────────────────────────────────────────────────────
 
 /// Internal mutable state of a TyO3 project session.
 ///
-/// NOTE: `ProjectDatabase` (Salsa 0.26) is `!Send + !Sync` because it
-/// internally uses `RefCell<salsa::active_query::QueryStack>` and
-/// `UnsafeCell<HashMap<...>>`.  This means `&TyProjectState` is not `Send`,
-/// so we cannot wrap heavy analysis calls in `py.detach(|| ...)` to
-/// release the GIL.  All Rust analysis therefore runs with the GIL held.
-/// This is acceptable for v0.1; future Salsa versions may become `Sync`.
+/// CONCURRENCY: `ProjectDatabase` (salsa 0.26) is `Send + Clone` but `!Sync`
+/// — its `salsa::Storage` holds a per-thread `ZalsaLocal` (`RefCell`/`UnsafeCell`).
+/// You cannot share `&db` across threads, but you CAN move an owned clone, which is
+/// how ty itself parallelizes (`ty_project::Project::check` clones the db per rayon
+/// worker). Read methods take a `db.clone()` snapshot via `clone_locked_state` and
+/// run inside `py.detach(move || …)` to release the GIL. Because `#[pyclass]` only
+/// requires `Send` (not `Sync`), the `Mutex` below is what makes concurrent `&self`
+/// access sound once the GIL is released. The canonical db is only ever swapped
+/// (never mutated in place) — see `reload` — so outstanding clones stay isolated.
 struct TyProjectState {
     db: ProjectDatabase,
     root: SystemPathBuf,
@@ -81,8 +105,41 @@ fn clone_locked_state(
     })
 }
 
-/// GIL-free core of `check`: runs the project type-check and builds the DTO.
-/// Touches no Python state, so it is safe to call inside `py.detach(...)`.
+/// Resolve a file handle and return its source text as a String.
+fn resolve_file_and_source(
+    state: &TyProjectState,
+    path: &str,
+) -> Result<(File, String), AnalysisError> {
+    let file = file_resolver::resolve_file(
+        &state.db,
+        state.root.as_std_path(),
+        path,
+    )
+    .map_err(AnalysisError::Path)?;
+
+    let src = source_text(&state.db, file);
+    let source_str = src.as_str().to_string();
+
+    Ok((file, source_str))
+}
+
+// ── GIL-free analysis cores ──────────────────────────────────────────────
+//
+// Each `compute_*` takes `&TyProjectState`, touches no Python state, and
+// returns a serializable DTO (or a bare value when it cannot fail). They are
+// safe to call inside `py.detach(...)`.
+
+/// List all source files in the project.
+fn compute_files(state: &TyProjectState) -> Vec<String> {
+    let project = state.db.project();
+    let indexed = project.files(&state.db);
+    indexed
+        .iter()
+        .map(|f: &File| f.path(&state.db).as_str().to_string())
+        .collect()
+}
+
+/// Run the project type-check and build the DTO.
 fn compute_check(state: &TyProjectState) -> dto::CheckResultDto {
     let result = state.db.check();
     let diagnostics = convert::diagnostics::convert_diagnostics(&state.db, &result);
@@ -93,32 +150,117 @@ fn compute_check(state: &TyProjectState) -> dto::CheckResultDto {
     }
 }
 
-/// Resolve a file handle and return its source text as a String.
-fn resolve_file_and_source(
+/// Run a full project check and return only the diagnostics for `path`.
+fn compute_check_file(
     state: &TyProjectState,
     path: &str,
-) -> PyResult<(File, String)> {
-    let file = file_resolver::resolve_file(
-        &state.db,
-        state.root.as_std_path(),
-        path,
-    )
-    .map_err(|e| PathResolutionError::new_err(e))?;
+) -> Result<dto::CheckResultDto, AnalysisError> {
+    let (file, _) = resolve_file_and_source(state, path)?;
+    let target_path = file.path(&state.db).as_str().to_string();
 
-    let src = source_text(&state.db, file);
-    let source_str = src.as_str().to_string();
+    // Full project check (Salsa-cached if unchanged)
+    let all_diagnostics = state.db.check();
 
-    Ok((file, source_str))
+    // Filter in Rust — only convert matching diagnostics to DTOs
+    let matching: Vec<_> = all_diagnostics
+        .iter()
+        .filter(|d| {
+            convert::diagnostics::diagnostic_matches_file(&state.db, d, &target_path)
+        })
+        .collect();
+
+    let diagnostics =
+        convert::diagnostics::convert_diagnostic_refs(&state.db, &matching);
+
+    Ok(dto::CheckResultDto {
+        diagnostics,
+        files_checked: Some(1),
+        elapsed_ms: None,
+    })
 }
 
-/// Shared implementation for goto_definition, goto_declaration,
-/// goto_type_definition.  Resolves the path, computes the source offset,
-/// calls the provided navigation function, converts the results, and
-/// returns a Python list of definition-target dicts via pythonize.
-fn navigate_to_targets<'py>(
-    inner: &Mutex<Option<TyProjectState>>,
-    op_name: &str,
-    py: Python<'py>,
+/// Get document symbols for a file.
+fn compute_document_symbols(
+    state: &TyProjectState,
+    path: &str,
+) -> Result<Vec<dto::SymbolDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+
+    let flat_symbols = ty_ide::document_symbols(&state.db, file);
+    let hierarchical = flat_symbols.to_hierarchical();
+
+    let file_path = file.path(&state.db).as_str().to_string();
+    let line_index = ruff_source_file::LineIndex::from_source_text(&source_str);
+
+    let mut symbols: Vec<dto::SymbolDto> = Vec::new();
+    for (id, info) in hierarchical.iter() {
+        convert::symbols::collect_symbols_recursive(
+            &hierarchical,
+            id,
+            &info,
+            &source_str,
+            &line_index,
+            &file_path,
+            None,
+            &mut symbols,
+        );
+    }
+
+    Ok(symbols)
+}
+
+/// Search for symbols matching a query across all workspace files.
+fn compute_workspace_symbols(
+    state: &TyProjectState,
+    query: &str,
+) -> Vec<dto::SymbolDto> {
+    let results = ty_ide::workspace_symbols(&state.db, query);
+
+    // Cache source text and LineIndex per file — workspace symbol results
+    // from the same file reuse the precomputed LineIndex instead of rebuilding.
+    let mut file_cache: HashMap<File, (String, LineIndex)> = HashMap::new();
+    let mut symbols: Vec<dto::SymbolDto> = Vec::with_capacity(results.len());
+    for ws_info in &results {
+        let (source_str, line_index) = file_cache
+            .entry(ws_info.file)
+            .or_insert_with(|| {
+                let src = source_text(&state.db, ws_info.file);
+                let s = src.as_str().to_string();
+                let idx = LineIndex::from_source_text(&s);
+                (s, idx)
+            });
+        let file_path = ws_info.file.path(&state.db).as_str().to_string();
+
+        let sym = convert::symbols::convert_symbol(
+            source_str,
+            line_index,
+            &file_path,
+            &ws_info.symbol.name,
+            &ws_info.symbol.kind,
+            ws_info.symbol.deprecated,
+            ws_info.symbol.name_range,
+            ws_info.symbol.full_range,
+            ws_info
+                .symbol
+                .imported_from
+                .as_ref()
+                .map(|i| i.module_name().as_str()),
+            None,
+        );
+        symbols.push(sym);
+    }
+
+    symbols
+}
+
+/// Shared core for `goto_definition` / `goto_declaration` /
+/// `goto_type_definition`.  Resolves the path, computes the source offset,
+/// calls the provided navigation function, and converts the results.
+///
+/// `navigate_fn` is a plain function pointer — function pointers are
+/// `Send`/`Ungil`, so they cross the `detach` boundary fine.
+fn compute_navigate(
+    state: &TyProjectState,
     path: &str,
     line: u32,
     column: u32,
@@ -127,28 +269,167 @@ fn navigate_to_targets<'py>(
         File,
         ruff_text_size::TextSize,
     ) -> Option<ty_ide::RangedValue<ty_ide::NavigationTargets>>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let guard = lock_state(inner, op_name)?;
-    let state = guard.as_ref().unwrap();
-
+) -> Result<Vec<dto::DefinitionTargetDto>, AnalysisError> {
     let (file, source_str) = resolve_file_and_source(state, path)?;
 
     let line_index = LineIndex::from_source_text(&source_str);
     let offset = coordinates::position_to_offset_with_index(
         &source_str, &line_index, line, column,
     )
-    .map_err(|e| PositionError::new_err(e))?;
+    .map_err(AnalysisError::Position)?;
 
-    let result = navigate_fn(&state.db, file, offset);
-
-    let targets = match result {
+    let targets = match navigate_fn(&state.db, file, offset) {
         Some(targets) => {
             convert::navigation::convert_navigation_targets(&state.db, &targets)
         }
         None => Vec::new(),
     };
 
-    pythonize(py, &targets).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    Ok(targets)
+}
+
+/// Find all references to the symbol at the given position.
+fn compute_find_references(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+    include_declaration: bool,
+) -> Result<Vec<dto::ReferenceDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    let references = match ty_ide::find_references(
+        &state.db, file, offset, include_declaration,
+    ) {
+        Some(refs) => convert::navigation::convert_references(&state.db, &refs),
+        None => Vec::new(),
+    };
+
+    Ok(references)
+}
+
+/// Return semantic tokens for a file.
+fn compute_semantic_tokens(
+    state: &TyProjectState,
+    path: &str,
+) -> Result<Vec<dto::SemanticTokenDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+
+    let tokens = ty_ide::semantic_tokens(&state.db, file, None);
+
+    let result = convert::tokens::convert_semantic_tokens(
+        &source_str,
+        &line_index,
+        &tokens,
+    );
+
+    Ok(result)
+}
+
+/// Batch-resolve all name occurrences in a file.
+fn compute_file_occurrences(
+    state: &TyProjectState,
+    path: &str,
+) -> Result<Vec<dto::NameOccurrenceDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+
+    let result = convert::occurrences::convert_file_occurrences(
+        &state.db,
+        file,
+        &source_str,
+        &line_index,
+    );
+
+    Ok(result)
+}
+
+/// Query type hierarchy at a position: the item plus its supertypes and subtypes.
+fn compute_type_hierarchy(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+) -> Result<Option<dto::TypeHierarchyDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    // Step 1: Prepare the hierarchy item at this position
+    let item = match ty_ide::prepare_type_hierarchy(&state.db, file, offset) {
+        Some(item) => item,
+        None => return Ok(None),
+    };
+
+    // Step 2: Resolve supertypes and subtypes using the prepared item
+    let supertypes = ty_ide::type_hierarchy_supertypes(
+        &state.db, item.file, item.selection_range.start(),
+    );
+    let subtypes = ty_ide::type_hierarchy_subtypes(
+        &state.db, item.file, item.selection_range.start(),
+    );
+
+    let item_dto = convert::hierarchy::convert_hierarchy_item(&state.db, &item);
+    let supertypes_dto = convert::hierarchy::convert_hierarchy_items(&state.db, &supertypes);
+    let subtypes_dto = convert::hierarchy::convert_hierarchy_items(&state.db, &subtypes);
+
+    Ok(Some(dto::TypeHierarchyDto {
+        item: item_dto,
+        supertypes: supertypes_dto,
+        subtypes: subtypes_dto,
+    }))
+}
+
+/// Get hover information for the symbol at the given position.
+///
+/// NOTE: ty_ide does not publicly re-export Hover/HoverContent, so the entire
+/// hover is rendered as Markdown and returned as a single content item.
+fn compute_hover(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+) -> Result<Option<dto::HoverDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    match ty_ide::hover(&state.db, file, offset) {
+        None => Ok(None),
+        Some(hover_value) => {
+            let file_range = hover_value.file_range();
+            let file_path = file.path(&state.db).as_str().to_string();
+
+            // Render the entire hover as Markdown
+            let rendered = hover_value
+                .display(&state.db, ty_ide::MarkupKind::Markdown)
+                .to_string();
+
+            let hover_dto = convert::hover::convert_hover_markdown_with_index(
+                &source_str,
+                &line_index,
+                file_path,
+                file_range,
+                rendered,
+            );
+
+            Ok(Some(hover_dto))
+        }
+    }
 }
 
 // ── PyO3 Methods ─────────────────────────────────────────────────────────
@@ -240,18 +521,9 @@ impl PyTyProject {
     // ── Files ────────────────────────────────────────────────────────
 
     /// List all source files in the project.
-    fn files(&self) -> PyResult<Vec<String>> {
-        let guard = lock_state(&self.inner, "files")?;
-        let state = guard.as_ref().unwrap();
-
-        let project = state.db.project();
-        let indexed = project.files(&state.db);
-        let paths: Vec<String> = indexed
-            .iter()
-            .map(|f: &File| f.path(&state.db).as_str().to_string())
-            .collect();
-
-        Ok(paths)
+    fn files(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        let state = clone_locked_state(&self.inner, "files")?;
+        Ok(py.detach(move || compute_files(&state)))
     }
 
     // ── Check ────────────────────────────────────────────────────────
@@ -269,41 +541,12 @@ impl PyTyProject {
     }
 
     /// Run the type checker and return diagnostics for a single file.
-    ///
-    /// Runs a full project check (Salsa-cached if unchanged), then filters
-    /// diagnostics in Rust before constructing DTOs — only matching file
-    /// diagnostics are converted and returned across the boundary.
     fn check_file<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "check_file")?;
-        let state = guard.as_ref().unwrap();
-
-        // Resolve the target file path for comparison
-        let (file, _) = resolve_file_and_source(state, path)?;
-        let target_path = file.path(&state.db).as_str().to_string();
-
-        // Full project check (Salsa-cached if unchanged)
-        let all_diagnostics = state.db.check();
-
-        // Filter in Rust — only convert matching diagnostics to DTOs
-        let matching: Vec<_> = all_diagnostics
-            .iter()
-            .filter(|d| {
-                convert::diagnostics::diagnostic_matches_file(
-                    &state.db, d, &target_path,
-                )
-            })
-            .collect();
-
-        let diagnostics =
-            convert::diagnostics::convert_diagnostic_refs(&state.db, &matching);
-
-        let check_result = dto::CheckResultDto {
-            diagnostics,
-            files_checked: Some(1),
-            elapsed_ms: None,
-        };
-
-        pythonize(py, &check_result)
+        let state = clone_locked_state(&self.inner, "check_file")?;
+        let path = path.to_owned();
+        let dto = py.detach(move || compute_check_file(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dto)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -311,32 +554,11 @@ impl PyTyProject {
 
     /// Get document symbols for a file in the project.
     fn document_symbols<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "document_symbols")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-
-        let flat_symbols = ty_ide::document_symbols(&state.db, file);
-        let hierarchical = flat_symbols.to_hierarchical();
-
-        let file_path = file.path(&state.db).as_str().to_string();
-        let line_index = ruff_source_file::LineIndex::from_source_text(&source_str);
-
-        let mut symbols: Vec<dto::SymbolDto> = Vec::new();
-        for (id, info) in hierarchical.iter() {
-            convert::symbols::collect_symbols_recursive(
-                &hierarchical,
-                id,
-                &info,
-                &source_str,
-                &line_index,
-                &file_path,
-                None,
-                &mut symbols,
-            );
-        }
-
-        pythonize(py, &symbols)
+        let state = clone_locked_state(&self.inner, "document_symbols")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_document_symbols(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -344,46 +566,10 @@ impl PyTyProject {
 
     /// Search for symbols matching a query across all workspace files.
     fn workspace_symbols<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "workspace_symbols")?;
-        let state = guard.as_ref().unwrap();
-
-        let results = ty_ide::workspace_symbols(&state.db, query);
-
-        // Cache source text and LineIndex per file — workspace symbol results
-        // from the same file reuse the precomputed LineIndex instead of rebuilding.
-        let mut file_cache: HashMap<File, (String, LineIndex)> = HashMap::new();
-        let mut symbols: Vec<dto::SymbolDto> = Vec::with_capacity(results.len());
-        for ws_info in &results {
-            let (source_str, line_index) = file_cache
-                .entry(ws_info.file)
-                .or_insert_with(|| {
-                    let src = source_text(&state.db, ws_info.file);
-                    let s = src.as_str().to_string();
-                    let idx = LineIndex::from_source_text(&s);
-                    (s, idx)
-                });
-            let file_path = ws_info.file.path(&state.db).as_str().to_string();
-
-            let sym = convert::symbols::convert_symbol(
-                source_str,
-                line_index,
-                &file_path,
-                &ws_info.symbol.name,
-                &ws_info.symbol.kind,
-                ws_info.symbol.deprecated,
-                ws_info.symbol.name_range,
-                ws_info.symbol.full_range,
-                ws_info
-                    .symbol
-                    .imported_from
-                    .as_ref()
-                    .map(|i| i.module_name().as_str()),
-                None,
-            );
-            symbols.push(sym);
-        }
-
-        pythonize(py, &symbols)
+        let state = clone_locked_state(&self.inner, "workspace_symbols")?;
+        let query = query.to_owned();
+        let dtos = py.detach(move || compute_workspace_symbols(&state, &query));
+        pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -397,15 +583,14 @@ impl PyTyProject {
         line: u32,
         column: u32,
     ) -> PyResult<Bound<'py, PyAny>> {
-        navigate_to_targets(
-            &self.inner,
-            "goto_definition",
-            py,
-            path,
-            line,
-            column,
-            ty_ide::goto_definition,
-        )
+        let state = clone_locked_state(&self.inner, "goto_definition")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || {
+            compute_navigate(&state, &path, line, column, ty_ide::goto_definition)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     // ── Goto Declaration ─────────────────────────────────────────────
@@ -418,15 +603,14 @@ impl PyTyProject {
         line: u32,
         column: u32,
     ) -> PyResult<Bound<'py, PyAny>> {
-        navigate_to_targets(
-            &self.inner,
-            "goto_declaration",
-            py,
-            path,
-            line,
-            column,
-            ty_ide::goto_declaration,
-        )
+        let state = clone_locked_state(&self.inner, "goto_declaration")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || {
+            compute_navigate(&state, &path, line, column, ty_ide::goto_declaration)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     // ── Goto Type Definition ─────────────────────────────────────────
@@ -439,15 +623,14 @@ impl PyTyProject {
         line: u32,
         column: u32,
     ) -> PyResult<Bound<'py, PyAny>> {
-        navigate_to_targets(
-            &self.inner,
-            "goto_type_definition",
-            py,
-            path,
-            line,
-            column,
-            ty_ide::goto_type_definition,
-        )
+        let state = clone_locked_state(&self.inner, "goto_type_definition")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || {
+            compute_navigate(&state, &path, line, column, ty_ide::goto_type_definition)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     // ── Find References ──────────────────────────────────────────────
@@ -461,30 +644,13 @@ impl PyTyProject {
         column: u32,
         include_declaration: bool,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "find_references")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-
-        let line_index = LineIndex::from_source_text(&source_str);
-        let offset = coordinates::position_to_offset_with_index(
-            &source_str, &line_index, line, column,
-        )
-        .map_err(|e| PositionError::new_err(e))?;
-
-        let result = ty_ide::find_references(
-            &state.db,
-            file,
-            offset,
-            include_declaration,
-        );
-
-        let references = match result {
-            Some(refs) => convert::navigation::convert_references(&state.db, &refs),
-            None => Vec::new(),
-        };
-
-        pythonize(py, &references)
+        let state = clone_locked_state(&self.inner, "find_references")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || {
+            compute_find_references(&state, &path, line, column, include_declaration)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -492,21 +658,11 @@ impl PyTyProject {
 
     /// Return semantic tokens for a file.
     fn semantic_tokens<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "semantic_tokens")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-        let line_index = LineIndex::from_source_text(&source_str);
-
-        let tokens = ty_ide::semantic_tokens(&state.db, file, None);
-
-        let result = convert::tokens::convert_semantic_tokens(
-            &source_str,
-            &line_index,
-            &tokens,
-        );
-
-        pythonize(py, &result)
+        let state = clone_locked_state(&self.inner, "semantic_tokens")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_semantic_tokens(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -521,20 +677,11 @@ impl PyTyProject {
     /// This replaces the per-token `goto_definition` approach with a
     /// single Rust call per file — O(1) FFI calls instead of O(tokens).
     fn file_occurrences<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "file_occurrences")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-        let line_index = LineIndex::from_source_text(&source_str);
-
-        let result = convert::occurrences::convert_file_occurrences(
-            &state.db,
-            file,
-            &source_str,
-            &line_index,
-        );
-
-        pythonize(py, &result)
+        let state = clone_locked_state(&self.inner, "file_occurrences")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_file_occurrences(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -548,45 +695,15 @@ impl PyTyProject {
         line: u32,
         column: u32,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "type_hierarchy")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-        let line_index = LineIndex::from_source_text(&source_str);
-        let offset = coordinates::position_to_offset_with_index(
-            &source_str, &line_index, line, column,
-        )
-        .map_err(|e| PositionError::new_err(e))?;
-
-        // Step 1: Prepare the hierarchy item at this position
-        let prepared = ty_ide::prepare_type_hierarchy(&state.db, file, offset);
-        let item = match prepared {
-            Some(item) => item,
-            None => {
-                return Ok(py.None().bind(py).clone());
-            }
-        };
-
-        // Step 2: Resolve supertypes and subtypes using the prepared item
-        let supertypes = ty_ide::type_hierarchy_supertypes(
-            &state.db, item.file, item.selection_range.start(),
-        );
-        let subtypes = ty_ide::type_hierarchy_subtypes(
-            &state.db, item.file, item.selection_range.start(),
-        );
-
-        let item_dto = convert::hierarchy::convert_hierarchy_item(&state.db, &item);
-        let supertypes_dto = convert::hierarchy::convert_hierarchy_items(&state.db, &supertypes);
-        let subtypes_dto = convert::hierarchy::convert_hierarchy_items(&state.db, &subtypes);
-
-        let result = dto::TypeHierarchyDto {
-            item: item_dto,
-            supertypes: supertypes_dto,
-            subtypes: subtypes_dto,
-        };
-
-        pythonize(py, &result)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        let state = clone_locked_state(&self.inner, "type_hierarchy")?;
+        let path = path.to_owned();
+        match py.detach(move || compute_type_hierarchy(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(dto) => pythonize(py, &dto)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
     }
 
     // ── Hover ────────────────────────────────────────────────────────
@@ -594,10 +711,6 @@ impl PyTyProject {
     /// Get hover information for the symbol at the given position.
     ///
     /// Returns a dict, or None if no hover info is available.
-    ///
-    /// NOTE: ty_ide does not publicly re-export Hover/HoverContent, so the
-    /// entire hover is rendered as Markdown and returned as a single content
-    /// item of kind `markdown`.
     fn hover<'py>(
         &self,
         py: Python<'py>,
@@ -605,41 +718,14 @@ impl PyTyProject {
         line: u32,
         column: u32,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "hover")?;
-        let state = guard.as_ref().unwrap();
-
-        let (file, source_str) = resolve_file_and_source(state, path)?;
-
-        let line_index = LineIndex::from_source_text(&source_str);
-        let offset = coordinates::position_to_offset_with_index(
-            &source_str, &line_index, line, column,
-        )
-        .map_err(|e| PositionError::new_err(e))?;
-
-        let result = ty_ide::hover(&state.db, file, offset);
-
-        match result {
+        let state = clone_locked_state(&self.inner, "hover")?;
+        let path = path.to_owned();
+        match py.detach(move || compute_hover(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?
+        {
             None => Ok(py.None().bind(py).clone()),
-            Some(hover_value) => {
-                let file_range = hover_value.file_range();
-                let file_path = file.path(&state.db).as_str().to_string();
-
-                // Render the entire hover as Markdown
-                let rendered = hover_value
-                    .display(&state.db, ty_ide::MarkupKind::Markdown)
-                    .to_string();
-
-                let hover_dto = convert::hover::convert_hover_markdown_with_index(
-                    &source_str,
-                    &line_index,
-                    file_path,
-                    file_range,
-                    rendered,
-                );
-
-                pythonize(py, &hover_dto)
-                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-            }
+            Some(dto) => pythonize(py, &dto)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
         }
     }
 }

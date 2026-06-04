@@ -194,13 +194,13 @@ class TestPythonizeEdgeCases:
 
         assert issubclass(ProjectClosedError, Exception)
 
-    def test_native_module_exports_only_typroject_and_exceptions(self) -> None:
-        """After DTO boundary simplification, only TyProject + exceptions remain."""
+    def test_native_module_exports_typroject_tysnapshot_and_exceptions(self) -> None:
+        """The native module exports TyProject, TySnapshot, and exception types."""
         import tyo3._native_impl as _native  # type: ignore[import-untyped]
 
-        # TyProject and exceptions
         expected = {
             "TyProject",
+            "TySnapshot",
             "ProjectClosedError",
             "PathResolutionError",
             "PositionError",
