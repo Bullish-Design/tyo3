@@ -349,7 +349,7 @@ git add -A && git commit -m "refactor(phase5): py correctness/perf/doc cleanups"
 
 ---
 
-## Phase 6 — Collapse the `RustProject` / `TyO3Session` duplication  ⚠️ DECISION
+## Phase 6 — Collapse the `RustProject` / `TyO3Session` duplication  
 
 **Problem:** `TyO3Session` is a near-1:1 delegating wrapper over `RustProject`.
 Every public method is declared twice; `TyO3Session` adds essentially one line of
@@ -371,8 +371,7 @@ So this is mechanical but broad.
 > `TyO3Session` as the public ergonomic layer; just document the split and stop
 > there. Choose this only if test-migration time is unavailable.
 
-If unsure, **ask the maintainer which option** before executing. The steps below
-are for **Option A**.
+**We will be implementing Option A** The steps below are for **Option A**.
 
 ### 6.A.1 Merge the implementation
 1. Move the *body* of every `RustProject` method into the matching `TyO3Session`
@@ -411,7 +410,7 @@ git add -A && git commit -m "refactor(phase6): collapse RustProject into TyO3Ses
 
 ---
 
-## Phase 7 — Remove the spec-anticipation models  ⚠️ DECISION
+## Phase 7 — Remove the spec-anticipation models  
 
 **Problem:** `models/core.py` and `models/_spec.py` define `TyProject`,
 `ProjectFile`, `TyProjectConfig`, `BackendInfo` ("no backend yet"). **Nothing in
@@ -433,7 +432,7 @@ fixtures are built from `TyProject`/`ProjectFile`, and are consumed by
 > `src/tyo3/_spec_models.py` and drop them from `tyo3.models.__all__` and from
 > `models/__init__.py` re-exports. Keep the runtime enums that are actually used.
 
-Steps below are for **Option A**.
+**We will be implementing Option A** The steps below are for **Option A**.
 
 ### 7.A.1 Identify the genuinely-used enums first
 `ProjectStatus`, `FileCategory`, `CoordinateMode` live in `core.py`. Confirm

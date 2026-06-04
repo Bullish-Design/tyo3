@@ -86,7 +86,7 @@ class TyO3Session:
 
     def workspace_symbols(self, query: str) -> list[Symbol]:
         """Search for symbols matching query across the project."""
-        if len(query) < 1:
+        if not query:
             return []
         return self._rp.workspace_symbols(query)
 

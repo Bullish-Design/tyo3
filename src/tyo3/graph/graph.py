@@ -30,11 +30,14 @@ logger = logging.getLogger(__name__)
 def _to_relative(root: Path, path: str) -> str:
     """Convert an absolute path to a project-relative POSIX string.
 
+    *root* must already be resolved (call ``root.resolve()`` once
+    before passing it).
+
     If *path* is not under *root* (e.g. an external path), returns it
     unchanged so external references stay explicitly external.
     """
     try:
-        return str(PurePosixPath(Path(path).resolve().relative_to(root.resolve())))
+        return str(PurePosixPath(Path(path).resolve().relative_to(root)))
     except ValueError:
         return path  # External path — return as-is
 
@@ -105,6 +108,10 @@ class CodeGraph:
         # Dependency graph cache for external packages
         self._dependency_cache: dict[str, DependencyGraph] = {}
 
+        # Memoized semantic subgraphs keyed by filtered edge-kinds
+        #   frozenset[EdgeKind] -> rx.PyDiGraph
+        self._semantic_subgraph_cache: dict[frozenset[EdgeKind], rx.PyDiGraph] = {}
+
     # ── Construction ──────────────────────────────────────────
 
     @classmethod
@@ -131,8 +138,9 @@ class CodeGraph:
         """
         graph = cls()
         root = session.root
+        root_resolved = root.resolve()
         native_paths = [str(p) for p in session.files()]
-        graph_paths = [_to_relative(root, p) for p in native_paths]
+        graph_paths = [_to_relative(root_resolved, p) for p in native_paths]
         native_by_graph = dict(zip(graph_paths, native_paths, strict=True))
         project_files = set(graph_paths)
 
@@ -166,7 +174,7 @@ class CodeGraph:
                 file_str,
                 project_files,
                 report=report,
-                root=root,
+                root=root_resolved,
                 native_by_graph=native_by_graph,
             )
 
@@ -177,7 +185,7 @@ class CodeGraph:
                 file_str,
                 symbols,
                 report=report,
-                root=root,
+                root=root_resolved,
                 native_by_graph=native_by_graph,
                 project_files=project_files,
             )
@@ -186,7 +194,7 @@ class CodeGraph:
         graph._collect_all_diagnostics(
             session,
             report=report,
-            root=root,
+            root=root_resolved,
             project_files=project_files,
         )
 
@@ -224,7 +232,7 @@ class CodeGraph:
         try:
             return session.document_symbols(file_str)
         except Exception as e:
-            logger.warning("Failed to get symbols for %s, skipping", file_str)
+            logger.warning("Failed to get symbols for %s, skipping: %s", file_str, e)
             if report is not None:
                 report.failures.append(
                     GraphBuildFailure(
@@ -335,7 +343,7 @@ class CodeGraph:
         try:
             result = session.check()
         except Exception as e:
-            logger.warning("Failed to run project check, skipping diagnostics")
+            logger.warning("Failed to run project check, skipping diagnostics: %s", e)
             if report is not None:
                 report.failures.append(
                     GraphBuildFailure(
@@ -425,8 +433,9 @@ class CodeGraph:
             occurrences = session.file_occurrences(native_file)
         except Exception as e:
             logger.warning(
-                "Failed to get file occurrences for %s, falling back",
+                "Failed to get file occurrences for %s, falling back: %s",
                 file_str,
+                e,
             )
             if report is not None:
                 report.failures.append(
@@ -605,8 +614,8 @@ class CodeGraph:
         native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
         try:
             tokens = session.semantic_tokens(native_file)
-        except Exception:
-            logger.warning("Failed to get semantic tokens for %s", file_str)
+        except Exception as e:
+            logger.warning("Failed to get semantic tokens for %s: %s", file_str, e)
             return
 
         # Filter to name-like tokens (not keywords, strings, numbers)
@@ -893,6 +902,7 @@ class CodeGraph:
             if len(parts) == 2:
                 name_part = parts[1].split("@", 1)[0]
                 self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
+        self._semantic_subgraph_cache.clear()
         return idx
 
     def _add_edge(
@@ -909,6 +919,7 @@ class CodeGraph:
             return None
         edge_idx = self._graph.add_edge(src_idx, tgt_idx, data)
         self._file_to_edges[file].append(edge_idx)
+        self._semantic_subgraph_cache.clear()
         return edge_idx
 
     def _rebuild_indexes(self) -> None:
@@ -923,6 +934,7 @@ class CodeGraph:
         self._file_to_edges.clear()
         self._file_node_ranges.clear()
         self._name_prefix_index.clear()
+        self._semantic_subgraph_cache.clear()
         for idx in self._graph.node_indices():
             node: SymbolNode = self._graph[idx]
             self._id_to_index[node.symbol_id] = idx
@@ -1093,7 +1105,13 @@ class CodeGraph:
 
         Node indices are preserved (same as the main graph) so callers can
         use ``self._id_to_index`` for lookups.
+
+        Results are memoized per *kinds* set and invalidated on any graph
+        mutation (node/edge addition, index rebuild, full rebuild).
         """
+        cached = self._semantic_subgraph_cache.get(kinds)
+        if cached is not None:
+            return cached
         sub = self._graph.copy()
         to_remove = [
             sub.get_edge_endpoints_by_index(edge_idx)
@@ -1101,6 +1119,7 @@ class CodeGraph:
             if sub.get_edge_data_by_index(edge_idx).kind not in kinds
         ]
         sub.remove_edges_from(to_remove)
+        self._semantic_subgraph_cache[kinds] = sub
         return sub
 
     def dependencies(
@@ -1351,17 +1370,12 @@ class CodeGraph:
 
     # ── Incremental updates ───────────────────────────────────
 
-    def update_file(self, session: TyO3Session, path: str) -> None:
-        """Re-index a file and all files that reference symbols in it.
+    def rebuild(self, session: TyO3Session, path: str) -> None:
+        """Rebuild the entire code graph.
 
-        Rebuilds the changed file plus its reverse-dependency set to
-        preserve cross-file reference edges.  This is cheaper than a
-        full rebuild for large projects (|affected| << |total|) while
-        remaining correct for all edge types.
-
-        For the initial implementation, this delegates to a full
-        rebuild.  Once profiling shows this is a bottleneck, the
-        targeted approach (documented above) should be implemented.
+        Currently performs a full rebuild from the session.  The *path*
+        parameter is accepted for API compatibility but is unused — all
+        files are re-indexed.
         """
         fresh = CodeGraph.build(session)
         # Swap all internal state — the old graph is discarded.

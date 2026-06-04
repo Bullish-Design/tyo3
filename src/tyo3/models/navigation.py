@@ -52,10 +52,7 @@ class NameOccurrence(BaseModel):
 
 
 class HoverContentKind(StrEnum):
-    """Kind of hover content returned by the ty engine.
-
-    Maps to :class:`tyo3.rust_backend.HoverContentKindDto` variants.
-    """
+    """Kind of hover content returned by the ty engine."""
 
     TYPE = "type"
     SIGNATURE = "signature"

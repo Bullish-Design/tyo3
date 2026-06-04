@@ -12,7 +12,6 @@ Usage::
     files = rp.files()
     result = rp.check()
 
-See RUST_BACKEND_IMPLEMENTATION.md §6.1 for the design.
 """
 
 from __future__ import annotations

@@ -17,8 +17,8 @@ def fixture_path(name: str) -> str:
 
 
 @needs_native
-class TestUpdateFile:
-    """Integration tests for update_file — requires native extension.
+class TestRebuild:
+    """Integration tests for rebuild — requires native extension.
 
     These tests mutate the graph, so each gets a fresh CodeGraph.build().
     The session is shared via the session-scoped cache.
@@ -35,7 +35,7 @@ class TestUpdateFile:
         assert len(symbols_in_models) > 0
 
         app_path = "app.py"
-        graph.update_file(session, app_path)
+        graph.rebuild(session, app_path)
 
         symbols_in_models_after = graph.symbols_in_file("models.py")
         assert len(symbols_in_models_after) > 0
@@ -46,7 +46,7 @@ class TestUpdateFile:
         app_path = "app.py"
 
         before_symbols = graph.symbols_in_file(app_path)
-        graph.update_file(session, app_path)
+        graph.rebuild(session, app_path)
         after_symbols = graph.symbols_in_file(app_path)
 
         assert len(after_symbols) >= len(before_symbols)
@@ -56,11 +56,11 @@ class TestUpdateFile:
         graph = self._fresh_graph()
         bug_path = "bug.py"
 
-        graph.update_file(session, bug_path)
+        graph.rebuild(session, bug_path)
         diags = graph.diagnostics_for_file(bug_path)
         assert isinstance(diags, list)
 
-    def test_update_file_preserves_incoming_references(self) -> None:
+    def test_rebuild_preserves_incoming_references(self) -> None:
         """After updating models.py, incoming references from app.py are preserved."""
         session = get_session("graph_test")
         graph = self._fresh_graph()
@@ -70,7 +70,7 @@ class TestUpdateFile:
         assert refs_before, f"Expected User to have incoming references before update, got {refs_before}"
 
         models_path = next(str(path) for path in session.files() if str(path).endswith("models.py"))
-        graph.update_file(session, models_path)
+        graph.rebuild(session, models_path)
 
         user_after = find_one(graph, file="models.py", name="User", kind=SymbolKind.CLASS)
         refs_after = graph.references_to(user_after.symbol_id)

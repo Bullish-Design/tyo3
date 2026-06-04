@@ -1,7 +1,4 @@
-"""TyO3 exception hierarchy for mapping Rust errors to Python exceptions.
-
-Derived from RUST_BACKEND_IMPLEMENTATION.md §6.3
-"""
+"""TyO3 exception hierarchy for mapping Rust errors to Python exceptions."""
 
 from __future__ import annotations
 
