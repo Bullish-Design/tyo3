@@ -31,6 +31,10 @@ from tyo3.models.symbols import Symbol, SymbolKind
 from tyo3.models.editor import (
     FoldingRange,
     FoldingRangeKind,
+    Hint,
+    HintKind,
+    InlayHint,
+    InlayHintKind,
 )
 from tyo3.models.lsp import (
     Completion,
@@ -73,6 +77,10 @@ __all__ = [  # noqa: F405
     # Editor
     "FoldingRangeKind",
     "FoldingRange",
+    "InlayHintKind",
+    "InlayHint",
+    "HintKind",
+    "Hint",
     # LSP
     "CompletionKind",
     "Completion",

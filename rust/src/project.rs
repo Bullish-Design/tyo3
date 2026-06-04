@@ -390,6 +390,70 @@ fn compute_type_hierarchy(
     }))
 }
 
+/// Get inlay hints for a file (whole-file).
+///
+/// NOTE: ty_ide does not publicly re-export InlayHint, so the conversion
+/// is inlined here to work with the inferred type.
+fn compute_inlay_hints(
+    state: &TyProjectState,
+    path: &str,
+) -> Result<Vec<dto::InlayHintDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+
+    let text_len = ruff_text_size::TextSize::from(source_str.len() as u32);
+    let full_range = ruff_text_size::TextRange::up_to(text_len);
+    let settings = ty_ide::InlayHintSettings::default();
+
+    let hints = ty_ide::inlay_hints(&state.db, file, full_range, &settings);
+    Ok(hints
+        .iter()
+        .map(|hint| {
+            // Flatten structured label parts into a single display string
+            let label: String = hint.label.parts()
+                .iter()
+                .map(|p| p.text().to_string())
+                .collect::<Vec<_>>()
+                .join("");
+
+            let loc = line_index.source_location(
+                hint.position,
+                &source_str,
+                ruff_source_file::PositionEncoding::Utf32,
+            );
+
+            let kind = match hint.kind {
+                ty_ide::InlayHintKind::Type => dto::InlayHintKindDto::Type,
+                ty_ide::InlayHintKind::CallArgumentName => dto::InlayHintKindDto::CallArgumentName,
+            };
+
+            dto::InlayHintDto {
+                position: dto::PositionDto {
+                    line: loc.line.get() as u32,
+                    column: (loc.character_offset.to_zero_indexed() + 1) as u32,
+                },
+                label,
+                kind,
+            }
+        })
+        .collect())
+}
+
+/// Get hints (unused bindings, unreachable code) for a file.
+fn compute_hints(
+    state: &TyProjectState,
+    path: &str,
+) -> Result<Vec<dto::HintDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+
+    let hints = ty_ide::hints(&state.db, file);
+    Ok(hints
+        .iter()
+        .map(|h| convert::hints::convert_hint(&source_str, &line_index, h))
+        .collect())
+}
+
 /// Get signature help at a position.
 fn compute_signature_help(
     state: &TyProjectState,
@@ -865,6 +929,30 @@ impl PyTyProject {
         }
     }
 
+    // ── Inlay Hints ──────────────────────────────────────────────────
+
+    /// Return inlay hints for a file.
+    fn inlay_hints<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "inlay_hints")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_inlay_hints(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Hints ────────────────────────────────────────────────────────
+
+    /// Return hints (unused bindings, unreachable code) for a file.
+    fn hints<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "hints")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_hints(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     // ── Selection Ranges ────────────────────────────────────────────
 
     /// Compute selection ranges at the given position.
@@ -1173,6 +1261,30 @@ impl PySnapshot {
         let state = clone_locked_state(&self.inner, "semantic_tokens")?;
         let path = path.to_owned();
         let dtos = py.detach(move || compute_semantic_tokens(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Inlay Hints ──────────────────────────────────────────
+
+    /// Return inlay hints for a file.
+    fn inlay_hints<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "inlay_hints")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_inlay_hints(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Hints ────────────────────────────────────────────────
+
+    /// Return hints (unused bindings, unreachable code) for a file.
+    fn hints<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "hints")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_hints(&state, &path))
             .map_err(AnalysisError::into_pyerr)?;
         pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))

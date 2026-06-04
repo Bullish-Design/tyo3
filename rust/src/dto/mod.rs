@@ -10,6 +10,7 @@ mod rename;
 mod folding;
 mod signature;
 mod completion;
+mod hints;
 pub use coordinates::*;
 pub use diagnostics::*;
 pub use hierarchy::*;
@@ -22,6 +23,7 @@ pub use rename::*;
 pub use folding::*;
 pub use signature::*;
 pub use completion::*;
+pub use hints::*;
 
 /// Result of a project check.  Serialized to a Python dict via pythonize.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

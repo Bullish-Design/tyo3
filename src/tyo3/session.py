@@ -39,6 +39,7 @@ from tyo3.models.navigation import (
     TypeHierarchy,
     WorkspaceEdit,
 )
+from tyo3.models.editor import FoldingRange, Hint, InlayHint
 from tyo3.models.lsp import Completion, SignatureHelp
 from tyo3.models.symbols import Symbol
 
@@ -336,6 +337,38 @@ class _ReadOps:
             raise InternalTyError(f"Unexpected error in folding_ranges(): {e}") from e
 
         return [FoldingRange.model_validate(r) for r in native_ranges]
+
+    # ── Inlay Hints ──────────────────────────────────────────────────
+
+    def inlay_hints(self, path: str | StdPath) -> list[InlayHint]:
+        """Return inlay hints for a file."""
+        self._check_open()
+        try:
+            result = self._inner.inlay_hints(str(path))
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in inlay_hints(): {e}") from e
+
+        return [InlayHint.model_validate(r) for r in result]
+
+    # ── Hints ────────────────────────────────────────────────────────
+
+    def hints(self, path: str | StdPath) -> list[Hint]:
+        """Return hints (unused bindings, unreachable code) for a file."""
+        self._check_open()
+        try:
+            result = self._inner.hints(str(path))
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in hints(): {e}") from e
+
+        return [Hint.model_validate(r) for r in result]
 
     # ── Signature Help ──────────────────────────────────────────────
 
