@@ -24,7 +24,10 @@ pub fn convert_diagnostics(
                 severity: severity_to_dto(d.severity()),
                 code: diagnostic_id_to_code(d.id()),
                 message: d.primary_message().to_string(),
-                details: vec![],
+                details: d.sub_diagnostics()
+                    .iter()
+                    .map(|s| s.concise_message().to_string())
+                    .collect(),
             }
         })
         .collect()
@@ -99,7 +102,10 @@ pub fn convert_diagnostic_refs(
                 severity: severity_to_dto(d.severity()),
                 code: diagnostic_id_to_code(d.id()),
                 message: d.primary_message().to_string(),
-                details: vec![],
+                details: d.sub_diagnostics()
+                    .iter()
+                    .map(|s| s.concise_message().to_string())
+                    .collect(),
             }
         })
         .collect()
