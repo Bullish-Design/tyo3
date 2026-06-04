@@ -1,14 +1,14 @@
 # TyO3 CI — Rust backend build + test pipeline
 #
-# Runs in the devenv shell with the pinned Rust toolchain and Python 3.13.
-# The build: (1) compiles the Rust extension, (2) copies the .so into the
-# Python package, (3) runs the full test suite.
+# Uses devenv to provision the pinned Rust toolchain, Python 3.13,
+# and all build dependencies.  The build script (build-release) runs
+# `maturin develop --release` which compiles the Rust extension and
+# installs it into the venv in one step.
 #
-# See RUST_BACKEND_IMPLEMENTATION.md §9.4 for the design.
-#
-# NOTE: This workflow does NOT cache cargo dependencies because the
-# ty/Ruff crates are large and tied to a specific commit hash. If CI
-# times out on the initial build, add a cargo cache step (see below).
+# Validation gates (must pass before merge):
+#   1. ruff check .        — lint and formatting
+#   2. build-release        — compile Rust extension
+#   3. tests                — full test suite with coverage
 
 name: CI
 
@@ -23,9 +23,7 @@ on:
     branches: [main, master]
 
 env:
-  CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  PYTHONPATH: src
 
 jobs:
   test:
@@ -55,24 +53,11 @@ jobs:
       #       rust/target
       #     key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
 
-      - name: Build Rust extension
-        run: |
-          cd rust
-          cargo build --release
-          cp target/release/lib_native_impl.so ../src/tyo3/_native_impl.cpython-313-x86_64-linux-gnu.so
+      - name: Ruff
+        run: devenv shell -- ruff check .
 
-      - name: Verify native extension is importable
-        run: |
-          python -c "
-          from tyo3.rust_project import RustProject
-          print('Rust extension imported successfully')
-          "
+      - name: Build native extension
+        run: devenv shell -- build-release
 
       - name: Run tests
-        run: |
-          uv pip install hypothesis  # for property-based tests
-          python -m pytest src/tyo3/tests/ -v -x --cov=tyo3 --cov-report=term-missing
-
-      - name: Run performance benchmarks
-        run: |
-          python -m pytest src/tyo3/tests/test_rust_performance.py -v -x
+        run: devenv shell -- tests
