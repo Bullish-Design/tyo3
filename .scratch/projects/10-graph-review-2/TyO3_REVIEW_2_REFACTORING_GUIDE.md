@@ -1646,7 +1646,7 @@ Definition of done:
 - CI uses maturin/devenv to build the extension.
 - Unused spec models are not in the public `__all__`.
 
-## Phase 11: DTO Boundary Simplification (Optional)
+## Phase 11: DTO Boundary Simplification
 
 Purpose: simplify maintenance of the Rust/Python transport layer.
 

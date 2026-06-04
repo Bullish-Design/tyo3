@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import rustworkx as rx
@@ -25,6 +25,35 @@ from tyo3.models.symbols import Symbol, SymbolKind
 from tyo3.session import TyO3Session
 
 logger = logging.getLogger(__name__)
+
+
+def _to_relative(root: Path, path: str) -> str:
+    """Convert an absolute path to a project-relative POSIX string.
+
+    If *path* is not under *root* (e.g. an external path), returns it
+    unchanged so external references stay explicitly external.
+    """
+    try:
+        return str(
+            PurePosixPath(Path(path).resolve().relative_to(root.resolve()))
+        )
+    except ValueError:
+        return path  # External path — return as-is
+
+
+def _normalize_result_path(
+    root: Path, path: str, project_files: set[str]
+) -> str:
+    """Normalize a Rust-returned path to match graph-path format.
+
+    Rust APIs return absolute paths.  When the path refers to a
+    project file, convert it to a project-relative graph path.
+    Otherwise leave it as-is (external).
+    """
+    candidate = _to_relative(root, path)
+    if candidate in project_files:
+        return candidate
+    return path
 
 
 def _range_size(t: tuple[int, int, int, int, str]) -> tuple[int, int]:
@@ -95,25 +124,34 @@ class CodeGraph:
         (not module fallback) and project-local targets are never
         externalized because of file ordering.
 
+        First-party paths are normalized to project-relative POSIX
+        paths so symbol IDs are portable and snapshot-friendly.
+
         If *report* is provided, failures are recorded on it so
         callers can programmatically inspect whether the graph is
         complete.
         """
         graph = cls()
-        files = [str(file_path) for file_path in session.files()]
-        project_files = set(files)
+        root = session.root
+        native_paths = [str(p) for p in session.files()]
+        graph_paths = [_to_relative(root, p) for p in native_paths]
+        native_by_graph = dict(
+            zip(graph_paths, native_paths, strict=True)
+        )
+        project_files = set(graph_paths)
 
         if report is not None:
-            report.files_total = len(files)
+            report.files_total = len(graph_paths)
 
         # ── Pass 1: collect symbols ───────────────────────────
         symbols_by_file: dict[str, list[Symbol]] = {}
-        for file_str in files:
+        for graph_path in graph_paths:
+            native_path = native_by_graph[graph_path]
             symbols = graph._collect_symbols_for_file(
-                session, file_str, report=report
+                session, native_path, report=report
             )
             if symbols is not None:
-                symbols_by_file[file_str] = symbols
+                symbols_by_file[graph_path] = symbols
 
         if report is not None:
             report.files_indexed = len(symbols_by_file)
@@ -130,17 +168,33 @@ class CodeGraph:
         # ── Pass 4: semantic references ───────────────────────
         for file_str in symbols_by_file:
             graph._resolve_references_via_occurrences(
-                session, file_str, project_files, report=report
+                session,
+                file_str,
+                project_files,
+                report=report,
+                root=root,
+                native_by_graph=native_by_graph,
             )
 
         # ── Pass 5: inheritance and overrides ─────────────────
         for file_str, symbols in symbols_by_file.items():
             graph._resolve_inheritance(
-                session, file_str, symbols, report=report
+                session,
+                file_str,
+                symbols,
+                report=report,
+                root=root,
+                native_by_graph=native_by_graph,
+                project_files=project_files,
             )
 
         # ── Pass 6: diagnostics (single check, distribute per-file)
-        graph._collect_all_diagnostics(session, report=report)
+        graph._collect_all_diagnostics(
+            session,
+            report=report,
+            root=root,
+            project_files=project_files,
+        )
 
         return graph
 
@@ -285,11 +339,16 @@ class CodeGraph:
         session: TyO3Session,
         *,
         report: GraphBuildReport | None = None,
+        root: Path | None = None,
+        project_files: set[str] | None = None,
     ) -> None:
         """Collect diagnostics with a single ``check()`` call, distribute per-file.
 
         Replaces the old per-file ``check_file()`` approach (N FFI
         calls) with a single project-wide check (1 FFI call).
+
+        Normalizes Rust-returned absolute paths to project-relative
+        graph paths when *root* and *project_files* are provided.
         """
         try:
             result = session.check()
@@ -309,7 +368,14 @@ class CodeGraph:
             return
         for diagnostic in result.diagnostics:
             if diagnostic.file:
-                self._diagnostics.setdefault(diagnostic.file, []).append(
+                norm_file = (
+                    _normalize_result_path(
+                        root, diagnostic.file, project_files
+                    )
+                    if root is not None and project_files is not None
+                    else diagnostic.file
+                )
+                self._diagnostics.setdefault(norm_file, []).append(
                     diagnostic
                 )
 
@@ -413,6 +479,8 @@ class CodeGraph:
         project_files: set[str],
         *,
         report: GraphBuildReport | None = None,
+        root: Path | None = None,
+        native_by_graph: dict[str, str] | None = None,
     ) -> None:
         """Resolve references using the batch file_occurrences API.
 
@@ -424,8 +492,13 @@ class CodeGraph:
         already exist as nodes from Pass 2) from external targets
         (which need stub nodes).
         """
+        native_file = (
+            native_by_graph.get(file_str, file_str)
+            if native_by_graph
+            else file_str
+        )
         try:
-            occurrences = session.file_occurrences(file_str)
+            occurrences = session.file_occurrences(native_file)
         except Exception as e:
             logger.warning(
                 "Failed to get file occurrences for %s, falling back",
@@ -441,14 +514,27 @@ class CodeGraph:
                     )
                 )
             # Fall back to the token-based approach
-            self._resolve_references_via_tokens(session, file_str)
+            self._resolve_references_via_tokens(
+                session,
+                file_str,
+                root=root,
+                native_by_graph=native_by_graph,
+                project_files=project_files,
+            )
             return
 
         for occ in occurrences:
             if occ.target_file is None or occ.target_name is None:
                 continue
 
-            target_file = occ.target_file
+            target_file_raw = occ.target_file
+            target_file = (
+                _normalize_result_path(
+                    root, target_file_raw, project_files
+                )
+                if root is not None
+                else target_file_raw
+            )
             target_name = occ.target_name
 
             # Build the target's symbol_id.
@@ -584,7 +670,13 @@ class CodeGraph:
         return ext_sid
 
     def _resolve_references_via_tokens(
-        self, session: TyO3Session, file_str: str
+        self,
+        session: TyO3Session,
+        file_str: str,
+        *,
+        root: Path | None = None,
+        native_by_graph: dict[str, str] | None = None,
+        project_files: set[str] | None = None,
     ) -> None:
         """Resolve references using semantic tokens + goto_definition.
 
@@ -592,8 +684,13 @@ class CodeGraph:
         find what symbol it refers to. Create a REFERENCES edge from
         the enclosing symbol to the target symbol.
         """
+        native_file = (
+            native_by_graph.get(file_str, file_str)
+            if native_by_graph
+            else file_str
+        )
         try:
-            tokens = session.semantic_tokens(file_str)
+            tokens = session.semantic_tokens(native_file)
         except Exception:
             logger.warning(
                 "Failed to get semantic tokens for %s", file_str
@@ -623,7 +720,7 @@ class CodeGraph:
             start = token.range.start
             try:
                 targets = session.goto_definition(
-                    file_str, start.line, start.column
+                    native_file, start.line, start.column
                 )
             except Exception:
                 continue
@@ -632,7 +729,12 @@ class CodeGraph:
                 continue
 
             target = targets[0]
-            target_file = str(target.path)
+            target_file_raw = str(target.path)
+            target_file = (
+                _normalize_result_path(root, target_file_raw, project_files)
+                if root is not None and project_files is not None
+                else target_file_raw
+            )
 
             # Build the target's symbol_id
             if target.symbol and target.symbol.qualified_name:
@@ -747,8 +849,16 @@ class CodeGraph:
         symbols: list[Symbol],
         *,
         report: GraphBuildReport | None = None,
+        root: Path | None = None,
+        native_by_graph: dict[str, str] | None = None,
+        project_files: set[str] | None = None,
     ) -> None:
         """Add INHERITS and OVERRIDES edges for class symbols."""
+        native_file = (
+            native_by_graph.get(file_str, file_str)
+            if native_by_graph
+            else file_str
+        )
         for symbol in symbols:
             if symbol.kind != SymbolKind.CLASS:
                 continue
@@ -760,7 +870,7 @@ class CodeGraph:
             )
             try:
                 hierarchy = session.type_hierarchy(
-                    file_str, start.line, start.column
+                    native_file, start.line, start.column
                 )
             except Exception as e:
                 if report is not None:
@@ -781,7 +891,14 @@ class CodeGraph:
 
             # Add INHERITS edges to supertypes
             for supertype in hierarchy.supertypes:
-                super_file = str(supertype.path)
+                super_file_raw = str(supertype.path)
+                super_file = (
+                    _normalize_result_path(
+                        root, super_file_raw, project_files
+                    )
+                    if root is not None and project_files is not None
+                    else super_file_raw
+                )
                 super_sid = self._find_symbol_in_file(
                     super_file, supertype.name
                 )

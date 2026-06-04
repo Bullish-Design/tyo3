@@ -21,10 +21,7 @@ class TestGraphQueries:
 
     def test_symbols_in_file(self) -> None:
         graph = get_graph("classes")
-        session = get_session("classes")
-        files = session.files()  # type: ignore[union-attr]
-        assert len(files) > 0
-        symbols = graph.symbols_in_file(str(files[0]))
+        symbols = graph.symbols_in_file("models.py")
         assert len(symbols) > 0
 
     def test_children(self) -> None:

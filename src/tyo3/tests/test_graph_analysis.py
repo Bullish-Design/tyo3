@@ -342,18 +342,14 @@ class TestSubgraphForFileIntegration:
 
     def test_extracts_meaningful_subgraph(self) -> None:
         graph = get_graph("graph_test")
-        fixture = StdPath(__file__).parent.parent.parent.parent / "fixtures"
-        models_path = str(fixture / "graph_test" / "models.py")
-        sub = graph.subgraph_for_file(models_path)
+        sub = graph.subgraph_for_file("models.py")
         assert sub.num_nodes() > 0
         node_names = {sub[i].name for i in sub.node_indices()}
         assert len(node_names) >= 1
 
     def test_export_dot_of_subgraph(self) -> None:
         graph = get_graph("graph_test")
-        fixture = StdPath(__file__).parent.parent.parent.parent / "fixtures"
-        models_path = str(fixture / "graph_test" / "models.py")
-        sub = graph.subgraph_for_file(models_path)
+        sub = graph.subgraph_for_file("models.py")
         assert sub.num_nodes() > 0
         for idx in sub.node_indices():
             node = sub[idx]

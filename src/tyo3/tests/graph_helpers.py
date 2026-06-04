@@ -14,25 +14,37 @@ from tyo3.models.symbols import SymbolKind
 def find_one(
     graph: CodeGraph,
     *,
-    file_suffix: str,
+    file_suffix: str = "",
+    file: str = "",
     name: str,
     kind: SymbolKind,
 ) -> SymbolNode:
     """Find exactly one non-external symbol matching the criteria.
 
-    Uses ``file.endswith(file_suffix)`` to keep tests working while
-    paths are still absolute.  After path normalization (Phase 7),
-    update callers to use exact relative paths.
+    Prefer *file* (exact match) when graph paths are project-relative.
+    Falls back to *file_suffix* (``endswith`` match) for backward
+    compatibility or when paths are still absolute.
     """
-    matches = [
-        node
-        for node in graph.symbols_of_kind(kind)
-        if node.file.endswith(file_suffix)
-        and node.name == name
-        and not node.external
-    ]
+    if file:
+        matches = [
+            node
+            for node in graph.symbols_of_kind(kind)
+            if node.file == file
+            and node.name == name
+            and not node.external
+        ]
+        tag = file
+    else:
+        matches = [
+            node
+            for node in graph.symbols_of_kind(kind)
+            if node.file.endswith(file_suffix)
+            and node.name == name
+            and not node.external
+        ]
+        tag = f"*{file_suffix}"
     assert len(matches) == 1, (
-        f"Expected exactly one {kind} named {name!r} in *{file_suffix}, "
+        f"Expected exactly one {kind} named {name!r} in {tag}, "
         f"got {[m.symbol_id for m in matches]}"
     )
     return matches[0]

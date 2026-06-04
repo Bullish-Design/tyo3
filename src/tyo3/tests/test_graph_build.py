@@ -79,9 +79,7 @@ class TestQualifiedNameResolution:
 
     def test_find_symbol_in_file_resolves_by_short_name(self) -> None:
         graph = get_graph("simple_package")
-        main_path = str(
-            StdPath(fixture_path("simple_package")) / "main.py"
-        )
+        main_path = "main.py"
         found = graph._find_symbol_in_file(main_path, "MyClass")
         assert found is not None, (
             "_find_symbol_in_file should find 'MyClass' by short name"

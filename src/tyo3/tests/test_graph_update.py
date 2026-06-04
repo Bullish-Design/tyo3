@@ -32,23 +32,19 @@ class TestUpdateFile:
         session = get_session("graph_test")
         graph = self._fresh_graph()
         original_count = graph.node_count
-        symbols_in_models = graph.symbols_in_file(
-            str(StdPath(fixture_path("graph_test")) / "models.py")
-        )
+        symbols_in_models = graph.symbols_in_file("models.py")
         assert len(symbols_in_models) > 0
 
-        app_path = str(StdPath(fixture_path("graph_test")) / "app.py")
+        app_path = "app.py"
         graph.update_file(session, app_path)
 
-        symbols_in_models_after = graph.symbols_in_file(
-            str(StdPath(fixture_path("graph_test")) / "models.py")
-        )
+        symbols_in_models_after = graph.symbols_in_file("models.py")
         assert len(symbols_in_models_after) > 0
 
     def test_update_repopulates_file(self) -> None:
         session = get_session("graph_test")
         graph = self._fresh_graph()
-        app_path = str(StdPath(fixture_path("graph_test")) / "app.py")
+        app_path = "app.py"
 
         before_symbols = graph.symbols_in_file(app_path)
         graph.update_file(session, app_path)
@@ -59,7 +55,7 @@ class TestUpdateFile:
     def test_update_clears_file_diagnostics(self) -> None:
         session = get_session("graph_test")
         graph = self._fresh_graph()
-        bug_path = str(StdPath(fixture_path("graph_test")) / "bug.py")
+        bug_path = "bug.py"
 
         graph.update_file(session, bug_path)
         diags = graph.diagnostics_for_file(bug_path)
@@ -71,7 +67,7 @@ class TestUpdateFile:
         graph = self._fresh_graph()
 
         user = find_one(
-            graph, file_suffix="models.py", name="User", kind=SymbolKind.CLASS
+            graph, file="models.py", name="User", kind=SymbolKind.CLASS
         )
         refs_before = graph.references_to(user.symbol_id)
         assert refs_before, (
@@ -86,7 +82,7 @@ class TestUpdateFile:
         graph.update_file(session, models_path)
 
         user_after = find_one(
-            graph, file_suffix="models.py", name="User", kind=SymbolKind.CLASS
+            graph, file="models.py", name="User", kind=SymbolKind.CLASS
         )
         refs_after = graph.references_to(user_after.symbol_id)
         assert refs_after, (
