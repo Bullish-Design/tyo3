@@ -62,7 +62,7 @@ struct TyProjectState {
 
 /// Python-facing wrapper.  The inner `Option` is `None` after `close()`;
 /// every operation checks this first and raises if the project is closed.
-#[pyclass(name = "TyProject", module = "tyo3._native_impl")]
+#[pyclass(name = "TyProject", module = "tyo3._native_impl", frozen)]
 pub struct PyTyProject {
     inner: Mutex<Option<TyProjectState>>,
 }
@@ -737,13 +737,23 @@ impl PyTyProject {
 // lock and runs the analysis with the GIL released, so many threads can share
 // one snapshot and run reads in parallel.
 
-#[pyclass(name = "TySnapshot", module = "tyo3._native_impl")]
+#[pyclass(name = "TySnapshot", module = "tyo3._native_impl", frozen)]
 pub struct PySnapshot {
     inner: Mutex<Option<TyProjectState>>,
 }
 
 #[pymethods]
 impl PySnapshot {
+    // ── Files ────────────────────────────────────────────────────
+
+    /// List all source files in the project.
+    fn files(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        let state = clone_locked_state(&self.inner, "files")?;
+        Ok(py.detach(move || compute_files(&state)))
+    }
+
+    // ── Check ────────────────────────────────────────────────────
+
     /// Run the type checker on the snapshot's pinned revision (GIL released).
     fn check<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let state = clone_locked_state(&self.inner, "check")?;
@@ -751,6 +761,188 @@ impl PySnapshot {
         pythonize(py, &check_result)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
+
+    /// Run the type checker and return diagnostics for a single file.
+    fn check_file<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "check_file")?;
+        let path = path.to_owned();
+        let dto = py.detach(move || compute_check_file(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dto)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Document Symbols ─────────────────────────────────────────
+
+    /// Get document symbols for a file in the project.
+    fn document_symbols<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "document_symbols")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_document_symbols(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Workspace Symbols ────────────────────────────────────────
+
+    /// Search for symbols matching a query across all workspace files.
+    fn workspace_symbols<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "workspace_symbols")?;
+        let query = query.to_owned();
+        let dtos = py.detach(move || compute_workspace_symbols(&state, &query));
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Goto Definition ──────────────────────────────────────────
+
+    /// Navigate to the definition of the symbol at the given position.
+    fn goto_definition<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "goto_definition")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || {
+            compute_navigate(&state, &path, line, column, ty_ide::goto_definition)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Goto Declaration ─────────────────────────────────────────
+
+    /// Navigate to the declaration of the symbol at the given position.
+    fn goto_declaration<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "goto_declaration")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || {
+            compute_navigate(&state, &path, line, column, ty_ide::goto_declaration)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Goto Type Definition ─────────────────────────────────────
+
+    /// Navigate to the type definition of the symbol at the given position.
+    fn goto_type_definition<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "goto_type_definition")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || {
+            compute_navigate(&state, &path, line, column, ty_ide::goto_type_definition)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Find References ──────────────────────────────────────────
+
+    /// Find all references to the symbol at the given position.
+    fn find_references<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+        include_declaration: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "find_references")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || {
+            compute_find_references(&state, &path, line, column, include_declaration)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Semantic Tokens ─────────────────────────────────────
+
+    /// Return semantic tokens for a file.
+    fn semantic_tokens<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "semantic_tokens")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_semantic_tokens(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── File Occurrences ─────────────────────────────────────
+
+    /// Batch-resolve all name occurrences in a file.
+    fn file_occurrences<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "file_occurrences")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_file_occurrences(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Type Hierarchy ──────────────────────────────────────
+
+    /// Query type hierarchy at a position.
+    fn type_hierarchy<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "type_hierarchy")?;
+        let path = path.to_owned();
+        match py.detach(move || compute_type_hierarchy(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(dto) => pythonize(py, &dto)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    // ── Hover ────────────────────────────────────────────────
+
+    /// Get hover information for the symbol at the given position.
+    fn hover<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "hover")?;
+        let path = path.to_owned();
+        match py.detach(move || compute_hover(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(dto) => pythonize(py, &dto)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    // ── Close ────────────────────────────────────────────────
 
     /// Release the pinned revision early, freeing its database. Idempotent.
     fn close(&self) -> PyResult<()> {
