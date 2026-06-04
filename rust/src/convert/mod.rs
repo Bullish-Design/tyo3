@@ -6,4 +6,5 @@ pub mod navigation;
 pub mod hover;
 pub mod tokens;
 pub mod rename;
+pub mod folding;
 

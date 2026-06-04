@@ -390,6 +390,42 @@ fn compute_type_hierarchy(
     }))
 }
 
+/// Compute selection ranges at a position.
+fn compute_selection_ranges(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+) -> Result<Vec<dto::RangeDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    let ranges = ty_ide::selection_range(&state.db, file, offset);
+    Ok(ranges
+        .iter()
+        .map(|r| coordinates::range_to_dto_with_index(&source_str, &line_index, *r))
+        .collect())
+}
+
+/// Compute folding ranges for a file (whole-file by default).
+fn compute_folding_ranges(
+    state: &TyProjectState,
+    path: &str,
+) -> Result<Vec<dto::FoldingRangeDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+
+    let ranges = ty_ide::folding_ranges(&state.db, file, None);
+    Ok(ranges
+        .iter()
+        .map(|r| convert::folding::convert_folding_range(&source_str, &line_index, r))
+        .collect())
+}
+
 /// Return the editable range of the symbol at the position, or None.
 fn compute_can_rename(
     state: &TyProjectState,
@@ -787,6 +823,36 @@ impl PyTyProject {
         }
     }
 
+    // ── Selection Ranges ────────────────────────────────────────────
+
+    /// Compute selection ranges at the given position.
+    fn selection_ranges<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "selection_ranges")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_selection_ranges(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Folding Ranges ───────────────────────────────────────────────
+
+    /// Return folding ranges for a file.
+    fn folding_ranges<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "folding_ranges")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_folding_ranges(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     // ── Document Highlights ──────────────────────────────────────────
 
     /// Highlight all in-file occurrences of the symbol at the given position.
@@ -1024,6 +1090,36 @@ impl PySnapshot {
         let state = clone_locked_state(&self.inner, "semantic_tokens")?;
         let path = path.to_owned();
         let dtos = py.detach(move || compute_semantic_tokens(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Selection Ranges ────────────────────────────────────
+
+    /// Compute selection ranges at the given position.
+    fn selection_ranges<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "selection_ranges")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_selection_ranges(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Folding Ranges ───────────────────────────────────────
+
+    /// Return folding ranges for a file.
+    fn folding_ranges<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "folding_ranges")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_folding_ranges(&state, &path))
             .map_err(AnalysisError::into_pyerr)?;
         pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))

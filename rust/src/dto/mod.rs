@@ -7,6 +7,7 @@ mod hierarchy;
 mod occurrences;
 mod tokens;
 mod rename;
+mod folding;
 pub use coordinates::*;
 pub use diagnostics::*;
 pub use hierarchy::*;
@@ -16,6 +17,7 @@ pub use navigation::*;
 pub use hover::*;
 pub use tokens::*;
 pub use rename::*;
+pub use folding::*;
 
 /// Result of a project check.  Serialized to a Python dict via pythonize.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

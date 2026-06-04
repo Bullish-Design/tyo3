@@ -39,6 +39,7 @@ from tyo3.models.navigation import (
     TypeHierarchy,
     WorkspaceEdit,
 )
+from tyo3.models.editor import FoldingRange
 from tyo3.models.symbols import Symbol
 
 # ── Native extension import ──────────────────────────────────────────────
@@ -297,6 +298,44 @@ class _ReadOps:
         if native_edit is None:
             return None
         return WorkspaceEdit.model_validate(native_edit)
+
+    # ── Selection Ranges ───────────────────────────────────────────
+
+    def selection_ranges(
+        self, path: str | StdPath, line: int, column: int
+    ) -> list[Range]:
+        """Compute selection ranges at *(line, column)*."""
+        self._check_open()
+        try:
+            native_ranges = self._inner.selection_ranges(str(path), line, column)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in selection_ranges(): {e}") from e
+
+        return [Range.model_validate(r) for r in native_ranges]
+
+    # ── Folding Ranges ─────────────────────────────────────────────
+
+    def folding_ranges(self, path: str | StdPath) -> list[FoldingRange]:
+        """Return folding ranges for a file."""
+        self._check_open()
+        try:
+            native_ranges = self._inner.folding_ranges(str(path))
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in folding_ranges(): {e}") from e
+
+        return [FoldingRange.model_validate(r) for r in native_ranges]
 
     # ── Semantic Tokens ──────────────────────────────────────────
 

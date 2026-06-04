@@ -28,6 +28,10 @@ from tyo3.models.navigation import (
     WorkspaceEdit,
 )
 from tyo3.models.symbols import Symbol, SymbolKind
+from tyo3.models.editor import (
+    FoldingRange,
+    FoldingRangeKind,
+)
 
 __all__ = [  # noqa: F405
     # Analysis
@@ -59,4 +63,7 @@ __all__ = [  # noqa: F405
     # Rename
     "RenameEdit",
     "WorkspaceEdit",
+    # Editor
+    "FoldingRangeKind",
+    "FoldingRange",
 ]
