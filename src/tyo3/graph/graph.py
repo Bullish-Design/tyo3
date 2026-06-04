@@ -34,16 +34,12 @@ def _to_relative(root: Path, path: str) -> str:
     unchanged so external references stay explicitly external.
     """
     try:
-        return str(
-            PurePosixPath(Path(path).resolve().relative_to(root.resolve()))
-        )
+        return str(PurePosixPath(Path(path).resolve().relative_to(root.resolve())))
     except ValueError:
         return path  # External path — return as-is
 
 
-def _normalize_result_path(
-    root: Path, path: str, project_files: set[str]
-) -> str:
+def _normalize_result_path(root: Path, path: str, project_files: set[str]) -> str:
     """Normalize a Rust-returned path to match graph-path format.
 
     Rust APIs return absolute paths.  When the path refers to a
@@ -70,15 +66,17 @@ def _range_size(t: tuple[int, int, int, int, str]) -> tuple[int, int]:
 
 _METHOD_KINDS = frozenset({SymbolKind.METHOD, SymbolKind.CONSTRUCTOR})
 
-DEPENDENCY_EDGE_KINDS: frozenset[EdgeKind] = frozenset({
-    EdgeKind.REFERENCES,
-    EdgeKind.IMPORTS,
-    EdgeKind.INHERITS,
-    EdgeKind.OVERRIDES,
-    EdgeKind.TYPE_OF,
-    EdgeKind.RETURNS,
-    EdgeKind.INSTANTIATES,
-})
+DEPENDENCY_EDGE_KINDS: frozenset[EdgeKind] = frozenset(
+    {
+        EdgeKind.REFERENCES,
+        EdgeKind.IMPORTS,
+        EdgeKind.INHERITS,
+        EdgeKind.OVERRIDES,
+        EdgeKind.TYPE_OF,
+        EdgeKind.RETURNS,
+        EdgeKind.INSTANTIATES,
+    }
+)
 
 
 class CodeGraph:
@@ -135,9 +133,7 @@ class CodeGraph:
         root = session.root
         native_paths = [str(p) for p in session.files()]
         graph_paths = [_to_relative(root, p) for p in native_paths]
-        native_by_graph = dict(
-            zip(graph_paths, native_paths, strict=True)
-        )
+        native_by_graph = dict(zip(graph_paths, native_paths, strict=True))
         project_files = set(graph_paths)
 
         if report is not None:
@@ -147,9 +143,7 @@ class CodeGraph:
         symbols_by_file: dict[str, list[Symbol]] = {}
         for graph_path in graph_paths:
             native_path = native_by_graph[graph_path]
-            symbols = graph._collect_symbols_for_file(
-                session, native_path, report=report
-            )
+            symbols = graph._collect_symbols_for_file(session, native_path, report=report)
             if symbols is not None:
                 symbols_by_file[graph_path] = symbols
 
@@ -230,9 +224,7 @@ class CodeGraph:
         try:
             return session.document_symbols(file_str)
         except Exception as e:
-            logger.warning(
-                "Failed to get symbols for %s, skipping", file_str
-            )
+            logger.warning("Failed to get symbols for %s, skipping", file_str)
             if report is not None:
                 report.failures.append(
                     GraphBuildFailure(
@@ -244,9 +236,7 @@ class CodeGraph:
                 )
             return None
 
-    def _materialize_file_nodes(
-        self, file_str: str, symbols: list[Symbol]
-    ) -> None:
+    def _materialize_file_nodes(self, file_str: str, symbols: list[Symbol]) -> None:
         """Create module and symbol nodes for one file in the graph."""
         module_id = f"{file_str}::<module>"
         module_node = SymbolNode(
@@ -291,24 +281,16 @@ class CodeGraph:
                     parts = node.symbol_id.split("::", 1)
                     if len(parts) == 2:
                         name_part = parts[1].split("@", 1)[0]
-                        self._name_prefix_index[
-                            (parts[0], name_part)
-                        ] = node.symbol_id
+                        self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
 
-    def _add_containment_edges_for_file(
-        self, file_str: str, symbols: list[Symbol]
-    ) -> None:
+    def _add_containment_edges_for_file(self, file_str: str, symbols: list[Symbol]) -> None:
         """Add DEFINES/CONTAINS edges for all symbols in one file."""
         module_id = f"{file_str}::<module>"
         for symbol in symbols:
             sid = symbol_id_from_symbol(file_str, symbol)
             parent_id = self._resolve_parent_id(file_str, symbol, module_id)
             if parent_id and parent_id in self._id_to_index:
-                edge_kind = (
-                    EdgeKind.DEFINES
-                    if parent_id == module_id
-                    else EdgeKind.CONTAINS
-                )
+                edge_kind = EdgeKind.DEFINES if parent_id == module_id else EdgeKind.CONTAINS
                 edge = EdgeData(kind=edge_kind)
                 self._add_edge(parent_id, sid, edge, file_str)
 
@@ -353,9 +335,7 @@ class CodeGraph:
         try:
             result = session.check()
         except Exception as e:
-            logger.warning(
-                "Failed to run project check, skipping diagnostics"
-            )
+            logger.warning("Failed to run project check, skipping diagnostics")
             if report is not None:
                 report.failures.append(
                     GraphBuildFailure(
@@ -369,15 +349,11 @@ class CodeGraph:
         for diagnostic in result.diagnostics:
             if diagnostic.file:
                 norm_file = (
-                    _normalize_result_path(
-                        root, diagnostic.file, project_files
-                    )
+                    _normalize_result_path(root, diagnostic.file, project_files)
                     if root is not None and project_files is not None
                     else diagnostic.file
                 )
-                self._diagnostics.setdefault(norm_file, []).append(
-                    diagnostic
-                )
+                self._diagnostics.setdefault(norm_file, []).append(diagnostic)
 
     # ── Parent resolution for containment ─────────────────────
 
@@ -394,9 +370,7 @@ class CodeGraph:
         """
         if symbol.container_name:
             # Use flexible lookup to handle both "name" and "name@line" formats
-            candidate_id = self._find_symbol_in_file(
-                file_str, symbol.container_name
-            )
+            candidate_id = self._find_symbol_in_file(file_str, symbol.container_name)
             if candidate_id is not None:
                 return candidate_id
         return module_id
@@ -426,52 +400,6 @@ class CodeGraph:
 
     # ── Reference resolution ──────────────────────────────────
 
-    def _resolve_references_for_symbol(
-        self,
-        session: TyO3Session,
-        file_str: str,
-        symbol: Symbol,
-    ) -> None:
-        """Add REFERENCES edges for a symbol using find_references.
-
-        For each reference site, we create an edge from the enclosing
-        symbol (at the reference site) to the definition symbol.
-        """
-        sid = symbol_id_from_symbol(file_str, symbol)
-        start = symbol.location.range.start
-
-        try:
-            refs = session.find_references(
-                file_str,
-                start.line,
-                start.column,
-                include_declaration=False,
-            )
-        except Exception:
-            return
-
-        for ref in refs:
-            ref_file = str(ref.path)
-            # Find the enclosing symbol at the reference site
-            enclosing_id = self._find_enclosing_symbol(ref_file, ref.range)
-            if enclosing_id is None:
-                continue
-
-            # Map ReferenceKind to ReferenceRole
-            role = ReferenceRole.OTHER
-            if ref.kind.value == "read":
-                role = ReferenceRole.READ
-            elif ref.kind.value == "write":
-                role = ReferenceRole.WRITE
-
-            edge = EdgeData(
-                kind=EdgeKind.REFERENCES,
-                file=ref_file,
-                range=ref.range,
-                role=role,
-            )
-            self._add_edge(enclosing_id, sid, edge, ref_file)
-
     def _resolve_references_via_occurrences(
         self,
         session: TyO3Session,
@@ -492,11 +420,7 @@ class CodeGraph:
         already exist as nodes from Pass 2) from external targets
         (which need stub nodes).
         """
-        native_file = (
-            native_by_graph.get(file_str, file_str)
-            if native_by_graph
-            else file_str
-        )
+        native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
         try:
             occurrences = session.file_occurrences(native_file)
         except Exception as e:
@@ -529,11 +453,7 @@ class CodeGraph:
 
             target_file_raw = occ.target_file
             target_file = (
-                _normalize_result_path(
-                    root, target_file_raw, project_files
-                )
-                if root is not None
-                else target_file_raw
+                _normalize_result_path(root, target_file_raw, project_files) if root is not None else target_file_raw
             )
             target_name = occ.target_name
 
@@ -590,9 +510,7 @@ class CodeGraph:
             # As a pragmatic bridge, every resolved cross-file reference
             # implies a module-level import dependency.
             if target_file and target_file != file_str:
-                self._add_import_edge(
-                    file_str, target_file, occ.range, project_files
-                )
+                self._add_import_edge(file_str, target_file, occ.range, project_files)
 
     def _add_import_edge(
         self,
@@ -684,17 +602,11 @@ class CodeGraph:
         find what symbol it refers to. Create a REFERENCES edge from
         the enclosing symbol to the target symbol.
         """
-        native_file = (
-            native_by_graph.get(file_str, file_str)
-            if native_by_graph
-            else file_str
-        )
+        native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
         try:
             tokens = session.semantic_tokens(native_file)
         except Exception:
-            logger.warning(
-                "Failed to get semantic tokens for %s", file_str
-            )
+            logger.warning("Failed to get semantic tokens for %s", file_str)
             return
 
         # Filter to name-like tokens (not keywords, strings, numbers)
@@ -719,9 +631,7 @@ class CodeGraph:
 
             start = token.range.start
             try:
-                targets = session.goto_definition(
-                    native_file, start.line, start.column
-                )
+                targets = session.goto_definition(native_file, start.line, start.column)
             except Exception:
                 continue
 
@@ -738,30 +648,21 @@ class CodeGraph:
 
             # Build the target's symbol_id
             if target.symbol and target.symbol.qualified_name:
-                target_sid = (
-                    f"{target_file}::{target.symbol.qualified_name}"
-                )
+                target_sid = f"{target_file}::{target.symbol.qualified_name}"
             elif target.symbol:
-                target_sid = (
-                    f"{target_file}::{target.symbol.name}"
-                    f"@{target.range.start.line}"
-                )
+                target_sid = f"{target_file}::{target.symbol.name}@{target.range.start.line}"
             else:
                 # No symbol info — skip this reference
                 continue
 
             # Ensure the target node exists — create a stub if external
             if target_sid not in self._id_to_index:
-                target_sid = self._ensure_target_node(
-                    target_file, target_sid, target
-                )
+                target_sid = self._ensure_target_node(target_file, target_sid, target)
                 if target_sid is None:
                     continue
 
             # Determine the enclosing symbol at this token's location
-            enclosing_id = self._find_enclosing_symbol(
-                file_str, token.range
-            )
+            enclosing_id = self._find_enclosing_symbol(file_str, token.range)
             if enclosing_id is None:
                 continue
 
@@ -854,24 +755,14 @@ class CodeGraph:
         project_files: set[str] | None = None,
     ) -> None:
         """Add INHERITS and OVERRIDES edges for class symbols."""
-        native_file = (
-            native_by_graph.get(file_str, file_str)
-            if native_by_graph
-            else file_str
-        )
+        native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
         for symbol in symbols:
             if symbol.kind != SymbolKind.CLASS:
                 continue
 
-            start = (
-                symbol.selection_range.start
-                if symbol.selection_range
-                else symbol.location.range.start
-            )
+            start = symbol.selection_range.start if symbol.selection_range else symbol.location.range.start
             try:
-                hierarchy = session.type_hierarchy(
-                    native_file, start.line, start.column
-                )
+                hierarchy = session.type_hierarchy(native_file, start.line, start.column)
             except Exception as e:
                 if report is not None:
                     report.failures.append(
@@ -893,23 +784,16 @@ class CodeGraph:
             for supertype in hierarchy.supertypes:
                 super_file_raw = str(supertype.path)
                 super_file = (
-                    _normalize_result_path(
-                        root, super_file_raw, project_files
-                    )
+                    _normalize_result_path(root, super_file_raw, project_files)
                     if root is not None and project_files is not None
                     else super_file_raw
                 )
-                super_sid = self._find_symbol_in_file(
-                    super_file, supertype.name
-                )
+                super_sid = self._find_symbol_in_file(super_file, supertype.name)
 
                 # If not found locally, create an external stub node
                 if super_sid is None:
                     package = self._infer_package(super_file)
-                    if (
-                        package is None
-                        and super_file not in self._file_to_nodes
-                    ):
+                    if package is None and super_file not in self._file_to_nodes:
                         package = "unknown"
                     if package:
                         ext_sid = f"{package}::{supertype.name}"
@@ -919,9 +803,7 @@ class CodeGraph:
                             self._add_stub_node(
                                 symbol_id=ext_sid,
                                 name=supertype.name,
-                                qualified_name=(
-                                    f"{package}.{supertype.name}"
-                                ),
+                                qualified_name=(f"{package}.{supertype.name}"),
                                 kind=kind,
                                 package=package,
                             )
@@ -934,12 +816,7 @@ class CodeGraph:
             # Derive OVERRIDES: collect methods from the child class,
             # then walk the full supertype chain to find overridden
             # methods.
-            child_methods = [
-                s
-                for s in symbols
-                if s.kind in _METHOD_KINDS
-                and s.container_name == symbol.name
-            ]
+            child_methods = [s for s in symbols if s.kind in _METHOD_KINDS and s.container_name == symbol.name]
             if not child_methods:
                 continue
 
@@ -954,9 +831,7 @@ class CodeGraph:
                 if current_idx is None:
                     continue
 
-                for _src, succ_idx, edge_data in self._graph.out_edges(
-                    current_idx
-                ):
+                for _src, succ_idx, edge_data in self._graph.out_edges(current_idx):
                     if edge_data.kind != EdgeKind.INHERITS:
                         continue
 
@@ -967,10 +842,7 @@ class CodeGraph:
 
                     # Collect this parent's methods
                     for c in self.children(parent_sid):
-                        if (
-                            c.kind in _METHOD_KINDS
-                            and c.name not in ancestor_methods
-                        ):
+                        if c.kind in _METHOD_KINDS and c.name not in ancestor_methods:
                             ancestor_methods[c.name] = c.symbol_id
 
             for method in child_methods:
@@ -978,13 +850,9 @@ class CodeGraph:
                     method_sid = symbol_id_from_symbol(file_str, method)
                     parent_method_sid = ancestor_methods[method.name]
                     edge = EdgeData(kind=EdgeKind.OVERRIDES)
-                    self._add_edge(
-                        method_sid, parent_method_sid, edge, file_str
-                    )
+                    self._add_edge(method_sid, parent_method_sid, edge, file_str)
 
-    def _find_enclosing_symbol(
-        self, file_str: str, range: Range
-    ) -> str | None:
+    def _find_enclosing_symbol(self, file_str: str, range: Range) -> str | None:
         """Find the innermost symbol in *file_str* that contains *range*.
 
         Uses the pre-materialized range cache (B1) to avoid per-node
@@ -1024,9 +892,7 @@ class CodeGraph:
             parts = node.symbol_id.split("::", 1)
             if len(parts) == 2:
                 name_part = parts[1].split("@", 1)[0]
-                self._name_prefix_index[
-                    (parts[0], name_part)
-                ] = node.symbol_id
+                self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
         return idx
 
     def _add_edge(
@@ -1066,16 +932,10 @@ class CodeGraph:
                 parts = node.symbol_id.split("::", 1)
                 if len(parts) == 2:
                     name_part = parts[1].split("@", 1)[0]
-                    self._name_prefix_index[
-                        (parts[0], name_part)
-                    ] = node.symbol_id
+                    self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
         for edge_idx in self._graph.edge_indices():
             data = self._graph.get_edge_data_by_index(edge_idx)
-            if (
-                data is not None
-                and hasattr(data, "file")
-                and data.file is not None
-            ):
+            if data is not None and hasattr(data, "file") and data.file is not None:
                 self._file_to_edges[data.file].append(edge_idx)
         # Rebuild range cache (B1)
         for file_str in self._file_to_nodes:
@@ -1176,9 +1036,7 @@ class CodeGraph:
 
     def symbols_in_file(self, path: str) -> list[SymbolNode]:
         """All symbols defined in a file."""
-        return [
-            self._graph[i] for i in self._file_to_nodes.get(path, [])
-        ]
+        return [self._graph[i] for i in self._file_to_nodes.get(path, [])]
 
     def symbols_of_kind(self, kind: SymbolKind) -> list[SymbolNode]:
         """All symbols of a given kind."""
@@ -1193,23 +1051,11 @@ class CodeGraph:
 
     def references_to(self, symbol_id: str) -> list[EdgeData]:
         """All incoming REFERENCES edges to a symbol."""
-        return [
-            data
-            for _, data in self._edges_of_kind(
-                symbol_id, {EdgeKind.REFERENCES}, incoming=True
-            )
-        ]
+        return [data for _, data in self._edges_of_kind(symbol_id, {EdgeKind.REFERENCES}, incoming=True)]
 
-    def references_from(
-        self, symbol_id: str
-    ) -> list[tuple[SymbolNode, EdgeData]]:
+    def references_from(self, symbol_id: str) -> list[tuple[SymbolNode, EdgeData]]:
         """All outgoing REFERENCES edges from a symbol."""
-        return [
-            (self._graph[tgt_idx], data)
-            for tgt_idx, data in self._edges_of_kind(
-                symbol_id, {EdgeKind.REFERENCES}
-            )
-        ]
+        return [(self._graph[tgt_idx], data) for tgt_idx, data in self._edges_of_kind(symbol_id, {EdgeKind.REFERENCES})]
 
     # ── Structural queries ────────────────────────────────────
 
@@ -1217,9 +1063,7 @@ class CodeGraph:
         """Direct children (outgoing DEFINES/CONTAINS edges)."""
         seen: set[int] = set()
         result: list[SymbolNode] = []
-        for tgt_idx, _ in self._edges_of_kind(
-            symbol_id, {EdgeKind.DEFINES, EdgeKind.CONTAINS}
-        ):
+        for tgt_idx, _ in self._edges_of_kind(symbol_id, {EdgeKind.DEFINES, EdgeKind.CONTAINS}):
             if tgt_idx not in seen:
                 seen.add(tgt_idx)
                 result.append(self._graph[tgt_idx])
@@ -1267,10 +1111,7 @@ class CodeGraph:
     ) -> set[str]:
         """All symbols this one directly depends on (semantic edges only)."""
         edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
-        return {
-            self._graph[tgt_idx].symbol_id
-            for tgt_idx, _data in self._edges_of_kind(symbol_id, edge_kinds)
-        }
+        return {self._graph[tgt_idx].symbol_id for tgt_idx, _data in self._edges_of_kind(symbol_id, edge_kinds)}
 
     def dependents(
         self,
@@ -1282,9 +1123,7 @@ class CodeGraph:
         edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
         return {
             self._graph[src_idx].symbol_id
-            for src_idx, _data in self._edges_of_kind(
-                symbol_id, edge_kinds, incoming=True
-            )
+            for src_idx, _data in self._edges_of_kind(symbol_id, edge_kinds, incoming=True)
         }
 
     def transitive_dependencies(
@@ -1328,10 +1167,7 @@ class CodeGraph:
         nodes are module ``symbol_id`` strings and *sid_to_index*
         maps ``symbol_id`` → node index in the module graph.
         """
-        module_indices = [
-            i for i in self._graph.node_indices()
-            if self._graph[i].kind == SymbolKind.MODULE
-        ]
+        module_indices = [i for i in self._graph.node_indices() if self._graph[i].kind == SymbolKind.MODULE]
         if len(module_indices) < 2:
             return rx.PyDiGraph(), {}
 
@@ -1379,9 +1215,7 @@ class CodeGraph:
             return []
 
         # Build adjacency dict from the module graph
-        adj: dict[str, set[str]] = {
-            mod_graph[i]: set() for i in mod_graph.node_indices()
-        }
+        adj: dict[str, set[str]] = {mod_graph[i]: set() for i in mod_graph.node_indices()}
 
         for edge_idx in mod_graph.edge_indices():
             src, tgt = mod_graph.get_edge_endpoints_by_index(edge_idx)
@@ -1432,11 +1266,7 @@ class CodeGraph:
         except Exception:
             return []
 
-        scored = [
-            (self._graph[i].symbol_id, score)
-            for i, score in centrality.items()
-            if score > 0.0
-        ]
+        scored = [(self._graph[i].symbol_id, score) for i, score in centrality.items() if score > 0.0]
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_n]
 
@@ -1457,11 +1287,7 @@ class CodeGraph:
             return []
 
         sccs = rx.strongly_connected_components(mod_graph)
-        return [
-            {mod_graph[i] for i in scc}
-            for scc in sccs
-            if len(scc) > 1
-        ]
+        return [{mod_graph[i] for i in scc} for scc in sccs if len(scc) > 1]
 
     def is_reachable(self, from_sid: str, to_sid: str) -> bool:
         """Check if there is a directed path from one symbol to another.
@@ -1520,9 +1346,7 @@ class CodeGraph:
                 included.add(pred)
 
         # Single Rust call: copies nodes and all edges between included nodes
-        sub, _node_map = self._graph.subgraph_with_nodemap(
-            sorted(included)
-        )
+        sub, _node_map = self._graph.subgraph_with_nodemap(sorted(included))
         return sub
 
     # ── Incremental updates ───────────────────────────────────
@@ -1626,17 +1450,11 @@ class CodeGraph:
         if node is None:
             return []
         file_diags = self._diagnostics.get(node.file, [])
-        return [
-            d
-            for d in file_diags
-            if d.range and _ranges_overlap(d.range, node.range)
-        ]
+        return [d for d in file_diags if d.range and _ranges_overlap(d.range, node.range)]
 
     def all_diagnostics(self) -> list[Diagnostic]:
         """All diagnostics across all files."""
-        return [
-            d for diags in self._diagnostics.values() for d in diags
-        ]
+        return [d for diags in self._diagnostics.values() for d in diags]
 
 
 def _ranges_overlap(a: Range, b: Range) -> bool:

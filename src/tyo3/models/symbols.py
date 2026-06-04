@@ -48,6 +48,7 @@ class Symbol(BaseModel):
     container_name: str | None = None
     deprecated: bool = False
 
+
 __all__ = [
     "SymbolKind",
     "Symbol",

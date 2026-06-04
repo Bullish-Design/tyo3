@@ -71,59 +71,44 @@ class TestQualifiedNameResolution:
         for m in methods:
             if not m.external:
                 assert "." in m.qualified_name, (
-                    f"Method {m.name} should have dotted qualified_name, "
-                    f"got {m.qualified_name!r}"
+                    f"Method {m.name} should have dotted qualified_name, got {m.qualified_name!r}"
                 )
 
     def test_find_symbol_in_file_resolves_by_short_name(self) -> None:
         graph = get_graph("simple_package")
         main_path = "main.py"
         found = graph._find_symbol_in_file(main_path, "MyClass")
-        assert found is not None, (
-            "_find_symbol_in_file should find 'MyClass' by short name"
-        )
+        assert found is not None, "_find_symbol_in_file should find 'MyClass' by short name"
         assert "MyClass" in found
 
         found_method = graph._find_symbol_in_file(main_path, "get_val")
-        assert found_method is not None, (
-            "_find_symbol_in_file should find 'get_val' by short name"
-        )
+        assert found_method is not None, "_find_symbol_in_file should find 'get_val' by short name"
         assert "get_val" in found_method
 
     def test_references_to_function_connect_correctly(self) -> None:
         graph = get_graph("simple_package")
-        greet_nodes = [
-            n for n in graph.symbols_of_kind(SymbolKind.FUNCTION)
-            if n.name == "greet" and not n.external
-        ]
+        greet_nodes = [n for n in graph.symbols_of_kind(SymbolKind.FUNCTION) if n.name == "greet" and not n.external]
         assert len(greet_nodes) >= 1, "greet function should exist"
         greet_node = greet_nodes[0]
 
         refs = graph.references_to(greet_node.symbol_id)
-        assert len(refs) > 0, (
-            f"greet() should have at least one reference, got {len(refs)}"
-        )
+        assert len(refs) > 0, f"greet() should have at least one reference, got {len(refs)}"
         for r in refs:
             from tyo3.graph import EdgeKind as _EK
+
             assert r.kind == _EK.REFERENCES
             assert r.role is not None
 
     def test_occurrence_model_has_target_qualified_name(self) -> None:
         session = get_session("simple_package")
-        main_path = str(
-            StdPath(fixture_path("simple_package")) / "main.py"
-        )
+        main_path = str(StdPath(fixture_path("simple_package")) / "main.py")
         occurrences = session.file_occurrences(main_path)  # type: ignore[union-attr]
         assert len(occurrences) > 0
 
         for occ in occurrences:
-            assert hasattr(occ, "target_qualified_name"), (
-                "NameOccurrence must have target_qualified_name"
-            )
+            assert hasattr(occ, "target_qualified_name"), "NameOccurrence must have target_qualified_name"
 
-        has_qualified = any(
-            occ.target_qualified_name is not None for occ in occurrences
-        )
+        has_qualified = any(occ.target_qualified_name is not None for occ in occurrences)
         _ = has_qualified  # Qualified-name coverage varies by backend
 
 
@@ -161,9 +146,7 @@ class TestBuildReports:
         mock_session = MagicMock()
         mock_session.files.return_value = ["/fake/a.py"]
         mock_session.document_symbols.return_value = []
-        mock_session.file_occurrences.side_effect = RuntimeError(
-            "simulated ref failure"
-        )
+        mock_session.file_occurrences.side_effect = RuntimeError("simulated ref failure")
 
         graph, report = CodeGraph.build_with_report(mock_session)
 
@@ -198,9 +181,7 @@ class TestBuildReports:
         mock_session.files.return_value = ["/fake/a.py"]
         mock_session.document_symbols.return_value = [mock_class]
         mock_session.file_occurrences.return_value = []
-        mock_session.type_hierarchy.side_effect = RuntimeError(
-            "simulated inheritance failure"
-        )
+        mock_session.type_hierarchy.side_effect = RuntimeError("simulated inheritance failure")
 
         graph, report = CodeGraph.build_with_report(mock_session)
 
@@ -214,9 +195,7 @@ class TestBuildReports:
         mock_session.files.return_value = ["/fake/a.py"]
         mock_session.document_symbols.return_value = []
         mock_session.file_occurrences.return_value = []
-        mock_session.check.side_effect = RuntimeError(
-            "simulated check failure"
-        )
+        mock_session.check.side_effect = RuntimeError("simulated check failure")
 
         graph, report = CodeGraph.build_with_report(mock_session)
 

@@ -53,6 +53,7 @@ class TestPythonizeDictStructures:
     def test_position_dict_structure(self) -> None:
         """Pythonize should produce dicts with line/column keys."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             symbols = rp.document_symbols("main.py")
@@ -71,6 +72,7 @@ class TestPythonizeDictStructures:
     def test_check_result_roundtrip(self) -> None:
         """Check() returns a dict that validates as CheckResult."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             result = rp.check()
@@ -82,6 +84,7 @@ class TestPythonizeDictStructures:
     def test_document_symbols_roundtrip(self) -> None:
         """document_symbols() returns a list of dicts that validate as Symbols."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             symbols = rp.document_symbols("main.py")
@@ -95,6 +98,7 @@ class TestPythonizeDictStructures:
     def test_goto_definition_roundtrip(self) -> None:
         """goto_definition() returns a list of dicts for DefinitionTarget."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             targets = rp.goto_definition("main.py", 1, 1)
@@ -109,6 +113,7 @@ class TestPythonizeDictStructures:
     def test_find_references_roundtrip(self) -> None:
         """find_references() returns a list of dicts for Reference."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             refs = rp.find_references("main.py", 1, 1)
@@ -119,6 +124,7 @@ class TestPythonizeDictStructures:
     def test_workspace_symbols_roundtrip(self) -> None:
         """workspace_symbols() returns a list of dicts for Symbol."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             symbols = rp.workspace_symbols("greet")
@@ -131,6 +137,7 @@ class TestPythonizeDictStructures:
     def test_hover_roundtrip(self) -> None:
         """hover() returns a dict or None for HoverResult."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             result = rp.hover("main.py", 1, 1)
@@ -152,6 +159,7 @@ class TestPythonizeEdgeCases:
     def test_check_file_diagnostics(self) -> None:
         """check_file() returns diagnostics for a specific file."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             result = rp.check_file("main.py")
@@ -166,6 +174,7 @@ class TestPythonizeEdgeCases:
     def test_none_hover_handling(self) -> None:
         """hover() can return None for positions without hover info."""
         from tyo3 import rust_project
+
         rp = rust_project.RustProject("fixtures/simple_package")
         try:
             # Position at a non-symbol (e.g., whitespace) may return None
@@ -180,22 +189,21 @@ class TestPythonizeEdgeCases:
     def test_exception_types_still_importable(self) -> None:
         """Exception classes remain on the native module."""
         from tyo3._native_impl import (
-            AnalysisError,  # type: ignore[import-untyped]
             ProjectClosedError,  # type: ignore[import-untyped]
         )
+
         assert issubclass(ProjectClosedError, Exception)
-        assert issubclass(AnalysisError, Exception)
 
     def test_native_module_exports_only_typroject_and_exceptions(self) -> None:
         """After DTO boundary simplification, only TyProject + exceptions remain."""
         import tyo3._native_impl as _native  # type: ignore[import-untyped]
+
         # TyProject and exceptions
         expected = {
             "TyProject",
             "ProjectClosedError",
             "PathResolutionError",
             "PositionError",
-            "AnalysisError",
         }
         for name in dir(_native):
             if name.startswith("_"):
@@ -203,6 +211,5 @@ class TestPythonizeEdgeCases:
             obj = getattr(_native, name)
             if isinstance(obj, type):
                 assert name in expected, (
-                    f"Unexpected native type {name!r} — should not be a PyO3 class "
-                    f"after DTO boundary simplification"
+                    f"Unexpected native type {name!r} — should not be a PyO3 class after DTO boundary simplification"
                 )

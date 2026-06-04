@@ -11,9 +11,7 @@ from tyo3.tests.conftest import get_graph, needs_native
 class TestImportCycles:
     """Unit tests for import cycle detection."""
 
-    def _make_module_node(
-        self, graph: CodeGraph, file: str, name: str
-    ) -> str:
+    def _make_module_node(self, graph: CodeGraph, file: str, name: str) -> str:
         sid = f"{file}::<module>"
         node = SymbolNode(
             symbol_id=sid,
@@ -21,24 +19,22 @@ class TestImportCycles:
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
             file=file,
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         graph._add_node(node)
         return sid
 
-    def _add_import_edge(
-        self, graph: CodeGraph, src_file: str, tgt_file: str
-    ) -> None:
+    def _add_import_edge(self, graph: CodeGraph, src_file: str, tgt_file: str) -> None:
         src_id = f"{src_file}::<module>"
         tgt_id = f"{tgt_file}::<module>"
         edge = EdgeData(kind=EdgeKind.IMPORTS)
         graph._add_edge(src_id, tgt_id, edge, src_file)
 
     def _make_data_node(
-        self, graph: CodeGraph, symbol_id: str, file: str,
+        self,
+        graph: CodeGraph,
+        symbol_id: str,
+        file: str,
     ) -> None:
         node = SymbolNode(
             symbol_id=symbol_id,
@@ -46,10 +42,7 @@ class TestImportCycles:
             qualified_name=symbol_id.split("::")[-1],
             kind=SymbolKind.FUNCTION,
             file=file,
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         graph._add_node(node)
 
@@ -136,9 +129,7 @@ class TestImportCycles:
 class TestImportCycleGroups:
     """Unit tests for import_cycle_groups (Phase E1)."""
 
-    def _make_module_node(
-        self, graph: CodeGraph, file: str, name: str
-    ) -> str:
+    def _make_module_node(self, graph: CodeGraph, file: str, name: str) -> str:
         sid = f"{file}::<module>"
         node = SymbolNode(
             symbol_id=sid,
@@ -146,17 +137,12 @@ class TestImportCycleGroups:
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
             file=file,
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         graph._add_node(node)
         return sid
 
-    def _add_import_edge(
-        self, graph: CodeGraph, src_file: str, tgt_file: str
-    ) -> None:
+    def _add_import_edge(self, graph: CodeGraph, src_file: str, tgt_file: str) -> None:
         src_id = f"{src_file}::<module>"
         tgt_id = f"{tgt_file}::<module>"
         edge = EdgeData(kind=EdgeKind.IMPORTS)
@@ -229,42 +215,41 @@ class TestImportCycleGroups:
         self._add_import_edge(graph, "a.py", "a.py")
         assert graph.import_cycle_groups() == []
 
-
     def test_references_do_not_create_import_cycles(self) -> None:
         """A cross-file REFERENCES edge does not imply an import relationship."""
         graph = CodeGraph()
 
         mod_a = SymbolNode(
-            symbol_id="a.py::<module>", name="a", qualified_name="<module>",
-            kind=SymbolKind.MODULE, file="a.py",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            symbol_id="a.py::<module>",
+            name="a",
+            qualified_name="<module>",
+            kind=SymbolKind.MODULE,
+            file="a.py",
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         mod_b = SymbolNode(
-            symbol_id="b.py::<module>", name="b", qualified_name="<module>",
-            kind=SymbolKind.MODULE, file="b.py",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            symbol_id="b.py::<module>",
+            name="b",
+            qualified_name="<module>",
+            kind=SymbolKind.MODULE,
+            file="b.py",
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         func_a = SymbolNode(
-            symbol_id="a.py::f", name="f", qualified_name="f",
-            kind=SymbolKind.FUNCTION, file="a.py",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            symbol_id="a.py::f",
+            name="f",
+            qualified_name="f",
+            kind=SymbolKind.FUNCTION,
+            file="a.py",
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         func_b = SymbolNode(
-            symbol_id="b.py::g", name="g", qualified_name="g",
-            kind=SymbolKind.FUNCTION, file="b.py",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            symbol_id="b.py::g",
+            name="g",
+            qualified_name="g",
+            kind=SymbolKind.FUNCTION,
+            file="b.py",
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         for node in [mod_a, mod_b, func_a, func_b]:
             graph._add_node(node)
@@ -282,9 +267,7 @@ class TestImportCyclesIntegration:
     def test_no_false_cycles_on_simple_package(self) -> None:
         graph = get_graph("simple_package")
         cycles = graph.import_cycles()
-        assert len(cycles) == 0, (
-            f"simple_package should have no import cycles, got {cycles}"
-        )
+        assert len(cycles) == 0, f"simple_package should have no import cycles, got {cycles}"
 
     def test_does_not_crash_on_complex_fixture(self) -> None:
         graph = get_graph("circular_imports")
@@ -299,17 +282,15 @@ class TestImportCyclesIntegration:
     def test_circular_imports_detected_from_import_edges(self) -> None:
         graph = get_graph("circular_imports")
         cycles = graph.import_cycles()
-        assert cycles, (
-            "Expected at least one import cycle in circular_imports fixture"
-        )
+        assert cycles, "Expected at least one import cycle in circular_imports fixture"
         # Verify the cycle contains both modules
         all_sids_in_cycles = {sid for cycle in cycles for sid in cycle}
-        assert any(
-            sid.endswith("module_a.py::<module>") for sid in all_sids_in_cycles
-        ), f"Cycle(s) missing module_a: {cycles}"
-        assert any(
-            sid.endswith("module_b.py::<module>") for sid in all_sids_in_cycles
-        ), f"Cycle(s) missing module_b: {cycles}"
+        assert any(sid.endswith("module_a.py::<module>") for sid in all_sids_in_cycles), (
+            f"Cycle(s) missing module_a: {cycles}"
+        )
+        assert any(sid.endswith("module_b.py::<module>") for sid in all_sids_in_cycles), (
+            f"Cycle(s) missing module_b: {cycles}"
+        )
 
     def test_cycle_groups_no_false_positives(self) -> None:
         graph = get_graph("simple_package")

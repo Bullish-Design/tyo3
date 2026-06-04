@@ -33,6 +33,7 @@ class AnalysisError(TyO3Error):
 class InternalTyError(TyO3Error):
     """Raised when the underlying ty/Ruff engine encounters an unexpected error."""
 
+
 __all__ = [
     "TyO3Error",
     "ProjectOpenError",

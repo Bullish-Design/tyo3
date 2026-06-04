@@ -65,26 +65,13 @@ class TestUpdateFile:
         session = get_session("graph_test")
         graph = self._fresh_graph()
 
-        user = find_one(
-            graph, file="models.py", name="User", kind=SymbolKind.CLASS
-        )
+        user = find_one(graph, file="models.py", name="User", kind=SymbolKind.CLASS)
         refs_before = graph.references_to(user.symbol_id)
-        assert refs_before, (
-            f"Expected User to have incoming references before update, "
-            f"got {refs_before}"
-        )
+        assert refs_before, f"Expected User to have incoming references before update, got {refs_before}"
 
-        models_path = next(
-            str(path) for path in session.files()
-            if str(path).endswith("models.py")
-        )
+        models_path = next(str(path) for path in session.files() if str(path).endswith("models.py"))
         graph.update_file(session, models_path)
 
-        user_after = find_one(
-            graph, file="models.py", name="User", kind=SymbolKind.CLASS
-        )
+        user_after = find_one(graph, file="models.py", name="User", kind=SymbolKind.CLASS)
         refs_after = graph.references_to(user_after.symbol_id)
-        assert refs_after, (
-            f"Expected User to still have incoming references after update, "
-            f"got {refs_after}"
-        )
+        assert refs_after, f"Expected User to still have incoming references after update, got {refs_after}"

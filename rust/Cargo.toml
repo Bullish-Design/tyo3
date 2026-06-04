@@ -29,9 +29,6 @@ ty_python_semantic = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eb
 ty_module_resolver = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
 ty_python_core = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
 
-[features]
-json-schema = []
-
 [profile.release]
 lto = true
 codegen-units = 1

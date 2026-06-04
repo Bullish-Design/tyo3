@@ -20,9 +20,7 @@ def fixture_path(name: str) -> str:
     return str((FIXTURES_DIR / name).resolve())
 
 
-needs_native = pytest.mark.skipif(
-    not _HAS_NATIVE, reason="Rust native extension not built"
-)
+needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
 # ── Shared caches (session-scoped, via conftest) ──────────────────────────
 
@@ -69,8 +67,7 @@ class TestFileOccurrences:
         # At minimum, the `Base` reference in `User(Base)` should resolve
         # back to models.py itself (or stdlib/builtins.pyi for `object`)
         assert len(resolved) > 0, (
-            f"Expected at least one resolved occurrence, got {len(resolved)} "
-            f"from {len(occs)} total"
+            f"Expected at least one resolved occurrence, got {len(resolved)} from {len(occs)} total"
         )
 
     def test_import_role_detected(self) -> None:
@@ -83,10 +80,7 @@ class TestFileOccurrences:
         occs = rp.file_occurrences(app_file[0])
         imports = [o for o in occs if o.role == ReferenceRole.IMPORT]
         # app.py has `from models import MAX_USERS, User`
-        assert len(imports) >= 1, (
-            f"Expected Import role occurrences, got roles: "
-            f"{[o.role for o in occs]}"
-        )
+        assert len(imports) >= 1, f"Expected Import role occurrences, got roles: {[o.role for o in occs]}"
 
     def test_definition_role_detected(self) -> None:
         """Definition sites should get the Definition role."""
@@ -137,6 +131,4 @@ class TestFileOccurrences:
         assert graph.node_count > 0
         assert graph.edge_count >= 0
         # Should have at least some edges from the occurrence API
-        assert graph.edge_count > 0, (
-            "Expected at least some reference edges from file_occurrences"
-        )
+        assert graph.edge_count > 0, "Expected at least some reference edges from file_occurrences"

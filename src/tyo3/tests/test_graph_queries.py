@@ -68,19 +68,19 @@ class TestParallelEdges:
         graph = CodeGraph()
         a = SymbolNode(
             symbol_id="a.py::caller",
-            name="caller", qualified_name="caller",
-            kind=SymbolKind.FUNCTION, file="a.py",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 10, "column": 1}}
-            ),
+            name="caller",
+            qualified_name="caller",
+            kind=SymbolKind.FUNCTION,
+            file="a.py",
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 10, "column": 1}}),
         )
         b = SymbolNode(
             symbol_id="b.py::target",
-            name="target", qualified_name="target",
-            kind=SymbolKind.FUNCTION, file="b.py",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 5, "column": 1}}
-            ),
+            name="target",
+            qualified_name="target",
+            kind=SymbolKind.FUNCTION,
+            file="b.py",
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 5, "column": 1}}),
         )
         graph._add_node(a)
         graph._add_node(b)
@@ -89,10 +89,7 @@ class TestParallelEdges:
             edge = EdgeData(
                 kind=EdgeKind.REFERENCES,
                 file="a.py",
-                range=Range.model_validate(
-                    {"start": {"line": line, "column": 5},
-                     "end": {"line": line, "column": 11}}
-                ),
+                range=Range.model_validate({"start": {"line": line, "column": 5}, "end": {"line": line, "column": 11}}),
                 role=ReferenceRole.READ,
             )
             graph._add_edge("a.py::caller", "b.py::target", edge, "a.py")
@@ -107,19 +104,19 @@ class TestParallelEdges:
         graph = CodeGraph()
         mod = SymbolNode(
             symbol_id="m.py::<module>",
-            name="m", qualified_name="<module>",
-            kind=SymbolKind.MODULE, file="m.py",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-            ),
+            name="m",
+            qualified_name="<module>",
+            kind=SymbolKind.MODULE,
+            file="m.py",
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         func = SymbolNode(
             symbol_id="m.py::foo",
-            name="foo", qualified_name="foo",
-            kind=SymbolKind.FUNCTION, file="m.py",
-            range=Range.model_validate(
-                {"start": {"line": 2, "column": 1}, "end": {"line": 5, "column": 1}}
-            ),
+            name="foo",
+            qualified_name="foo",
+            kind=SymbolKind.FUNCTION,
+            file="m.py",
+            range=Range.model_validate({"start": {"line": 2, "column": 1}, "end": {"line": 5, "column": 1}}),
         )
         graph._add_node(mod)
         graph._add_node(func)

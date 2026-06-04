@@ -20,9 +20,7 @@ class TestDependencyGraph:
             qualified_name="json.loads",
             kind=SymbolKind.FUNCTION,
             file="<external>",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=True,
             package="stdlib",
         )
@@ -49,9 +47,7 @@ class TestDependencyGraph:
             qualified_name="A",
             kind=SymbolKind.CLASS,
             file="<external>",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=True,
             package="pkg",
         )
@@ -61,9 +57,7 @@ class TestDependencyGraph:
             qualified_name="B",
             kind=SymbolKind.CLASS,
             file="<external>",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=True,
             package="pkg",
         )
@@ -78,9 +72,7 @@ class TestDependencyGraph:
         assert names == {"A", "B"}
 
     def test_save_and_load_roundtrip(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps"
-        )
+        monkeypatch.setattr("tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps")
 
         g = rx.PyDiGraph()
         node = SymbolNode(
@@ -89,9 +81,7 @@ class TestDependencyGraph:
             qualified_name="Foo",
             kind=SymbolKind.CLASS,
             file="<external>",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=True,
             package="testpkg",
         )
@@ -115,9 +105,7 @@ class TestDependencyGraph:
 
     def test_dependency_graph_edge_role_roundtrips(self, tmp_path, monkeypatch) -> None:
         """Loaded dependency graph EdgeData.role is ReferenceRole, not raw string."""
-        monkeypatch.setattr(
-            "tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps"
-        )
+        monkeypatch.setattr("tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps")
 
         g = rx.PyDiGraph()
         n1 = SymbolNode(
@@ -126,10 +114,7 @@ class TestDependencyGraph:
             qualified_name="A",
             kind=SymbolKind.CLASS,
             file="<external>",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=True,
             package="testpkg",
         )
@@ -139,17 +124,15 @@ class TestDependencyGraph:
             qualified_name="B",
             kind=SymbolKind.FUNCTION,
             file="<external>",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=True,
             package="testpkg",
         )
         idx1 = g.add_node(n1)
         idx2 = g.add_node(n2)
         g.add_edge(
-            idx1, idx2,
+            idx1,
+            idx2,
             EdgeData(
                 kind=EdgeKind.REFERENCES,
                 role=ReferenceRole.READ,
@@ -182,9 +165,7 @@ class TestDependencyGraph:
         assert result is None
 
     def test_list_cached(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps"
-        )
+        monkeypatch.setattr("tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps")
 
         for pkg, ver in [("alpha", "1.0"), ("beta", "2.0")]:
             g = rx.PyDiGraph()
@@ -194,9 +175,7 @@ class TestDependencyGraph:
                 qualified_name="X",
                 kind=SymbolKind.CLASS,
                 file="<external>",
-                range=Range.model_validate(
-                    {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-                ),
+                range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
                 external=True,
                 package=pkg,
             )
@@ -212,9 +191,7 @@ class TestDependencyGraph:
         assert ("beta", "2.0") in cached_set
 
     def test_list_cached_empty_directory(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "tyo3.graph.dependency.CACHE_DIR", tmp_path / "nonexistent_dir"
-        )
+        monkeypatch.setattr("tyo3.graph.dependency.CACHE_DIR", tmp_path / "nonexistent_dir")
         result = DependencyGraph.list_cached()
         assert result == []
 
@@ -228,9 +205,7 @@ class TestResolveExternal:
             qualified_name="foo",
             kind=SymbolKind.FUNCTION,
             file="src/main.py",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=False,
         )
         graph._add_node(node)
@@ -253,9 +228,7 @@ class TestResolveExternal:
         assert result.package == "unknown"
 
     def test_resolves_from_cache(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr(
-            "tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps"
-        )
+        monkeypatch.setattr("tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps")
 
         g = rx.PyDiGraph()
         rich_node = SymbolNode(
@@ -264,9 +237,7 @@ class TestResolveExternal:
             qualified_name="pathlib.Path",
             kind=SymbolKind.CLASS,
             file="<external>",
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=True,
             package="stdlib",
             documentation="Represents a filesystem path.",
@@ -295,30 +266,22 @@ class TestResolveExternal:
 class TestInferPackage:
     def test_site_packages(self) -> None:
         graph = CodeGraph()
-        result = graph._infer_package(
-            "/home/user/.local/lib/python3.13/site-packages/pydantic/main.py"
-        )
+        result = graph._infer_package("/home/user/.local/lib/python3.13/site-packages/pydantic/main.py")
         assert result == "pydantic"
 
     def test_stdlib(self) -> None:
         graph = CodeGraph()
-        result = graph._infer_package(
-            "/usr/lib/python3.13/pathlib.py"
-        )
+        result = graph._infer_package("/usr/lib/python3.13/pathlib.py")
         assert result == "stdlib"
 
     def test_typeshed(self) -> None:
         graph = CodeGraph()
-        result = graph._infer_package(
-            "/usr/lib/python3.13/typeshed/stdlib/builtins.pyi"
-        )
+        result = graph._infer_package("/usr/lib/python3.13/typeshed/stdlib/builtins.pyi")
         assert result == "stdlib"
 
     def test_venv_site_packages(self) -> None:
         graph = CodeGraph()
-        result = graph._infer_package(
-            "/home/user/project/.venv/lib/python3.13/site-packages/requests/api.py"
-        )
+        result = graph._infer_package("/home/user/project/.venv/lib/python3.13/site-packages/requests/api.py")
         assert result == "requests"
 
     def test_unknown_returns_none(self) -> None:

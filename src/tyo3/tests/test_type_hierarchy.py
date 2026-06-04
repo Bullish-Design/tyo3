@@ -18,9 +18,7 @@ def fixture_path(name: str) -> str:
     return str((FIXTURES_DIR / name).resolve())
 
 
-needs_native = pytest.mark.skipif(
-    not _HAS_NATIVE, reason="Rust native extension not built"
-)
+needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
 # ── Shared cache (session-scoped, via conftest) ──────────────────────────
 
@@ -48,9 +46,9 @@ class TestTypeHierarchy:
         files = rp.files()
         symbols = rp.document_symbols(str(files[0]))
         # Find a class symbol that inherits from something
-        classes = [s for s in symbols if s.kind == SymbolKind.CLASS
-                   and s.selection_range is not None
-                   and s.name != "Animal"]
+        classes = [
+            s for s in symbols if s.kind == SymbolKind.CLASS and s.selection_range is not None and s.name != "Animal"
+        ]
         if classes:
             cls = classes[0]
             start = cls.selection_range.start

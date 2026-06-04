@@ -24,9 +24,7 @@ class Position(BaseModel):
     @model_validator(mode="after")
     def _positive(self) -> Position:
         if self.line < 1 or self.column < 1:
-            raise ValueError(
-                f"Position must be 1-based: got line={self.line}, column={self.column}"
-            )
+            raise ValueError(f"Position must be 1-based: got line={self.line}, column={self.column}")
         return self
 
 
@@ -42,10 +40,7 @@ class Range(BaseModel):
     def _start_before_end(self) -> Range:
         s, e = self.start, self.end
         if (s.line, s.column) > (e.line, e.column):
-            raise ValueError(
-                f"Range start ({s.line}:{s.column}) must not be "
-                f"after end ({e.line}:{e.column})"
-            )
+            raise ValueError(f"Range start ({s.line}:{s.column}) must not be after end ({e.line}:{e.column})")
         return self
 
 
@@ -95,6 +90,7 @@ class Diagnostic(BaseModel):
     code: str | None = None
     message: str
     details: list[str] = Field(default_factory=list)
+
 
 __all__ = [
     "Position",

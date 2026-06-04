@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "TyO3: Python semantic engine powered by ty/Ruff"
 readme = "README.md"
 requires-python = ">=3.13"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 
 authors = [
   { name = "Bullish Design", email = "BullishDesignEngineering@gmail.com" },

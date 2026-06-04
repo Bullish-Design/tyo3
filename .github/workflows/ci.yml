@@ -6,9 +6,12 @@
 # installs it into the venv in one step.
 #
 # Validation gates (must pass before merge):
-#   1. ruff check .        — lint and formatting
-#   2. build-release        — compile Rust extension
-#   3. tests                — full test suite with coverage
+#   1. ruff check .            — lint and formatting (Python)
+#   2. cargo fmt --check        — Rust formatting
+#   3. cargo clippy -- -D warnings — Rust lint with deny-warnings
+#   4. build-release            — compile Rust extension
+#   5. tests                    — full Python test suite with coverage
+#   6. test-rust                — Rust unit + snapshot tests
 
 name: CI
 
@@ -56,8 +59,17 @@ jobs:
       - name: Ruff
         run: devenv shell -- ruff check .
 
+      - name: Rust format
+        run: devenv shell -- cargo fmt --manifest-path rust/Cargo.toml --check
+
+      - name: Rust clippy
+        run: devenv shell -- cargo clippy --manifest-path rust/Cargo.toml -- -D warnings
+
       - name: Build native extension
         run: devenv shell -- build-release
 
-      - name: Run tests
+      - name: Run Python tests
         run: devenv shell -- tests
+
+      - name: Run Rust tests
+        run: devenv shell -- test-rust

@@ -8,7 +8,6 @@ use pyo3::create_exception;
 create_exception!(tyo3._native_impl, ProjectClosedError, pyo3::exceptions::PyRuntimeError);
 create_exception!(tyo3._native_impl, PathResolutionError, pyo3::exceptions::PyRuntimeError);
 create_exception!(tyo3._native_impl, PositionError, pyo3::exceptions::PyRuntimeError);
-create_exception!(tyo3._native_impl, AnalysisError, pyo3::exceptions::PyRuntimeError);
 
 mod convert;
 mod dto;
@@ -28,6 +27,6 @@ fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ProjectClosedError", m.py().get_type::<ProjectClosedError>())?;
     m.add("PathResolutionError", m.py().get_type::<PathResolutionError>())?;
     m.add("PositionError", m.py().get_type::<PositionError>())?;
-    m.add("AnalysisError", m.py().get_type::<AnalysisError>())?;
+
     Ok(())
 }

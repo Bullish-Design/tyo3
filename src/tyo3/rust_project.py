@@ -22,7 +22,6 @@ from pathlib import Path as StdPath
 from pathlib import PurePosixPath
 
 from tyo3.exceptions import (
-    AnalysisError,
     InternalTyError,
     PathResolutionError,
     PositionError,
@@ -51,9 +50,6 @@ except ImportError:
 # Import typed exception classes so we can catch Rust errors without string matching.
 try:
     from tyo3._native_impl import (
-        AnalysisError as _NativeAnalysisError,
-    )
-    from tyo3._native_impl import (
         PathResolutionError as _NativePathError,
     )
     from tyo3._native_impl import (
@@ -72,9 +68,6 @@ except ImportError:
         pass
 
     class _NativePositionError(Exception):  # type: ignore[no-redef]
-        pass
-
-    class _NativeAnalysisError(Exception):  # type: ignore[no-redef]
         pass
 
 
@@ -135,8 +128,6 @@ class RustProject:
             native_result = self._inner.check()
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
-        except _NativeAnalysisError as e:
-            raise AnalysisError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in check(): {e}") from e
 
@@ -151,8 +142,6 @@ class RustProject:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
             raise PathResolutionError(str(e)) from e
-        except _NativeAnalysisError as e:
-            raise AnalysisError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in check_file(): {e}") from e
 
@@ -322,9 +311,7 @@ class RustProject:
 
     # ── Type Hierarchy ───────────────────────────────────────────
 
-    def type_hierarchy(
-        self, path: str | StdPath, line: int, column: int
-    ) -> TypeHierarchy | None:
+    def type_hierarchy(self, path: str | StdPath, line: int, column: int) -> TypeHierarchy | None:
         """Query type hierarchy at a position."""
         self._check_open()
         try:
@@ -379,8 +366,7 @@ class RustProject:
             return
         if not getattr(self, "_closed", True):
             warnings.warn(
-                "RustProject was not closed explicitly. "
-                "Use 'with RustProject(...) as rp:' or call rp.close().",
+                "RustProject was not closed explicitly. Use 'with RustProject(...) as rp:' or call rp.close().",
                 ResourceWarning,
                 stacklevel=2,
             )

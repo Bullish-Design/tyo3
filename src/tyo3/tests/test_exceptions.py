@@ -163,6 +163,7 @@ class TestClosedOperations:
     def _make_closed_rp(self):
         """Create a mock RustProject that is already closed."""
         from tyo3.rust_project import RustProject
+
         rp = object.__new__(RustProject)
         rp._inner = MagicMock()
         rp._root = None

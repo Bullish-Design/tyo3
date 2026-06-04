@@ -3,18 +3,6 @@ use ruff_text_size::TextSize;
 
 use crate::dto::{PositionDto, RangeDto};
 
-/// Convert a 1-based Python Position to a ruff TextSize byte offset.
-///
-/// Convenience wrapper around [`position_to_offset_with_index`] that
-/// computes a `LineIndex` internally.
-pub fn position_to_offset(
-    source: &str,
-    pos: &PositionDto,
-) -> Result<TextSize, String> {
-    let line_index = LineIndex::from_source_text(source);
-    position_to_offset_with_index(source, &line_index, pos.line, pos.column)
-}
-
 /// Convert a 1-based Python Position to a ruff TextSize byte offset,
 /// using a pre-computed [`LineIndex`] (avoids recomputing for multiple
 /// positions in the same file).
@@ -118,17 +106,6 @@ pub fn range_to_dto_with_index(
             column: (end_loc.character_offset.to_zero_indexed() + 1) as u32,
         },
     }
-}
-
-/// Convenience wrapper that computes a `LineIndex` internally.
-/// Use `range_to_dto_with_index` when converting multiple ranges
-/// for the same source.
-pub fn range_to_dto(
-    source: &str,
-    range: ruff_text_size::TextRange,
-) -> RangeDto {
-    let line_index = LineIndex::from_source_text(source);
-    range_to_dto_with_index(source, &line_index, range)
 }
 
 #[cfg(test)]

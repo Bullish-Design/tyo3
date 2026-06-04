@@ -17,7 +17,7 @@ uv.lock
 secretspec.toml
 devenv.local.yaml
 .vscode
-
+_index.md
 
 
 # C extensions

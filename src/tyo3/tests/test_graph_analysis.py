@@ -9,9 +9,7 @@ from tyo3.tests.conftest import get_graph, needs_native
 
 
 class TestHubSymbols:
-    def _make_node(
-        self, graph: CodeGraph, name: str, file: str = "test.py"
-    ) -> str:
+    def _make_node(self, graph: CodeGraph, name: str, file: str = "test.py") -> str:
         sid = f"{file}::{name}"
         node = SymbolNode(
             symbol_id=sid,
@@ -19,17 +17,12 @@ class TestHubSymbols:
             qualified_name=name,
             kind=SymbolKind.FUNCTION,
             file=file,
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         graph._add_node(node)
         return sid
 
-    def _link(
-        self, graph: CodeGraph, a: str, b: str, file: str = "test.py"
-    ) -> None:
+    def _link(self, graph: CodeGraph, a: str, b: str, file: str = "test.py") -> None:
         edge = EdgeData(kind=EdgeKind.REFERENCES)
         graph._add_edge(a, b, edge, file)
 
@@ -63,16 +56,14 @@ class TestHubSymbols:
             self._make_node(graph, f"n{i}")
         for i in range(9):
             a = f"test.py::n{i}"
-            b = f"test.py::n{i+1}"
+            b = f"test.py::n{i + 1}"
             self._link(graph, a, b)
         hubs = graph.hub_symbols(top_n=3)
         assert len(hubs) <= 3
 
 
 class TestSubgraphForFile:
-    def _make_module_node(
-        self, graph: CodeGraph, file: str, name: str
-    ) -> str:
+    def _make_module_node(self, graph: CodeGraph, file: str, name: str) -> str:
         sid = f"{file}::<module>"
         node = SymbolNode(
             symbol_id=sid,
@@ -80,17 +71,12 @@ class TestSubgraphForFile:
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
             file=file,
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         graph._add_node(node)
         return sid
 
-    def _make_func_node(
-        self, graph: CodeGraph, name: str, file: str
-    ) -> str:
+    def _make_func_node(self, graph: CodeGraph, name: str, file: str) -> str:
         sid = f"{file}::{name}"
         node = SymbolNode(
             symbol_id=sid,
@@ -98,10 +84,7 @@ class TestSubgraphForFile:
             qualified_name=name,
             kind=SymbolKind.FUNCTION,
             file=file,
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         graph._add_node(node)
         return sid
@@ -146,7 +129,10 @@ class TestGraphProperties:
     """Tests for has_cycles, is_reachable, topological_order (Phase E2-E4)."""
 
     def _make_node(
-        self, graph: CodeGraph, name: str, file: str = "test.py",
+        self,
+        graph: CodeGraph,
+        name: str,
+        file: str = "test.py",
         kind: SymbolKind = SymbolKind.FUNCTION,
     ) -> str:
         sid = f"{file}::{name}"
@@ -156,17 +142,12 @@ class TestGraphProperties:
             qualified_name=name,
             kind=kind,
             file=file,
-            range=Range.model_validate(
-                {"start": {"line": 1, "column": 1},
-                 "end": {"line": 1, "column": 1}}
-            ),
+            range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         graph._add_node(node)
         return sid
 
-    def _link(
-        self, graph: CodeGraph, a: str, b: str, file: str = "test.py"
-    ) -> None:
+    def _link(self, graph: CodeGraph, a: str, b: str, file: str = "test.py") -> None:
         edge = EdgeData(kind=EdgeKind.REFERENCES)
         graph._add_edge(a, b, edge, file)
 
@@ -326,9 +307,7 @@ class TestHubSymbolsIntegration:
         hubs = graph.hub_symbols(top_n=10)
         if len(hubs) >= 2:
             for i in range(len(hubs) - 1):
-                assert hubs[i][1] >= hubs[i+1][1], (
-                    f"Hubs not sorted: {hubs[i][1]} < {hubs[i+1][1]}"
-                )
+                assert hubs[i][1] >= hubs[i + 1][1], f"Hubs not sorted: {hubs[i][1]} < {hubs[i + 1][1]}"
 
 
 @needs_native

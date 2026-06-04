@@ -29,30 +29,23 @@ def find_one(
         matches = [
             node
             for node in graph.symbols_of_kind(kind)
-            if node.file == file
-            and node.name == name
-            and not node.external
+            if node.file == file and node.name == name and not node.external
         ]
         tag = file
     else:
         matches = [
             node
             for node in graph.symbols_of_kind(kind)
-            if node.file.endswith(file_suffix)
-            and node.name == name
-            and not node.external
+            if node.file.endswith(file_suffix) and node.name == name and not node.external
         ]
         tag = f"*{file_suffix}"
     assert len(matches) == 1, (
-        f"Expected exactly one {kind} named {name!r} in {tag}, "
-        f"got {[m.symbol_id for m in matches]}"
+        f"Expected exactly one {kind} named {name!r} in {tag}, got {[m.symbol_id for m in matches]}"
     )
     return matches[0]
 
 
-def edges_of_kind(
-    graph: CodeGraph, kind: EdgeKind
-) -> list[tuple[str, str]]:
+def edges_of_kind(graph: CodeGraph, kind: EdgeKind) -> list[tuple[str, str]]:
     """Return all ``(source_symbol_id, target_symbol_id)`` pairs for edges of *kind*."""
     result: list[tuple[str, str]] = []
     for edge_idx in graph.graph.edge_indices():

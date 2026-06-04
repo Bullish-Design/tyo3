@@ -120,9 +120,7 @@ class TyO3Session:
 
     # ── Type Hierarchy ───────────────────────────────────────
 
-    def type_hierarchy(
-        self, path: str | StdPath, line: int, column: int
-    ) -> TypeHierarchy | None:
+    def type_hierarchy(self, path: str | StdPath, line: int, column: int) -> TypeHierarchy | None:
         """Query type hierarchy at a position."""
         return self._rp.type_hierarchy(path, line, column)
 
@@ -142,5 +140,3 @@ class TyO3Session:
         (read, write, import, definition, or other).
         """
         return self._rp.file_occurrences(path)
-
-

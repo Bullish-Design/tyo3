@@ -49,11 +49,7 @@ class DependencyGraph:
 
     def symbols_of_kind(self, kind: SymbolKind) -> list[SymbolNode]:
         """All symbols of a given kind in this dependency."""
-        return [
-            self.graph[idx]
-            for idx in self.graph.node_indices()
-            if self.graph[idx].kind == kind
-        ]
+        return [self.graph[idx] for idx in self.graph.node_indices() if self.graph[idx].kind == kind]
 
     def all_symbols(self) -> list[SymbolNode]:
         """All symbols in this dependency graph."""
@@ -98,8 +94,7 @@ class DependencyGraph:
             "edges": edges,
         }
         cache_path.write_text(json.dumps(data, indent=2))
-        logger.info("Cached dependency graph: %s (%d nodes, %d edges)",
-                      cache_path, len(nodes), len(edges))
+        logger.info("Cached dependency graph: %s (%d nodes, %d edges)", cache_path, len(nodes), len(edges))
         return cache_path
 
     @classmethod
@@ -149,7 +144,9 @@ class DependencyGraph:
         except Exception:
             logger.warning(
                 "Failed to load cached dependency graph for %s-%s",
-                package, version, exc_info=True,
+                package,
+                version,
+                exc_info=True,
             )
             return None
 

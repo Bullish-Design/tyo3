@@ -27,9 +27,7 @@ try:
 except ImportError:
     _HAS_NATIVE = False
 
-needs_native = pytest.mark.skipif(
-    not _HAS_NATIVE, reason="Rust native extension not built"
-)
+needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
 
 # ── Shared caches (session-scoped, shared across all test modules) ─────
@@ -261,5 +259,3 @@ def semantic_token() -> SemanticToken:
         token_type=SemanticTokenType.FUNCTION,
         modifiers={SemanticTokenModifier.DEFINITION},
     )
-
-

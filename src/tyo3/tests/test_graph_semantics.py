@@ -39,10 +39,7 @@ def test_reference_from_create_user_targets_user_class() -> None:
         if edge.kind == EdgeKind.REFERENCES
     }
 
-    assert user.symbol_id in targets, (
-        f"create_user should reference User, "
-        f"got references: {targets}"
-    )
+    assert user.symbol_id in targets, f"create_user should reference User, got references: {targets}"
 
 
 @needs_native
@@ -50,18 +47,12 @@ def test_reference_does_not_attach_to_app_module() -> None:
     """References from app.py should not land on ``app.py::<module>``."""
     graph = get_graph("graph_test")
 
-    app_modules = [
-        node
-        for node in graph.symbols_of_kind(SymbolKind.MODULE)
-        if node.file.endswith("app.py")
-    ]
+    app_modules = [node for node in graph.symbols_of_kind(SymbolKind.MODULE) if node.file.endswith("app.py")]
     assert len(app_modules) == 1
 
     app_module_refs = graph.references_from(app_modules[0].symbol_id)
     local_model_targets = [
-        target
-        for target, _edge in app_module_refs
-        if target.file.endswith("models.py") and not target.external
+        target for target, _edge in app_module_refs if target.file.endswith("models.py") and not target.external
     ]
     assert local_model_targets == [], (
         f"app.py::<module> should not have local references to models.py, "
@@ -85,9 +76,7 @@ def test_user_save_overrides_base_save() -> None:
     save_methods = [
         node
         for node in graph.symbols_of_kind(SymbolKind.METHOD)
-        if node.file.endswith("models.py")
-        and node.name == "save"
-        and not node.external
+        if node.file.endswith("models.py") and node.name == "save" and not node.external
     ]
     assert len(save_methods) >= 2, (
         f"Expected at least 2 save methods in models.py, got {[n.symbol_id for n in save_methods]}"
@@ -111,9 +100,7 @@ def test_user_save_overrides_base_save() -> None:
 
 
 def _range() -> Range:
-    return Range.model_validate(
-        {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-    )
+    return Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}})
 
 
 def test_dependencies_do_not_include_defined_children() -> None:
@@ -151,8 +138,7 @@ def test_dependencies_do_not_include_defined_children() -> None:
 
     assert graph.children(module.symbol_id) == [function]
     assert graph.dependencies(module.symbol_id) == set(), (
-        "dependencies() must exclude DEFINES edges; "
-        f"got {graph.dependencies(module.symbol_id)}"
+        f"dependencies() must exclude DEFINES edges; got {graph.dependencies(module.symbol_id)}"
     )
 
 
@@ -178,16 +164,15 @@ def test_dependencies_include_references() -> None:
     graph._add_node(f)
     graph._add_node(g)
     graph._add_edge(
-        f.symbol_id, g.symbol_id,
+        f.symbol_id,
+        g.symbol_id,
         EdgeData(kind=EdgeKind.REFERENCES),
         "a.py",
     )
 
     assert graph.dependencies(f.symbol_id) == {g.symbol_id}, (
-        f"dependencies(f) should include REFERENCES target g, "
-        f"got {graph.dependencies(f.symbol_id)}"
+        f"dependencies(f) should include REFERENCES target g, got {graph.dependencies(f.symbol_id)}"
     )
     assert graph.dependents(g.symbol_id) == {f.symbol_id}, (
-        f"dependents(g) should include REFERENCE source f, "
-        f"got {graph.dependents(g.symbol_id)}"
+        f"dependents(g) should include REFERENCE source f, got {graph.dependents(g.symbol_id)}"
     )

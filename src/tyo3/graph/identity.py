@@ -10,11 +10,6 @@ def make_symbol_id(file: str, qualified_name: str) -> str:
     return f"{file}::{qualified_name}"
 
 
-def make_external_id(package: str, qualified_name: str) -> str:
-    """Create a canonical symbol ID for an external (dependency) symbol."""
-    return f"{package}::{qualified_name}"
-
-
 def symbol_id_from_symbol(file: str, symbol: Symbol) -> str:
     """Derive a symbol_id from a TyO3 Symbol model.
 
@@ -29,8 +24,3 @@ def symbol_id_from_symbol(file: str, symbol: Symbol) -> str:
 def file_from_symbol_id(symbol_id: str) -> str:
     """Extract the file path (or package name) from a symbol_id."""
     return symbol_id.split("::", 1)[0]
-
-
-def qualified_name_from_symbol_id(symbol_id: str) -> str:
-    """Extract the qualified name from a symbol_id."""
-    return symbol_id.split("::", 1)[1]

@@ -18,9 +18,7 @@ def fixture_path(name: str) -> str:
     return str((FIXTURES_DIR / name).resolve())
 
 
-needs_native = pytest.mark.skipif(
-    not _HAS_NATIVE, reason="Rust native extension not built"
-)
+needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
 # ── Shared cache (session-scoped, via conftest) ──────────────────────────
 

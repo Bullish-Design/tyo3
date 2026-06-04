@@ -82,6 +82,7 @@ class ProjectFile(BaseModel):
     file_category: FileCategory
     last_checked_at: datetime | None = None
 
+
 __all__ = [
     "ProjectStatus",
     "FileCategory",

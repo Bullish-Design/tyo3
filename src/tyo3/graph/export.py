@@ -62,18 +62,18 @@ def _dot_label(node: SymbolNode) -> str:
 def _kind_color(kind: str) -> str:
     """Map SymbolKind value to a color for DOT rendering."""
     colors: dict[str, str] = {
-        "module": "#1f77b4",       # blue
-        "class_": "#d62728",       # red
-        "class": "#d62728",        # red
-        "function": "#2ca02c",     # green
-        "method": "#2ca02c",       # green
-        "variable": "#7f7f7f",     # gray
-        "constant": "#ff7f0e",     # orange
-        "parameter": "#bcbd22",    # olive
-        "property": "#9467bd",     # purple
+        "module": "#1f77b4",  # blue
+        "class_": "#d62728",  # red
+        "class": "#d62728",  # red
+        "function": "#2ca02c",  # green
+        "method": "#2ca02c",  # green
+        "variable": "#7f7f7f",  # gray
+        "constant": "#ff7f0e",  # orange
+        "parameter": "#bcbd22",  # olive
+        "property": "#9467bd",  # purple
         "constructor": "#d62728",  # red
         "enum_member": "#17becf",  # cyan
-        "interface": "#e377c2",    # pink
+        "interface": "#e377c2",  # pink
     }
     return colors.get(kind, "#333333")
 

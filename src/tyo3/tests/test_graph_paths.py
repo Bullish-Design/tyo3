@@ -63,8 +63,7 @@ def test_graph_ids_do_not_contain_absolute_paths(tmp_path: StdPath) -> None:
         if node.external:
             continue
         assert not node.symbol_id.startswith("/"), (
-            f"First-party symbol ID should be project-relative, "
-            f"got: {node.symbol_id}"
+            f"First-party symbol ID should be project-relative, got: {node.symbol_id}"
         )
 
 
@@ -80,11 +79,8 @@ def test_external_symbols_remain_explicitly_external(
     external_nodes = graph.external_symbols()
     for node in external_nodes:
         assert node.external is True
-        assert node.package is not None, (
-            f"External node {node.symbol_id} must have a package name"
-        )
+        assert node.package is not None, f"External node {node.symbol_id} must have a package name"
         # External nodes should not contain absolute paths
         assert "<external>" in node.file or not node.file.startswith("/"), (
-            f"External node {node.symbol_id} file should be '<external>' "
-            f"or a package name, got: {node.file}"
+            f"External node {node.symbol_id} file should be '<external>' or a package name, got: {node.file}"
         )

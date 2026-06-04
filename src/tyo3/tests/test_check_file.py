@@ -68,12 +68,7 @@ class TestCheckFileFiltering:
 
         # Simulate what check_file does: filter by path
         target = "src/main.py"
-        filtered = [
-            d
-            for d in result.diagnostics
-            if d.file is not None
-            and str(d.file) == target
-        ]
+        filtered = [d for d in result.diagnostics if d.file is not None and str(d.file) == target]
         assert len(filtered) == 1
         assert filtered[0].file == "src/main.py"
 
@@ -83,12 +78,7 @@ class TestCheckFileFiltering:
         result = CheckResult(diagnostics=[d1], files_checked=1)
 
         target = "src/main.py"
-        filtered = [
-            d
-            for d in result.diagnostics
-            if d.file is not None
-            and str(d.file) == target
-        ]
+        filtered = [d for d in result.diagnostics if d.file is not None and str(d.file) == target]
         assert len(filtered) == 0
 
     def test_filter_handles_no_file_diagnostics(self):
@@ -97,12 +87,7 @@ class TestCheckFileFiltering:
         result = CheckResult(diagnostics=[d])
 
         target = "src/main.py"
-        filtered = [
-            d
-            for d in result.diagnostics
-            if d.file is not None
-            and str(d.file) == target
-        ]
+        filtered = [d for d in result.diagnostics if d.file is not None and str(d.file) == target]
         assert len(filtered) == 0
 
 
@@ -129,9 +114,7 @@ class TestCheckFileIntegration:
         result = rp.check_file("errors.py")
         for d in result.diagnostics:
             assert d.file is not None, f"Diagnostic has no file: {d.message}"
-            assert "errors.py" in d.file, (
-                f"Diagnostic file '{d.file}' does not match 'errors.py'"
-            )
+            assert "errors.py" in d.file, f"Diagnostic file '{d.file}' does not match 'errors.py'"
 
     def test_check_file_on_multi_file_project(self) -> None:
         """check_file() on a multi-file project filters correctly."""
@@ -139,9 +122,7 @@ class TestCheckFileIntegration:
         # math_ops.py is a clean file — should have 0 diagnostics
         result = rp.check_file("math_ops.py")
         for d in result.diagnostics:
-            assert "math_ops.py" in d.file, (
-                f"Got diagnostic for wrong file: {d.file} -> {d.message}"
-            )
+            assert "math_ops.py" in d.file, f"Got diagnostic for wrong file: {d.file} -> {d.message}"
 
     def test_check_file_after_close_raises(self) -> None:
         """check_file() should raise ProjectClosedError after close()."""
@@ -168,6 +149,4 @@ class TestCheckFileIntegration:
         # Every diagnostic from check_file() should be present in check()
         full_messages = {d.message for d in full_result.diagnostics}
         for d in file_result.diagnostics:
-            assert d.message in full_messages, (
-                f"check_file diagnostic not found in check: {d.message}"
-            )
+            assert d.message in full_messages, f"check_file diagnostic not found in check: {d.message}"
