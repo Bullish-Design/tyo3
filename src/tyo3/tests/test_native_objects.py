@@ -52,9 +52,9 @@ class TestPythonizeDictStructures:
 
     def test_position_dict_structure(self) -> None:
         """Pythonize should produce dicts with line/column keys."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             symbols = rp.document_symbols("main.py")
             assert len(symbols) > 0
@@ -71,9 +71,9 @@ class TestPythonizeDictStructures:
 
     def test_check_result_roundtrip(self) -> None:
         """Check() returns a dict that validates as CheckResult."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             result = rp.check()
             assert isinstance(result, CheckResult)
@@ -83,9 +83,9 @@ class TestPythonizeDictStructures:
 
     def test_document_symbols_roundtrip(self) -> None:
         """document_symbols() returns a list of dicts that validate as Symbols."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             symbols = rp.document_symbols("main.py")
             assert len(symbols) > 0
@@ -97,9 +97,9 @@ class TestPythonizeDictStructures:
 
     def test_goto_definition_roundtrip(self) -> None:
         """goto_definition() returns a list of dicts for DefinitionTarget."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             targets = rp.goto_definition("main.py", 1, 1)
             assert isinstance(targets, list)
@@ -112,9 +112,9 @@ class TestPythonizeDictStructures:
 
     def test_find_references_roundtrip(self) -> None:
         """find_references() returns a list of dicts for Reference."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             refs = rp.find_references("main.py", 1, 1)
             assert isinstance(refs, list)
@@ -123,9 +123,9 @@ class TestPythonizeDictStructures:
 
     def test_workspace_symbols_roundtrip(self) -> None:
         """workspace_symbols() returns a list of dicts for Symbol."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             symbols = rp.workspace_symbols("greet")
             assert isinstance(symbols, list)
@@ -136,9 +136,9 @@ class TestPythonizeDictStructures:
 
     def test_hover_roundtrip(self) -> None:
         """hover() returns a dict or None for HoverResult."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             result = rp.hover("main.py", 1, 1)
             if result is not None:
@@ -158,9 +158,9 @@ class TestPythonizeEdgeCases:
 
     def test_check_file_diagnostics(self) -> None:
         """check_file() returns diagnostics for a specific file."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             result = rp.check_file("main.py")
             assert isinstance(result, CheckResult)
@@ -173,9 +173,9 @@ class TestPythonizeEdgeCases:
 
     def test_none_hover_handling(self) -> None:
         """hover() can return None for positions without hover info."""
-        from tyo3 import rust_project
+        from tyo3 import TyO3Session
 
-        rp = rust_project.RustProject("fixtures/simple_package")
+        rp = TyO3Session("fixtures/simple_package")
         try:
             # Position at a non-symbol (e.g., whitespace) may return None
             result = rp.hover("main.py", 1, 1)

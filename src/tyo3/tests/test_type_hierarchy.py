@@ -64,11 +64,11 @@ class TestTypeHierarchy:
             rp.type_hierarchy("nonexistent.py", 1, 1)
 
     def test_after_close_raises(self) -> None:
+        from tyo3 import TyO3Session
         from tyo3.exceptions import ProjectClosedError
-        from tyo3.rust_project import RustProject
 
         # Needs own instance since it closes the project
-        rp = RustProject(fixture_path("classes"))
+        rp = TyO3Session(fixture_path("classes"))
         rp.close()
         with pytest.raises(ProjectClosedError):
             rp.type_hierarchy("anything.py", 1, 1)

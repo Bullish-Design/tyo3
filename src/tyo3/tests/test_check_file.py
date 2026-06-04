@@ -16,7 +16,7 @@ from tyo3.models.analysis import (
 
 # Check if native extension is available
 try:
-    from tyo3.rust_project import RustProject
+    from tyo3 import TyO3Session
 
     _HAS_NATIVE = True
 except ImportError:
@@ -39,7 +39,7 @@ needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension
 # ── Shared cache (session-scoped, via conftest) ──────────────────────────
 
 
-def get_project(fixture_name: str) -> RustProject:
+def get_project(fixture_name: str) -> TyO3Session:
     from tyo3.tests.conftest import shared_project
 
     return shared_project(fixture_name)
@@ -127,7 +127,7 @@ class TestCheckFileIntegration:
     def test_check_file_after_close_raises(self) -> None:
         """check_file() should raise ProjectClosedError after close()."""
         # Needs own instance since it closes the project
-        rp = RustProject(fixture_path("simple_package"))
+        rp = TyO3Session(fixture_path("simple_package"))
         rp.close()
         with pytest.raises(ProjectClosedError):
             rp.check_file("main.py")

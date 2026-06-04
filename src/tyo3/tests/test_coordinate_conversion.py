@@ -23,7 +23,7 @@ import pytest
 
 # Check if native extension is available
 try:
-    from tyo3.rust_project import RustProject
+    from tyo3 import TyO3Session
 
     _HAS_NATIVE = True
 except ImportError:
@@ -102,7 +102,7 @@ class TestRustCoordinateConversion:
 
     @pytest.fixture(autouse=True, scope="class")
     def setup(self) -> Generator:
-        self.__class__.rp = RustProject(fixture_path("simple_package"))
+        self.__class__.rp = TyO3Session(fixture_path("simple_package"))
         yield
         self.__class__.rp.close()
 
@@ -202,7 +202,7 @@ class TestUnicodeCoordinateConversion:
 
     @pytest.fixture(autouse=True, scope="class")
     def setup(self) -> Generator:
-        self.__class__.rp = RustProject(fixture_path("unicode_positions"))
+        self.__class__.rp = TyO3Session(fixture_path("unicode_positions"))
         yield
         self.__class__.rp.close()
 
@@ -252,7 +252,7 @@ class TestEmptyFileEdgeCases:
 
     @pytest.fixture(autouse=True, scope="class")
     def setup(self) -> Generator:
-        self.__class__.rp = RustProject(fixture_path("empty"))
+        self.__class__.rp = TyO3Session(fixture_path("empty"))
         yield
         self.__class__.rp.close()
 
@@ -276,7 +276,7 @@ class TestEmptyFileEdgeCases:
 @needs_native
 def test_find_references_bad_path_raises_path_error() -> None:
     """A missing file path in find_references raises PathResolutionError."""
-    rp = RustProject(fixture_path("simple_package"))
+    rp = TyO3Session(fixture_path("simple_package"))
     try:
         with pytest.raises(PathResolutionError):
             rp.find_references("missing.py", 1, 1)
@@ -287,7 +287,7 @@ def test_find_references_bad_path_raises_path_error() -> None:
 @needs_native
 def test_hover_bad_path_raises_path_error() -> None:
     """A missing file path in hover raises PathResolutionError."""
-    rp = RustProject(fixture_path("simple_package"))
+    rp = TyO3Session(fixture_path("simple_package"))
     try:
         with pytest.raises(PathResolutionError):
             rp.hover("missing.py", 1, 1)
@@ -298,7 +298,7 @@ def test_hover_bad_path_raises_path_error() -> None:
 @needs_native
 def test_find_references_negative_position_raises_position_error() -> None:
     """A negative position in find_references raises PositionError."""
-    rp = RustProject(fixture_path("simple_package"))
+    rp = TyO3Session(fixture_path("simple_package"))
     try:
         with pytest.raises(PositionError):
             rp.find_references("main.py", -1, 1)

@@ -40,7 +40,6 @@ def _fixture_path(name: str) -> str:
 
 
 # Session-scoped caches for expensive objects
-_shared_project_cache: dict[str, object] = {}
 _shared_session_cache: dict[str, object] = {}
 _shared_graph_cache: dict[str, object] = {}
 
@@ -54,23 +53,16 @@ def _shared_cache_cleanup():
             session.close()  # type: ignore[union-attr]
         except Exception:
             pass
-    for rp in _shared_project_cache.values():
-        try:
-            rp.close()  # type: ignore[union-attr]
-        except Exception:
-            pass
-    _shared_project_cache.clear()
     _shared_session_cache.clear()
     _shared_graph_cache.clear()
 
 
 def shared_project(fixture_name: str):
-    """Get or create a cached RustProject (session-scoped, read-only use only)."""
-    if fixture_name not in _shared_project_cache:
-        from tyo3.rust_project import RustProject
+    """Get or create a cached TyO3Session (session-scoped, read-only use only).
 
-        _shared_project_cache[fixture_name] = RustProject(_fixture_path(fixture_name))
-    return _shared_project_cache[fixture_name]
+    Alias for shared_session — both return the same TyO3Session.
+    """
+    return shared_session(fixture_name)
 
 
 def shared_graph(fixture_name: str):

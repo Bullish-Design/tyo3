@@ -123,8 +123,8 @@
     if [ -n "$LS" ]; then
       echo "$LS"
       PYTHONPATH="$DEVENV_ROOT/src" python -c "
-from tyo3.rust_project import RustProject
-rp = RustProject('$DEVENV_ROOT/fixtures/simple_package')
+from tyo3 import TyO3Session
+rp = TyO3Session('$DEVENV_ROOT/fixtures/simple_package')
 files = rp.files()
 symbols = rp.document_symbols('main.py')
 rp.close()

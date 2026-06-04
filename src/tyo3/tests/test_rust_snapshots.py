@@ -19,7 +19,7 @@ import pytest
 
 # Check if native extension is available
 try:
-    from tyo3.rust_project import RustProject
+    from tyo3 import TyO3Session
 
     _HAS_NATIVE = True
 except ImportError:
@@ -75,7 +75,7 @@ class TestSnapshotSimplePackage:
 
     @pytest.fixture(autouse=True, scope="class")
     def setup(self) -> Generator:
-        self.__class__.rp = RustProject(fixture_path("simple_package"))
+        self.__class__.rp = TyO3Session(fixture_path("simple_package"))
         yield
         self.__class__.rp.close()
 
@@ -122,7 +122,7 @@ class TestSnapshotClasses:
 
     @pytest.fixture(autouse=True, scope="class")
     def setup(self) -> Generator:
-        self.__class__.rp = RustProject(fixture_path("classes"))
+        self.__class__.rp = TyO3Session(fixture_path("classes"))
         yield
         self.__class__.rp.close()
 
@@ -158,7 +158,7 @@ class TestSnapshotImports:
 
     @pytest.fixture(autouse=True, scope="class")
     def setup(self) -> Generator:
-        self.__class__.rp = RustProject(fixture_path("imports"))
+        self.__class__.rp = TyO3Session(fixture_path("imports"))
         yield
         self.__class__.rp.close()
 
@@ -182,7 +182,7 @@ class TestSnapshotUnicode:
 
     @pytest.fixture(autouse=True, scope="class")
     def setup(self) -> Generator:
-        self.__class__.rp = RustProject(fixture_path("unicode_positions"))
+        self.__class__.rp = TyO3Session(fixture_path("unicode_positions"))
         yield
         self.__class__.rp.close()
 
@@ -213,7 +213,7 @@ class TestSnapshotStandalone:
 
     @pytest.fixture(autouse=True, scope="class")
     def setup(self) -> Generator:
-        self.__class__.rp = RustProject(fixture_path("standalone"))
+        self.__class__.rp = TyO3Session(fixture_path("standalone"))
         yield
         self.__class__.rp.close()
 

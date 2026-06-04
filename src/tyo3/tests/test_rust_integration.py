@@ -23,7 +23,7 @@ import pytest
 
 # Check if native extension is available
 try:
-    from tyo3.rust_project import RustProject
+    from tyo3 import TyO3Session
 
     _HAS_NATIVE = True
 except ImportError:
@@ -53,7 +53,7 @@ needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension
 # ── Shared cache (session-scoped, via conftest) ──────────────────────────
 
 
-def get_project(fixture_name: str) -> RustProject:
+def get_project(fixture_name: str) -> TyO3Session:
     from tyo3.tests.conftest import shared_project
 
     return shared_project(fixture_name)
@@ -107,7 +107,7 @@ class TestProjectLifecycle:
 
     def test_reload_preserves_files(self) -> None:
         # Needs own instance since reload mutates state
-        rp = RustProject(fixture_path("simple_package"))
+        rp = TyO3Session(fixture_path("simple_package"))
         files_before = rp.files()
         rp.reload()
         files_after = rp.files()
@@ -116,7 +116,7 @@ class TestProjectLifecycle:
 
     def test_close_then_operation_raises(self) -> None:
         # Needs own instance since it closes the project
-        rp = RustProject(fixture_path("simple_package"))
+        rp = TyO3Session(fixture_path("simple_package"))
         rp.close()
         with pytest.raises(ProjectClosedError):
             rp.files()
@@ -127,7 +127,7 @@ class TestProjectLifecycle:
 
     def test_nonexistent_root_raises(self) -> None:
         with pytest.raises(ProjectOpenError):
-            RustProject("/nonexistent/path/that/does/not/exist")
+            TyO3Session("/nonexistent/path/that/does/not/exist")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -148,7 +148,7 @@ class TestFileDiscovery:
     def test_files_after_reload(self) -> None:
         """Files() after reload() returns the same set."""
         # Needs own instance since reload mutates state
-        rp = RustProject(fixture_path("imports"))
+        rp = TyO3Session(fixture_path("imports"))
         f1 = rp.files()
         rp.reload()
         f2 = rp.files()
@@ -338,7 +338,7 @@ class TestDiagnostics:
 
     def test_check_after_reload(self) -> None:
         # Needs own instance since reload mutates state
-        rp = RustProject(fixture_path("simple_package"))
+        rp = TyO3Session(fixture_path("simple_package"))
         rp.check()
         rp.reload()
         result2 = rp.check()

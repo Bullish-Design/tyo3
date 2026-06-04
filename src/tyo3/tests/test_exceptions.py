@@ -157,14 +157,14 @@ class TestExceptionChaining:
 
 
 class TestClosedOperations:
-    """Calling any public method on a closed RustProject raises ProjectClosedError
+    """Calling any public method on a closed TyO3Session raises ProjectClosedError
     immediately — without crossing the Rust boundary."""
 
     def _make_closed_rp(self):
-        """Create a mock RustProject that is already closed."""
-        from tyo3.rust_project import RustProject
+        """Create a mock TyO3Session that is already closed."""
+        from tyo3 import TyO3Session
 
-        rp = object.__new__(RustProject)
+        rp = object.__new__(TyO3Session)
         rp._inner = MagicMock()
         rp._root = None
         rp._closed = True
@@ -267,13 +267,13 @@ class TestClosedOperations:
 
 
 class TestCloseIdempotent:
-    """Verify that RustProject.close() is idempotent and __del__ warns."""
+    """Verify that TyO3Session.close() is idempotent and __del__ warns."""
 
     def test_double_close_no_error(self) -> None:
         """Calling close() twice should not raise — second call is a no-op."""
-        from tyo3.rust_project import RustProject
+        from tyo3 import TyO3Session
 
-        rp = object.__new__(RustProject)
+        rp = object.__new__(TyO3Session)
         rp._inner = MagicMock()
         rp._closed = False
         rp._root = None
@@ -288,9 +288,9 @@ class TestCloseIdempotent:
 
     def test_del_warns_when_not_closed(self) -> None:
         """__del__ should emit a ResourceWarning if close() was never called."""
-        from tyo3.rust_project import RustProject
+        from tyo3 import TyO3Session
 
-        rp = object.__new__(RustProject)
+        rp = object.__new__(TyO3Session)
         rp._inner = MagicMock()
         rp._closed = False
         rp._root = None
@@ -301,15 +301,15 @@ class TestCloseIdempotent:
 
         assert len(w) == 1
         assert issubclass(w[0].category, ResourceWarning)
-        assert "RustProject was not closed explicitly" in str(w[0].message)
+        assert "TyO3Session was not closed explicitly" in str(w[0].message)
         # After __del__, close() should have been called
         assert rp._closed is True
 
     def test_del_does_not_warn_when_closed(self) -> None:
         """__del__ should be silent if close() was already called."""
-        from tyo3.rust_project import RustProject
+        from tyo3 import TyO3Session
 
-        rp = object.__new__(RustProject)
+        rp = object.__new__(TyO3Session)
         rp._inner = MagicMock()
         rp._closed = True
         rp._root = None

@@ -25,7 +25,7 @@ import pytest
 
 # Check if native extension is available
 try:
-    from tyo3.rust_project import RustProject
+    from tyo3 import TyO3Session
 
     _HAS_NATIVE = True
 except ImportError:
@@ -95,7 +95,7 @@ class TestOpenTiming:
             timeout=OPEN_TIMEOUT,
         )
 
-        rp = RustProject(fixture_path(fixture_name))
+        rp = TyO3Session(fixture_path(fixture_name))
         try:
             files = rp.files()
             assert len(files) == expected_files, f"Expected {expected_files} files for {fixture_name}, got {len(files)}"
@@ -107,8 +107,8 @@ class TestOpenTiming:
 
     def test_open_same_fixture_twice(self) -> None:
         """Opening the same fixture twice (new instances) should both succeed."""
-        rp1 = RustProject(fixture_path("simple_package"))
-        rp2 = RustProject(fixture_path("simple_package"))
+        rp1 = TyO3Session(fixture_path("simple_package"))
+        rp2 = TyO3Session(fixture_path("simple_package"))
         f1 = rp1.files()
         f2 = rp2.files()
         assert set(f1) == set(f2)
@@ -129,7 +129,7 @@ class TestListFilesTiming:
         ],
     )
     def test_list_files(self, fixture_name: str) -> None:
-        rp = RustProject(fixture_path(fixture_name))
+        rp = TyO3Session(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
                 f"files({fixture_name})",
@@ -156,7 +156,7 @@ class TestSymbolsTiming:
         ],
     )
     def test_document_symbols(self, fixture_name: str, file_name: str) -> None:
-        rp = RustProject(fixture_path(fixture_name))
+        rp = TyO3Session(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
                 f"document_symbols({fixture_name}/{file_name})",
@@ -186,7 +186,7 @@ class TestCheckTiming:
         ],
     )
     def test_full_check(self, fixture_name: str) -> None:
-        rp = RustProject(fixture_path(fixture_name))
+        rp = TyO3Session(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
                 f"check({fixture_name})",
@@ -200,7 +200,7 @@ class TestCheckTiming:
 
     def test_check_twice_cached(self) -> None:
         """Second check() on the same project should be faster (Salsa cache)."""
-        rp = RustProject(fixture_path("classes"))
+        rp = TyO3Session(fixture_path("classes"))
         try:
             # First check (cold cache)
             t1 = _time_op(
@@ -249,7 +249,7 @@ class TestNavigationTiming:
         ],
     )
     def test_goto_definition(self, fixture_name: str, file_name: str, line: int, col: int) -> None:
-        rp = RustProject(fixture_path(fixture_name))
+        rp = TyO3Session(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
                 f"goto_definition({fixture_name}:{line},{col})",
@@ -269,7 +269,7 @@ class TestNavigationTiming:
         ],
     )
     def test_find_references(self, fixture_name: str, file_name: str, line: int, col: int) -> None:
-        rp = RustProject(fixture_path(fixture_name))
+        rp = TyO3Session(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
                 f"find_references({fixture_name}:{line},{col})",
@@ -290,7 +290,7 @@ class TestNavigationTiming:
         ],
     )
     def test_hover(self, fixture_name: str, file_name: str, line: int, col: int) -> None:
-        rp = RustProject(fixture_path(fixture_name))
+        rp = TyO3Session(fixture_path(fixture_name))
         try:
             elapsed = _time_op(
                 f"hover({fixture_name}:{line},{col})",
@@ -317,7 +317,7 @@ class TestReloadTiming:
         ],
     )
     def test_reload(self, fixture_name: str) -> None:
-        rp = RustProject(fixture_path(fixture_name))
+        rp = TyO3Session(fixture_path(fixture_name))
         try:
             # Warm up
             rp.files()
@@ -338,7 +338,7 @@ class TestReloadTiming:
 
     def test_reload_then_check(self) -> None:
         """Reload + check should complete within reasonable time."""
-        rp = RustProject(fixture_path("classes"))
+        rp = TyO3Session(fixture_path("classes"))
         try:
             t1_start = time.perf_counter()
             rp.reload()
@@ -355,7 +355,7 @@ class TestCloseTiming:
     """Time for close() operation."""
 
     def test_close(self) -> None:
-        rp = RustProject(fixture_path("classes"))
+        rp = TyO3Session(fixture_path("classes"))
         elapsed = _time_op(
             "close(classes)",
             lambda: rp.close(),

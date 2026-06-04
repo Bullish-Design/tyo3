@@ -67,11 +67,11 @@ class TestSemanticTokens:
             rp.semantic_tokens("nonexistent.py")
 
     def test_after_close_raises(self) -> None:
+        from tyo3 import TyO3Session
         from tyo3.exceptions import ProjectClosedError
-        from tyo3.rust_project import RustProject
 
         # Needs own instance since it closes the project
-        rp = RustProject(fixture_path("simple_package"))
+        rp = TyO3Session(fixture_path("simple_package"))
         rp.close()
         with pytest.raises(ProjectClosedError):
             rp.semantic_tokens("anything.py")

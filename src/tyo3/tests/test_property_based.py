@@ -24,7 +24,7 @@ from hypothesis import strategies as st
 
 # Check if native extension is available
 try:
-    from tyo3.rust_project import RustProject
+    from tyo3 import TyO3Session
 
     _HAS_NATIVE = True
 except ImportError:
@@ -57,7 +57,7 @@ def fixture_path(name: str) -> str:
 # ── Shared cache (session-scoped, via conftest) ──────────────────────────
 
 
-def get_project(fixture_name: str) -> RustProject:
+def get_project(fixture_name: str) -> TyO3Session:
     from tyo3.tests.conftest import shared_project
 
     return shared_project(fixture_name)
@@ -95,7 +95,7 @@ common_paths = st.sampled_from(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _path_in_fixture(rp: RustProject, filename: str) -> bool:
+def _path_in_fixture(rp: TyO3Session, filename: str) -> bool:
     """Check if *filename* (basename) exists in the project."""
     try:
         files = rp.files()
@@ -240,7 +240,7 @@ def test_symbols_are_deterministic(data: st.DataObject) -> None:
 @given(fixture_name=st.sampled_from(NON_EMPTY_FIXTURES))
 def test_all_operations_raise_after_close(fixture_name: str) -> None:
     """No operation should succeed after close()."""
-    rp = RustProject(fixture_path(fixture_name))
+    rp = TyO3Session(fixture_path(fixture_name))
     rp.close()
 
     ops = [
