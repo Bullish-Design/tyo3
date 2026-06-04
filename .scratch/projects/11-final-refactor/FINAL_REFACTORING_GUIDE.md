@@ -262,7 +262,7 @@ and adjust imports. No logic change.
   ```
   (use the real method names you find). Apply in both `convert_diagnostics` and
   `convert_diagnostic_refs`.
-- **Fallback (drop it):** if no clean API exists, remove `details` from
+- **Fallback (drop it - only if no clean API exists):** if no clean API exists, remove `details` from
   `DiagnosticDto` (`rust/src/dto/diagnostics.rs`) **and** from the Pydantic
   `Diagnostic` model (`src/tyo3/models/analysis.py`), and fix the doc comment.
 

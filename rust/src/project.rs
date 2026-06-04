@@ -24,6 +24,13 @@ use crate::files as file_resolver;
 // ── State ────────────────────────────────────────────────────────────────
 
 /// Internal mutable state of a TyO3 project session.
+///
+/// NOTE: `ProjectDatabase` (Salsa 0.26) is `!Send + !Sync` because it
+/// internally uses `RefCell<salsa::active_query::QueryStack>` and
+/// `UnsafeCell<HashMap<...>>`.  This means `&TyProjectState` is not `Send`,
+/// so we cannot wrap heavy analysis calls in `py.detach(|| ...)` to
+/// release the GIL.  All Rust analysis therefore runs with the GIL held.
+/// This is acceptable for v0.1; future Salsa versions may become `Sync`.
 struct TyProjectState {
     db: ProjectDatabase,
     root: SystemPathBuf,
