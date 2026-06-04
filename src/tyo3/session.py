@@ -153,9 +153,9 @@ class _ReadOps:
 
     def workspace_symbols(self, query: str) -> list[Symbol]:
         """Search for symbols matching *query* across the project."""
+        self._check_open()
         if not query:
             return []
-        self._check_open()
         try:
             native_symbols = self._inner.workspace_symbols(query)
         except _NativeClosedError as e:
@@ -344,9 +344,7 @@ class TyO3Session(_ReadOps):
 
     def __init__(self, root: str | StdPath) -> None:
         if _native is None:
-            raise ProjectOpenError(
-                "Rust native extension is not built. Run `maturin develop` inside the devenv shell first."
-            )
+            raise ProjectOpenError("Rust native extension is not built. Run `devenv shell -- build` first.")
         root_str = str(root)
         try:
             self._inner = _native.TyProject.open(root_str)

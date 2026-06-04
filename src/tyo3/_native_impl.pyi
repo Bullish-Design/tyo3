@@ -2,6 +2,7 @@
 
 The native module is compiled via PyO3/maturin and exports:
 - ``TyProject`` — the main project handle (a pyclass)
+- ``TySnapshot`` — an immutable read-only project snapshot (a pyclass)
 - Exception types — Python-visible subclasses of PyRuntimeError
 
 All return types are annotated as ``Any`` because the Rust layer returns
@@ -13,7 +14,6 @@ from typing import Any
 class ProjectClosedError(RuntimeError): ...
 class PathResolutionError(RuntimeError): ...
 class PositionError(RuntimeError): ...
-class AnalysisError(RuntimeError): ...
 
 class TyProject:
     """A live handle to an open ty project database."""

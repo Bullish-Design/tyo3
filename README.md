@@ -141,6 +141,7 @@ For convenience, these types are importable directly from `tyo3`:
 ```python
 from tyo3 import (
     TyO3Session,
+    Snapshot,
     CheckResult,
     Diagnostic,
     Symbol,

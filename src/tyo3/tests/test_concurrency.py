@@ -12,6 +12,10 @@ Validates that:
 from __future__ import annotations
 
 import concurrent.futures
+import ctypes
+import ctypes.util
+import shutil
+import threading
 import time
 import warnings
 from pathlib import Path as StdPath
@@ -22,7 +26,7 @@ import pytest
 
 try:
     from tyo3 import TyO3Session
-    from tyo3.exceptions import ProjectClosedError
+    from tyo3.exceptions import PositionError, ProjectClosedError
 
     _HAS_NATIVE = True
 except ImportError:
@@ -37,25 +41,55 @@ def _fixture_path(name: str) -> str:
     return str((FIXTURES_DIR / name).resolve())
 
 
-# ── Timing helpers ──────────────────────────────────────────────────────
+# ── GIL progress helpers ────────────────────────────────────────────────
 
 
-def _serial(make_call, n: int) -> float:
-    """Run *n* calls in series. *make_call* returns a zero-arg callable."""
-    calls = [make_call() for _ in range(n)]
+def _python_progress_while(call) -> tuple[int, float]:
+    """Count Python-thread progress while *call* runs on this thread."""
+    stop = threading.Event()
+    ready = threading.Event()
+    count = 0
+
+    def worker() -> None:
+        nonlocal count
+        ready.set()
+        while not stop.is_set():
+            count += 1
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    ready.wait(timeout=1)
+    start = count
     t0 = time.perf_counter()
-    for c in calls:
-        c()
-    return time.perf_counter() - t0
+    try:
+        call()
+    finally:
+        elapsed = time.perf_counter() - t0
+        advanced = count - start
+        stop.set()
+        thread.join(timeout=1)
+    return advanced, elapsed
 
 
-def _parallel(make_call, n: int) -> float:
-    """Run *n* calls concurrently on a thread pool."""
-    calls = [make_call() for _ in range(n)]
-    t0 = time.perf_counter()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
-        list(ex.map(lambda c: c(), calls))
-    return time.perf_counter() - t0
+def _gil_holding_sleep(seconds: float):
+    """Return a libc usleep call made through PyDLL, which keeps the GIL held."""
+    libc_path = ctypes.util.find_library("c")
+    if libc_path is None:
+        pytest.skip("Cannot locate libc for GIL-held control")
+
+    libc = ctypes.PyDLL(libc_path)
+    try:
+        usleep = libc.usleep
+    except AttributeError:
+        pytest.skip("libc has no usleep for GIL-held control")
+
+    usleep.argtypes = [ctypes.c_uint]
+    usleep.restype = ctypes.c_int
+
+    def run() -> None:
+        usleep(int(seconds * 1_000_000))
+
+    return run
 
 
 # ── Per-thread workloads ────────────────────────────────────────────────
@@ -89,6 +123,34 @@ def _do_workloads(root: str) -> tuple[int, int]:
         session.close()
 
 
+# ── Equivalence / error helpers ─────────────────────────────────────────
+
+
+def _dump(obj):
+    """Normalize a read result to a plain comparable value.
+
+    Pydantic models → dicts; lists recurse; None and scalars pass through.
+    Lets us assert session.<read>(...) == snapshot.<read>(...) for every method
+    without caring whether it returned a model, a list, or None.
+    """
+    if obj is None:
+        return None
+    if isinstance(obj, list):
+        return [_dump(x) for x in obj]
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    return obj
+
+
+def _capture_exc(fn):
+    """Run *fn* and return the type of any exception it raised, else None."""
+    try:
+        fn()
+    except Exception as e:  # noqa: BLE001 — we want the type of whatever it is
+        return type(e)
+    return None
+
+
 # ── GIL release proof ───────────────────────────────────────────────────
 
 
@@ -96,40 +158,35 @@ def _do_workloads(root: str) -> tuple[int, int]:
 class TestGilRelease:
     """Prove the GIL is genuinely released during analysis.
 
-    Uses a control-vs-treatment design: compare speedup of a pure-Python
-    CPU function (GIL held → speedup ≈ 1.0) against speedup of multiple
-    cold sessions running check() on separate threads. A real GIL release
-    produces a meaningfully higher speedup.
+    Uses a control-vs-treatment design: compare Python-thread progress while
+    a known GIL-held C call runs against progress while Rust analysis runs.
+    A real GIL release lets another Python thread make orders of magnitude
+    more progress during the Rust read.
     """
 
     ROOT = _fixture_path("demo_repos")
-    N = 4
+    WORKSPACE_SYMBOL_REPEATS = 50
 
-    def test_check_releases_the_gil(self) -> None:
-        """Rust check() speedup exceeds a Python-CPU control speedup."""
+    def test_session_reads_release_the_gil(self) -> None:
+        """Other Python threads make progress during Rust analysis."""
 
-        # Control: pure-Python CPU work — GIL serializes, no speedup expected.
-        def py_busy():
-            return lambda: sum(i * i for i in range(3_000_000))
-
-        py_busy()()  # warm
-        control_serial = _serial(py_busy, self.N)
-        control_parallel = _parallel(py_busy, self.N)
-        control_speedup = control_serial / control_parallel
-
-        # Treatment: each call is check() on its OWN cold session.
-        def make_check():
+        def rust_workspace_symbols() -> int:
             s = TyO3Session(self.ROOT)
-            return lambda: (s.check(), s.close())
+            try:
+                total = 0
+                for _ in range(self.WORKSPACE_SYMBOL_REPEATS):
+                    total += len(s.workspace_symbols("a"))
+                return total
+            finally:
+                s.close()
 
-        rust_serial = _serial(make_check, self.N)
-        rust_parallel = _parallel(make_check, self.N)
-        rust_speedup = rust_serial / rust_parallel
+        rust_progress, rust_elapsed = _python_progress_while(rust_workspace_symbols)
+        control_progress, _ = _python_progress_while(_gil_holding_sleep(rust_elapsed))
 
-        # If the GIL were still held, rust_speedup ≈ control_speedup (≈1.0).
-        # Released, it is meaningfully higher. Relative comparison is stable.
-        assert rust_speedup > control_speedup * 1.15, (
-            f"GIL not released? rust={rust_speedup:.2f} control={control_speedup:.2f}"
+        assert rust_progress > max(control_progress * 10, 100_000), (
+            "GIL not released? "
+            f"rust_progress={rust_progress} control_progress={control_progress} "
+            f"elapsed={rust_elapsed:.2f}s"
         )
 
 
@@ -261,26 +318,69 @@ class TestSnapshotLifecycle:
 class TestSnapshotIsolation:
     """Prove snapshot is revision-pinned and immune to reload."""
 
-    ROOT = _fixture_path("simple_package")
+    def test_snapshot_isolated_from_reload(self, tmp_path: StdPath) -> None:
+        """Old snapshot stays pinned while session/new snapshot see edits."""
+        project_root = tmp_path / "project"
+        shutil.copytree(FIXTURES_DIR / "simple_package", project_root)
 
-    def test_snapshot_isolated_from_reload(self) -> None:
-        """Snapshot retains pre-reload state after session reloads."""
-        session = TyO3Session(self.ROOT)
+        added_symbol = "added_symbol_for_snapshot_test"
+        main_py = project_root / "main.py"
+
+        session = TyO3Session(project_root)
+        snap = session.snapshot()
+        new_snap = None
         try:
-            snap = session.snapshot()
-            pre_reload_files = snap.files()
-            pre_reload_check = snap.check()
+            pre_names = {s.name for s in snap.document_symbols("main.py")}
+            assert added_symbol not in pre_names
 
-            # Reload the session — snapshot must not see this
-            session.reload()
-            post_reload_files = snap.files()
-            post_reload_check = snap.check()
-
-            # Same snapshot should return identical results
-            assert pre_reload_files == post_reload_files, "Snapshot files changed after reload"
-            assert len(pre_reload_check.diagnostics) == len(post_reload_check.diagnostics), (
-                "Snapshot diagnostics changed after reload"
+            main_py.write_text(
+                main_py.read_text() + f"\n\ndef {added_symbol}() -> int:\n    return 1\n",
             )
+
+            session.reload()
+
+            old_snapshot_names = {s.name for s in snap.document_symbols("main.py")}
+            session_names = {s.name for s in session.document_symbols("main.py")}
+            new_snap = session.snapshot()
+            new_snapshot_names = {s.name for s in new_snap.document_symbols("main.py")}
+
+            assert added_symbol not in old_snapshot_names
+            assert added_symbol in session_names
+            assert added_symbol in new_snapshot_names
+        finally:
+            if new_snap is not None:
+                new_snap.close()
+            session.close()
+            snap.close()
+
+    def test_snapshot_pinned_without_preread(self, tmp_path: StdPath) -> None:
+        """Snapshot stays pinned even when its first read happens AFTER a disk
+        edit + reload — the scenario-A shape that would fail without eager
+        materialization at snapshot() time (Option 1)."""
+        project_root = tmp_path / "project"
+        shutil.copytree(FIXTURES_DIR / "simple_package", project_root)
+
+        added_symbol = "pinned_symbol_no_preread"
+        main_py = project_root / "main.py"
+
+        session = TyO3Session(project_root)
+        snap = session.snapshot()
+        try:
+            # NO pre-read of the snapshot — this is the key difference from
+            # test_snapshot_isolated_from_reload.  We edit+reload first.
+            main_py.write_text(
+                main_py.read_text() + f"\n\ndef {added_symbol}() -> int:\n    return 1\n",
+            )
+            session.reload()
+
+            # First read on the old snapshot happens now — after the edit.
+            snapshot_names = {s.name for s in snap.document_symbols("main.py")}
+            session_names = {s.name for s in session.document_symbols("main.py")}
+
+            assert added_symbol not in snapshot_names, (
+                f"snapshot leaked a later edit: {added_symbol} in {snapshot_names}"
+            )
+            assert added_symbol in session_names
         finally:
             session.close()
             snap.close()
@@ -325,6 +425,75 @@ class TestSnapshotEquivalence:
         finally:
             session.close()
             snap.close()
+
+
+# ── Snapshot error parity ───────────────────────────────────────────────
+
+
+@needs_native
+class TestSnapshotErrorParity:
+    """A snapshot raises the SAME typed exception the session does for bad input."""
+
+    ROOT = _fixture_path("simple_package")
+
+    # Each case is a callable taking a handle (session or snapshot). The inputs are
+    # chosen to trip a specific error path:
+    #   - missing file        → PathResolutionError (resolved before any position work)
+    #   - overflowing column  → OverflowError → PositionError (session.py maps it)
+    ERROR_CASES = [
+        ("check_file_missing", lambda h: h.check_file("definitely_missing_file.py")),
+        ("document_symbols_missing", lambda h: h.document_symbols("definitely_missing_file.py")),
+        ("semantic_tokens_missing", lambda h: h.semantic_tokens("definitely_missing_file.py")),
+        ("file_occurrences_missing", lambda h: h.file_occurrences("definitely_missing_file.py")),
+        ("goto_definition_missing", lambda h: h.goto_definition("definitely_missing_file.py", 1, 1)),
+        ("goto_definition_overflow", lambda h: h.goto_definition("main.py", 1, 2**63)),
+        ("find_references_overflow", lambda h: h.find_references("main.py", 1, 2**63)),
+        ("hover_overflow", lambda h: h.hover("main.py", 1, 2**63)),
+        ("type_hierarchy_overflow", lambda h: h.type_hierarchy("main.py", 1, 2**63)),
+    ]
+
+    @pytest.mark.parametrize("name,call", ERROR_CASES, ids=[c[0] for c in ERROR_CASES])
+    def test_error_parity(self, name, call) -> None:
+        session = TyO3Session(self.ROOT)
+        try:
+            snap = session.snapshot()
+            try:
+                session_exc = _capture_exc(lambda: call(session))
+                snapshot_exc = _capture_exc(lambda: call(snap))
+                assert session_exc is not None, f"{name}: session did not raise — fix the test input"
+                assert snapshot_exc == session_exc, (
+                    f"{name}: snapshot raised {snapshot_exc}, session raised {session_exc}"
+                )
+            finally:
+                snap.close()
+        finally:
+            session.close()
+
+    def test_read_on_closed_snapshot_parity(self) -> None:
+        """Every read method on a closed snapshot raises ProjectClosedError."""
+        session = TyO3Session(self.ROOT)
+        try:
+            snap = session.snapshot()
+        finally:
+            session.close()
+        snap.close()
+        for call in (
+            lambda: snap.files(),
+            lambda: snap.check(),
+            lambda: snap.check_file("main.py"),
+            lambda: snap.document_symbols("main.py"),
+            lambda: snap.workspace_symbols("a"),
+            lambda: snap.goto_definition("main.py", 1, 1),
+            lambda: snap.goto_declaration("main.py", 1, 1),
+            lambda: snap.goto_type_definition("main.py", 1, 1),
+            lambda: snap.find_references("main.py", 1, 1),
+            lambda: snap.semantic_tokens("main.py"),
+            lambda: snap.file_occurrences("main.py"),
+            lambda: snap.hover("main.py", 1, 1),
+            lambda: snap.type_hierarchy("main.py", 1, 1),
+        ):
+            with pytest.raises(ProjectClosedError):
+                call()
 
 
 # ── Full Snapshot read surface ───────────────────────────────────────────
@@ -404,7 +573,171 @@ class TestSnapshotFullSurface:
         assert result is None or hasattr(result, "contents")
 
 
+# ── Full session↔snapshot equivalence ──────────────────────────────────
+
+
+@needs_native
+class TestSnapshotEquivalenceFull:
+    """snapshot.<read>(...) == session.<read>(...) at the same revision, all methods."""
+
+    ROOT = _fixture_path("simple_package")
+
+    # (id, callable(handle)). Positions are safe defaults; (1,1) returns a (possibly
+    # empty) list for navigation and None for hover/hierarchy — _dump compares either.
+    READ_CALLS = [
+        ("files", lambda h: h.files()),
+        ("check", lambda h: h.check()),
+        ("check_file", lambda h: h.check_file("main.py")),
+        ("document_symbols", lambda h: h.document_symbols("main.py")),
+        ("workspace_symbols", lambda h: h.workspace_symbols("a")),
+        ("goto_definition", lambda h: h.goto_definition("main.py", 1, 1)),
+        ("goto_declaration", lambda h: h.goto_declaration("main.py", 1, 1)),
+        ("goto_type_definition", lambda h: h.goto_type_definition("main.py", 1, 1)),
+        ("find_references", lambda h: h.find_references("main.py", 1, 1)),
+        ("semantic_tokens", lambda h: h.semantic_tokens("main.py")),
+        ("file_occurrences", lambda h: h.file_occurrences("main.py")),
+        ("type_hierarchy", lambda h: h.type_hierarchy("main.py", 9, 7)),
+        ("hover", lambda h: h.hover("main.py", 3, 10)),
+    ]
+
+    @pytest.mark.parametrize("name,call", READ_CALLS, ids=[c[0] for c in READ_CALLS])
+    def test_read_parity(self, name, call) -> None:
+        session = TyO3Session(self.ROOT)
+        try:
+            snap = session.snapshot()
+            try:
+                # No reload between the two calls → identical revision → identical result.
+                assert _dump(call(session)) == _dump(call(snap)), f"{name}: session/snapshot mismatch"
+            finally:
+                snap.close()
+        finally:
+            session.close()
+
+    def test_hover_some_branch_parity(self) -> None:
+        """At a position with real hover info, snapshot matches session and is non-None."""
+        session = TyO3Session(self.ROOT)
+        try:
+            snap = session.snapshot()
+            try:
+                hit = None
+                # Probe a small grid; main.py is tiny. Stop at the first real hover.
+                for line in range(1, 30):
+                    for col in range(1, 40):
+                        try:
+                            if session.hover("main.py", line, col) is not None:
+                                hit = (line, col)
+                                break
+                        except PositionError:
+                            pass  # column past end-of-line — skip
+                    if hit:
+                        break
+                if hit is None:
+                    pytest.skip("fixture yielded no hover anywhere in the probed grid")
+                line, col = hit
+                s = session.hover("main.py", line, col)
+                p = snap.hover("main.py", line, col)
+                assert p is not None
+                assert _dump(s) == _dump(p)
+            finally:
+                snap.close()
+        finally:
+            session.close()
+
+
 # ── Original concurrency tests (kept) ────────────────────────────────────
+
+
+# ── Reload / read concurrency ────────────────────────────────────────────
+
+
+@needs_native
+class TestReloadConcurrency:
+    """The load-bearing invariant: reload() swaps the db; in-flight reads on a
+    cloned db are never invalidated (no salsa::Cancelled, no panic, no error)."""
+
+    def test_reload_during_concurrent_reads(self, tmp_path: StdPath) -> None:
+        """Hammer reload() on one thread while N threads read — zero errors."""
+        project_root = tmp_path / "project"
+        shutil.copytree(FIXTURES_DIR / "simple_package", project_root)
+
+        session = TyO3Session(project_root)
+        errors: list[tuple[str, BaseException]] = []
+        stop = threading.Event()
+
+        def reader() -> None:
+            try:
+                while not stop.is_set():
+                    # Mix of full-project (rayon) and cursor reads to maximize
+                    # the chance a read is mid-flight when the swap lands.
+                    session.check()
+                    session.document_symbols("main.py")
+                    session.files()
+            except Exception as e:  # noqa: BLE001
+                errors.append(("reader", e))
+
+        def reloader() -> None:
+            try:
+                for _ in range(25):
+                    session.reload()
+            except Exception as e:  # noqa: BLE001
+                errors.append(("reloader", e))
+            finally:
+                stop.set()
+
+        threads = [threading.Thread(target=reader) for _ in range(4)]
+        threads.append(threading.Thread(target=reloader))
+        try:
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=60)
+            assert not any(t.is_alive() for t in threads), "deadlock: a thread did not finish"
+            # A read must NEVER raise here — close() is never called, so there is no
+            # closed window, and the swap-don't-mutate invariant means no Cancelled.
+            assert not errors, f"Concurrent reload/read raised: {errors}"
+        finally:
+            stop.set()
+            session.close()
+
+
+# ── Session thread-safety ───────────────────────────────────────────────
+
+
+@needs_native
+class TestSessionThreadSafety:
+    """One TyO3Session, shared across threads — same clone+detach path as Snapshot."""
+
+    ROOT = _fixture_path("simple_package")
+
+    def test_session_shared_across_threads(self) -> None:
+        session = TyO3Session(self.ROOT)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+                futures = [ex.submit(session.check) for _ in range(4)]
+                results = [f.result(timeout=30) for f in futures]
+            counts = [len(r.diagnostics) for r in results]
+            assert all(isinstance(c, int) and c >= 0 for c in counts)
+            assert len(set(counts)) == 1, f"Shared session returned differing counts: {counts}"
+        finally:
+            session.close()
+
+    def test_session_mixed_reads_no_deadlock(self) -> None:
+        session = TyO3Session(self.ROOT)
+        try:
+
+            def _mixed() -> bool:
+                session.check()
+                session.document_symbols("main.py")
+                session.files()
+                session.workspace_symbols("a")
+                return True
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                futures = [ex.submit(_mixed) for _ in range(8)]
+                for f in futures:
+                    assert f.result(timeout=30) is True
+        finally:
+            session.close()
 
 
 @needs_native
@@ -455,3 +788,100 @@ class TestConcurrency:
             futures = [executor.submit(_open_and_close, self.ROOT) for _ in range(8)]
             for f in futures:
                 f.result(timeout=30)
+
+
+# ── Close race ──────────────────────────────────────────────────────────
+
+
+@needs_native
+class TestCloseRace:
+    """close() during concurrent reads: benign — ProjectClosedError only, no crash."""
+
+    ROOT = _fixture_path("simple_package")
+
+    def _race(self, make_handle_and_close):
+        """make_handle_and_close() -> (handle, close_fn). Reads on `handle` run on
+        threads while close_fn() is called from the main thread."""
+        handle, close_fn = make_handle_and_close()
+        errors: list[BaseException] = []
+
+        def worker() -> None:
+            try:
+                for _ in range(100):
+                    handle.check()
+            except ProjectClosedError:
+                pass  # expected once close() lands
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        # Let a few reads start, then close out from under them.
+        close_fn()
+        for t in threads:
+            t.join(timeout=30)
+        assert not any(t.is_alive() for t in threads), "deadlock after close()"
+        assert not errors, f"close() race produced non-benign errors: {errors}"
+
+    def test_close_session_during_reads(self) -> None:
+        def make():
+            s = TyO3Session(self.ROOT)
+            return s, s.close
+
+        self._race(make)
+
+    def test_close_snapshot_during_reads(self) -> None:
+        def make():
+            s = TyO3Session(self.ROOT)
+            try:
+                snap = s.snapshot()
+            finally:
+                s.close()
+            return snap, snap.close
+
+        self._race(make)
+
+
+# ── Multi-snapshot isolation ────────────────────────────────────────────
+
+
+@needs_native
+class TestMultiSnapshotIsolation:
+    """Independent snapshots stay pinned to their own revision across multiple reloads."""
+
+    def test_snapshots_pinned_across_reloads(self, tmp_path: StdPath) -> None:
+        project_root = tmp_path / "project"
+        shutil.copytree(FIXTURES_DIR / "simple_package", project_root)
+        main_py = project_root / "main.py"
+
+        sym1 = "added_symbol_one"
+        sym2 = "added_symbol_two"
+
+        session = TyO3Session(project_root)
+        snaps = []
+        try:
+            snap_a = session.snapshot()  # revision 0: neither symbol
+            snaps.append(snap_a)
+
+            main_py.write_text(main_py.read_text() + f"\n\ndef {sym1}() -> int:\n    return 1\n")
+            session.reload()
+            snap_b = session.snapshot()  # revision 1: sym1 only
+            snaps.append(snap_b)
+
+            main_py.write_text(main_py.read_text() + f"\n\ndef {sym2}() -> int:\n    return 2\n")
+            session.reload()
+            snap_c = session.snapshot()  # revision 2: sym1 + sym2
+            snaps.append(snap_c)
+
+            names_a = {s.name for s in snap_a.document_symbols("main.py")}
+            names_b = {s.name for s in snap_b.document_symbols("main.py")}
+            names_c = {s.name for s in snap_c.document_symbols("main.py")}
+
+            assert sym1 not in names_a and sym2 not in names_a, "snap_a leaked a later edit"
+            assert sym1 in names_b and sym2 not in names_b, "snap_b not pinned to revision 1"
+            assert sym1 in names_c and sym2 in names_c, "snap_c missing a current symbol"
+        finally:
+            for s in snaps:
+                s.close()
+            session.close()

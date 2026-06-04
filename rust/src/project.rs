@@ -51,7 +51,7 @@ impl AnalysisError {
 /// You cannot share `&db` across threads, but you CAN move an owned clone, which is
 /// how ty itself parallelizes (`ty_project::Project::check` clones the db per rayon
 /// worker). Read methods take a `db.clone()` snapshot via `clone_locked_state` and
-/// run inside `py.detach(move || …)` to release the GIL. Because `#[pyclass]` only
+/// run inside `py.detach(...)` to release the GIL. Because `#[pyclass]` only
 /// requires `Send` (not `Sync`), the `Mutex` below is what makes concurrent `&self`
 /// access sound once the GIL is released. The canonical db is only ever swapped
 /// (never mutated in place) — see `reload` — so outstanding clones stay isolated.
@@ -513,6 +513,19 @@ impl PyTyProject {
     /// isolated from later `reload()` calls (which swap in a fresh database).
     fn snapshot(&self) -> PyResult<PySnapshot> {
         let state = clone_locked_state(&self.inner, "snapshot")?;
+        // Eagerly materialize every project file's source_text into the
+        // shared salsa memo so the snapshot is pinned against future disk
+        // edits. Without this, salsa's lazy-read model means the first
+        // read on the snapshot touches live disk and can "see" later
+        // edits — violating the snapshot contract (§8.4).
+        //
+        // When the session is warm (already check()ed), all memos hit in
+        // O(1).  Cold sessions pay O(files) one-time parse cost — still
+        // far cheaper than check().
+        let project = state.db.project();
+        for f in project.files(&state.db).iter() {
+            let _ = source_text(&state.db, *f);
+        }
         Ok(PySnapshot {
             inner: Mutex::new(Some(state)),
         })
