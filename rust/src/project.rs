@@ -390,6 +390,29 @@ fn compute_type_hierarchy(
     }))
 }
 
+/// Find document highlights for the symbol at the given position.
+///
+/// Highlights are identical to references but scoped to the current file.
+fn compute_document_highlights(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+) -> Result<Vec<dto::ReferenceDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    let refs = match ty_ide::document_highlights(&state.db, file, offset) {
+        Some(targets) => convert::navigation::convert_references(&state.db, &targets),
+        None => Vec::new(),
+    };
+    Ok(refs)
+}
+
 /// Get hover information for the symbol at the given position.
 ///
 /// NOTE: ty_ide does not publicly re-export Hover/HoverContent, so the entire
@@ -719,6 +742,24 @@ impl PyTyProject {
         }
     }
 
+    // ── Document Highlights ──────────────────────────────────────────
+
+    /// Highlight all in-file occurrences of the symbol at the given position.
+    fn document_highlights<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "document_highlights")?;
+        let path = path.to_owned();
+        let refs = py.detach(move || compute_document_highlights(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &refs)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     // ── Hover ────────────────────────────────────────────────────────
 
     /// Get hover information for the symbol at the given position.
@@ -932,6 +973,24 @@ impl PySnapshot {
             Some(dto) => pythonize(py, &dto)
                 .map_err(|e| PyRuntimeError::new_err(e.to_string())),
         }
+    }
+
+    // ── Document Highlights ─────────────────────────────────
+
+    /// Highlight all in-file occurrences of the symbol at the given position.
+    fn document_highlights<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "document_highlights")?;
+        let path = path.to_owned();
+        let refs = py.detach(move || compute_document_highlights(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &refs)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     // ── Hover ────────────────────────────────────────────────

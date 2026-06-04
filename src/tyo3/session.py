@@ -227,6 +227,32 @@ class _ReadOps:
 
         return [Reference.model_validate(r) for r in native_refs]
 
+    # ── Document Highlights ───────────────────────────────────────
+
+    def document_highlights(
+        self, path: str | StdPath, line: int, column: int
+    ) -> list[Reference]:
+        """Highlight all in-file occurrences of the symbol at *(line, column)*.
+
+        Like ``find_references`` but scoped to the current file. Returns an
+        empty list when no symbol is highlightable at the position.
+        """
+        self._check_open()
+        try:
+            native_refs = self._inner.document_highlights(str(path), line, column)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in document_highlights(): {e}") from e
+
+        return [Reference.model_validate(r) for r in native_refs]
+
     # ── Semantic Tokens ──────────────────────────────────────────
 
     def semantic_tokens(self, path: str | StdPath) -> list[SemanticToken]:
