@@ -390,6 +390,48 @@ fn compute_type_hierarchy(
     }))
 }
 
+/// Get signature help at a position.
+fn compute_signature_help(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+) -> Result<Option<dto::SignatureHelpDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    match ty_ide::signature_help(&state.db, file, offset) {
+        Some(info) => {
+            Ok(Some(convert::signature::convert_signature_help(&info)))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Get completion suggestions at a position.
+fn compute_completions(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+    auto_import: bool,
+) -> Result<Vec<dto::CompletionDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    let settings = ty_ide::CompletionSettings { auto_import };
+    let completions = ty_ide::completion(&state.db, &settings, file, offset);
+    Ok(convert::completion::convert_completions(&state.db, &completions))
+}
+
 /// Compute selection ranges at a position.
 fn compute_selection_ranges(
     state: &TyProjectState,
@@ -853,6 +895,47 @@ impl PyTyProject {
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
+    // ── Signature Help ───────────────────────────────────────────────
+
+    /// Get signature help at the given position.
+    fn signature_help<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "signature_help")?;
+        let path = path.to_owned();
+        match py.detach(move || compute_signature_help(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(dto) => pythonize(py, &dto)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    // ── Completion ───────────────────────────────────────────────────
+
+    /// Get completion suggestions at the given position.
+    #[pyo3(signature = (path, line, column, *, auto_import = true))]
+    fn completions<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+        auto_import: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "completions")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_completions(&state, &path, line, column, auto_import))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     // ── Document Highlights ──────────────────────────────────────────
 
     /// Highlight all in-file occurrences of the symbol at the given position.
@@ -1120,6 +1203,47 @@ impl PySnapshot {
         let state = clone_locked_state(&self.inner, "folding_ranges")?;
         let path = path.to_owned();
         let dtos = py.detach(move || compute_folding_ranges(&state, &path))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Signature Help ───────────────────────────────────────
+
+    /// Get signature help at the given position.
+    fn signature_help<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "signature_help")?;
+        let path = path.to_owned();
+        match py.detach(move || compute_signature_help(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?
+        {
+            None => Ok(py.None().bind(py).clone()),
+            Some(dto) => pythonize(py, &dto)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
+        }
+    }
+
+    // ── Completion ───────────────────────────────────────────
+
+    /// Get completion suggestions at the given position.
+    #[pyo3(signature = (path, line, column, *, auto_import = true))]
+    fn completions<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+        auto_import: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "completions")?;
+        let path = path.to_owned();
+        let dtos = py.detach(move || compute_completions(&state, &path, line, column, auto_import))
             .map_err(AnalysisError::into_pyerr)?;
         pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))

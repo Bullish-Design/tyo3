@@ -7,4 +7,6 @@ pub mod hover;
 pub mod tokens;
 pub mod rename;
 pub mod folding;
+pub mod signature;
+pub mod completion;
 

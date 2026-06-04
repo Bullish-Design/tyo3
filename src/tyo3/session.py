@@ -39,7 +39,7 @@ from tyo3.models.navigation import (
     TypeHierarchy,
     WorkspaceEdit,
 )
-from tyo3.models.editor import FoldingRange
+from tyo3.models.lsp import Completion, SignatureHelp
 from tyo3.models.symbols import Symbol
 
 # ── Native extension import ──────────────────────────────────────────────
@@ -336,6 +336,52 @@ class _ReadOps:
             raise InternalTyError(f"Unexpected error in folding_ranges(): {e}") from e
 
         return [FoldingRange.model_validate(r) for r in native_ranges]
+
+    # ── Signature Help ──────────────────────────────────────────────
+
+    def signature_help(
+        self, path: str | StdPath, line: int, column: int
+    ) -> SignatureHelp | None:
+        """Get signature help at *(line, column)*."""
+        self._check_open()
+        try:
+            result = self._inner.signature_help(str(path), line, column)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in signature_help(): {e}") from e
+
+        if result is None:
+            return None
+        return SignatureHelp.model_validate(result)
+
+    # ── Completion ─────────────────────────────────────────────────
+
+    def completions(
+        self, path: str | StdPath, line: int, column: int, *, auto_import: bool = True
+    ) -> list[Completion]:
+        """Get completion suggestions at *(line, column)*."""
+        self._check_open()
+        try:
+            result = self._inner.completions(str(path), line, column, auto_import=auto_import)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in completions(): {e}") from e
+
+        return [Completion.model_validate(r) for r in result]
 
     # ── Semantic Tokens ──────────────────────────────────────────
 

@@ -32,6 +32,13 @@ from tyo3.models.editor import (
     FoldingRange,
     FoldingRangeKind,
 )
+from tyo3.models.lsp import (
+    Completion,
+    CompletionKind,
+    Parameter,
+    Signature,
+    SignatureHelp,
+)
 
 __all__ = [  # noqa: F405
     # Analysis
@@ -66,4 +73,10 @@ __all__ = [  # noqa: F405
     # Editor
     "FoldingRangeKind",
     "FoldingRange",
+    # LSP
+    "CompletionKind",
+    "Completion",
+    "Parameter",
+    "Signature",
+    "SignatureHelp",
 ]

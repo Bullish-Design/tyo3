@@ -8,6 +8,8 @@ mod occurrences;
 mod tokens;
 mod rename;
 mod folding;
+mod signature;
+mod completion;
 pub use coordinates::*;
 pub use diagnostics::*;
 pub use hierarchy::*;
@@ -18,6 +20,8 @@ pub use hover::*;
 pub use tokens::*;
 pub use rename::*;
 pub use folding::*;
+pub use signature::*;
+pub use completion::*;
 
 /// Result of a project check.  Serialized to a Python dict via pythonize.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
