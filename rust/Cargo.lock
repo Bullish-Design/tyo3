@@ -1203,6 +1203,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pythonize"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b79f670c9626c8b651c0581011b57b6ba6970bb69faf01a7c4c0cfc81c43f95"
+dependencies = [
+ "pyo3",
+ "serde",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2317,26 +2327,18 @@ name = "tyo3"
 version = "0.1.0"
 dependencies = [
  "pyo3",
+ "pythonize",
  "ruff_db",
  "ruff_python_ast",
  "ruff_source_file",
  "ruff_text_size",
  "serde",
+ "serde_json",
  "ty_ide",
  "ty_module_resolver",
  "ty_project",
  "ty_python_core",
  "ty_python_semantic",
- "tyo3-derive",
-]
-
-[[package]]
-name = "tyo3-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

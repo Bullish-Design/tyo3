@@ -4,6 +4,7 @@ use std::sync::Mutex;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use pythonize::pythonize;
 
 use crate::{ProjectClosedError, PathResolutionError, PositionError};
 
@@ -76,7 +77,7 @@ fn resolve_file_and_source(
 /// Shared implementation for goto_definition, goto_declaration,
 /// goto_type_definition.  Resolves the path, computes the source offset,
 /// calls the provided navigation function, converts the results, and
-/// returns native DefinitionTargetDto objects.
+/// returns a Python list of definition-target dicts via pythonize.
 fn navigate_to_targets(
     inner: &Mutex<Option<TyProjectState>>,
     op_name: &str,
@@ -88,7 +89,7 @@ fn navigate_to_targets(
         File,
         ruff_text_size::TextSize,
     ) -> Option<ty_ide::RangedValue<ty_ide::NavigationTargets>>,
-) -> PyResult<Vec<dto::DefinitionTargetDto>> {
+) -> PyResult<Py<PyAny>> {
     let guard = lock_state(inner, op_name)?;
     let state = guard.as_ref().unwrap();
 
@@ -109,7 +110,9 @@ fn navigate_to_targets(
         None => Vec::new(),
     };
 
-    Ok(targets)
+    let py = unsafe { Python::assume_attached() };
+    pythonize(py, &targets).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        .map(|bound| bound.unbind())
 }
 
 /// Recursively collect document symbols from a hierarchical symbol tree.
@@ -255,7 +258,7 @@ impl PyTyProject {
     // ── Check ────────────────────────────────────────────────────────
 
     /// Run the type checker on the entire project.
-    fn check(&self) -> PyResult<dto::CheckResultDto> {
+    fn check(&self) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "check")?;
         let state = guard.as_ref().unwrap();
 
@@ -268,7 +271,10 @@ impl PyTyProject {
             elapsed_ms: None,
         };
 
-        Ok(check_result)
+        let py = unsafe { Python::assume_attached() };
+        pythonize(py, &check_result)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map(|bound| bound.unbind())
     }
 
     /// Run the type checker and return diagnostics for a single file.
@@ -276,7 +282,7 @@ impl PyTyProject {
     /// Runs a full project check (Salsa-cached if unchanged), then filters
     /// diagnostics in Rust before constructing DTOs — only matching file
     /// diagnostics are converted and returned across the boundary.
-    fn check_file(&self, path: &str) -> PyResult<dto::CheckResultDto> {
+    fn check_file(&self, path: &str) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "check_file")?;
         let state = guard.as_ref().unwrap();
 
@@ -300,17 +306,22 @@ impl PyTyProject {
         let diagnostics =
             convert::diagnostics::convert_diagnostic_refs(&state.db, &matching);
 
-        Ok(dto::CheckResultDto {
+        let check_result = dto::CheckResultDto {
             diagnostics,
             files_checked: Some(1),
             elapsed_ms: None,
-        })
+        };
+
+        let py = unsafe { Python::assume_attached() };
+        pythonize(py, &check_result)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map(|bound| bound.unbind())
     }
 
     // ── Document Symbols ─────────────────────────────────────────────
 
     /// Get document symbols for a file in the project.
-    fn document_symbols(&self, path: &str) -> PyResult<Vec<dto::SymbolDto>> {
+    fn document_symbols(&self, path: &str) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "document_symbols")?;
         let state = guard.as_ref().unwrap();
 
@@ -336,13 +347,16 @@ impl PyTyProject {
             );
         }
 
-        Ok(symbols)
+        let py = unsafe { Python::assume_attached() };
+        pythonize(py, &symbols)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map(|bound| bound.unbind())
     }
 
     // ── Workspace Symbols ────────────────────────────────────────────
 
     /// Search for symbols matching a query across all workspace files.
-    fn workspace_symbols(&self, query: &str) -> PyResult<Vec<dto::SymbolDto>> {
+    fn workspace_symbols(&self, query: &str) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "workspace_symbols")?;
         let state = guard.as_ref().unwrap();
 
@@ -382,7 +396,10 @@ impl PyTyProject {
             symbols.push(sym);
         }
 
-        Ok(symbols)
+        let py = unsafe { Python::assume_attached() };
+        pythonize(py, &symbols)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map(|bound| bound.unbind())
     }
 
     // ── Goto Definition ──────────────────────────────────────────────
@@ -393,7 +410,7 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<Vec<dto::DefinitionTargetDto>> {
+    ) -> PyResult<Py<PyAny>> {
         navigate_to_targets(
             &self.inner,
             "goto_definition",
@@ -412,7 +429,7 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<Vec<dto::DefinitionTargetDto>> {
+    ) -> PyResult<Py<PyAny>> {
         navigate_to_targets(
             &self.inner,
             "goto_declaration",
@@ -431,7 +448,7 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<Vec<dto::DefinitionTargetDto>> {
+    ) -> PyResult<Py<PyAny>> {
         navigate_to_targets(
             &self.inner,
             "goto_type_definition",
@@ -451,7 +468,7 @@ impl PyTyProject {
         line: u32,
         column: u32,
         include_declaration: bool,
-    ) -> PyResult<Vec<dto::ReferenceDto>> {
+    ) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "find_references")?;
         let state = guard.as_ref().unwrap();
 
@@ -475,13 +492,16 @@ impl PyTyProject {
             None => Vec::new(),
         };
 
-        Ok(references)
+        let py = unsafe { Python::assume_attached() };
+        pythonize(py, &references)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map(|bound| bound.unbind())
     }
 
     // ── Semantic Tokens ─────────────────────────────────────────
 
     /// Return semantic tokens for a file.
-    fn semantic_tokens(&self, path: &str) -> PyResult<Vec<dto::SemanticTokenDto>> {
+    fn semantic_tokens(&self, path: &str) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "semantic_tokens")?;
         let state = guard.as_ref().unwrap();
 
@@ -490,36 +510,46 @@ impl PyTyProject {
 
         let tokens = ty_ide::semantic_tokens(&state.db, file, None);
 
-        Ok(convert::tokens::convert_semantic_tokens(
+        let result = convert::tokens::convert_semantic_tokens(
             &source_str,
             &line_index,
             &tokens,
-        ))
+        );
+
+        let py = unsafe { Python::assume_attached() };
+        pythonize(py, &result)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map(|bound| bound.unbind())
     }
 
     // ── File Occurrences ─────────────────────────────────────────
 
     /// Batch-resolve all name occurrences in a file.
     ///
-    /// Returns a list of `NameOccurrenceDto` describing every name-like
-    /// token in the file, including its location, the symbol it resolves
-    /// to (target file + target name), and the reference role.
+    /// Returns a list describing every name-like token in the file,
+    /// including its location, the symbol it resolves to (target file +
+    /// target name), and the reference role.
     ///
     /// This replaces the per-token `goto_definition` approach with a
     /// single Rust call per file — O(1) FFI calls instead of O(tokens).
-    fn file_occurrences(&self, path: &str) -> PyResult<Vec<dto::NameOccurrenceDto>> {
+    fn file_occurrences(&self, path: &str) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "file_occurrences")?;
         let state = guard.as_ref().unwrap();
 
         let (file, source_str) = resolve_file_and_source(state, path)?;
         let line_index = LineIndex::from_source_text(&source_str);
 
-        Ok(convert::occurrences::convert_file_occurrences(
+        let result = convert::occurrences::convert_file_occurrences(
             &state.db,
             file,
             &source_str,
             &line_index,
-        ))
+        );
+
+        let py = unsafe { Python::assume_attached() };
+        pythonize(py, &result)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map(|bound| bound.unbind())
     }
 
     // ── Type Hierarchy ──────────────────────────────────────────
@@ -530,7 +560,7 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<Option<dto::TypeHierarchyDto>> {
+    ) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "type_hierarchy")?;
         let state = guard.as_ref().unwrap();
 
@@ -545,7 +575,10 @@ impl PyTyProject {
         let prepared = ty_ide::prepare_type_hierarchy(&state.db, file, offset);
         let item = match prepared {
             Some(item) => item,
-            None => return Ok(None),
+            None => {
+                let py = unsafe { Python::assume_attached() };
+                return Ok(py.None().into_any());
+            }
         };
 
         // Step 2: Resolve supertypes and subtypes using the prepared item
@@ -560,18 +593,23 @@ impl PyTyProject {
         let supertypes_dto = convert::hierarchy::convert_hierarchy_items(&state.db, &supertypes);
         let subtypes_dto = convert::hierarchy::convert_hierarchy_items(&state.db, &subtypes);
 
-        Ok(Some(dto::TypeHierarchyDto {
+        let result = dto::TypeHierarchyDto {
             item: item_dto,
             supertypes: supertypes_dto,
             subtypes: subtypes_dto,
-        }))
+        };
+
+        let py = unsafe { Python::assume_attached() };
+        pythonize(py, &result)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map(|bound| bound.unbind())
     }
 
     // ── Hover ────────────────────────────────────────────────────────
 
     /// Get hover information for the symbol at the given position.
     ///
-    /// Returns a native HoverDto, or None if no hover info is available.
+    /// Returns a dict, or None if no hover info is available.
     ///
     /// NOTE: ty_ide does not publicly re-export Hover/HoverContent, so the
     /// entire hover is rendered as Markdown and returned as a single content
@@ -581,7 +619,7 @@ impl PyTyProject {
         path: &str,
         line: u32,
         column: u32,
-    ) -> PyResult<Option<dto::HoverDto>> {
+    ) -> PyResult<Py<PyAny>> {
         let guard = lock_state(&self.inner, "hover")?;
         let state = guard.as_ref().unwrap();
 
@@ -595,8 +633,9 @@ impl PyTyProject {
 
         let result = ty_ide::hover(&state.db, file, offset);
 
+        let py = unsafe { Python::assume_attached() };
         match result {
-            None => Ok(None),
+            None => Ok(py.None().into_any()),
             Some(hover_value) => {
                 let file_range = hover_value.file_range();
                 let file_path = file.path(&state.db).as_str().to_string();
@@ -614,7 +653,9 @@ impl PyTyProject {
                     rendered,
                 );
 
-                Ok(Some(hover_dto))
+                pythonize(py, &hover_dto)
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+                    .map(|bound| bound.unbind())
             }
         }
     }

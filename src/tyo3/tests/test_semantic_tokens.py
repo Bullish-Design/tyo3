@@ -53,7 +53,10 @@ class TestSemanticTokens:
     def test_classes_fixture_has_class_tokens(self) -> None:
         rp = get_project("classes")
         files = rp.files()
-        tokens = rp.semantic_tokens(str(files[0]))
+        # Pick the file with actual code, not __init__.py which may be empty
+        code_files = [f for f in files if not str(f).endswith("__init__.py")]
+        assert code_files, "No code files found in classes fixture"
+        tokens = rp.semantic_tokens(str(code_files[0]))
         token_types = {t.token_type for t in tokens}
         # The classes fixture should have at least class or function tokens
         assert len(token_types) > 1

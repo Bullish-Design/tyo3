@@ -245,7 +245,7 @@ class TestNavigationTiming:
         [
             ("simple_package", "main.py", 3, 5),  # greet function definition
             ("classes", "models.py", 10, 8),  # Animal.__init__
-            ("standalone", "script.py", 6, 5),  # standalone_greeting
+            ("standalone", "script.py", 7, 5),  # standalone_greeting (def line)
         ],
     )
     def test_goto_definition(self, fixture_name: str, file_name: str, line: int, col: int) -> None:
@@ -265,7 +265,7 @@ class TestNavigationTiming:
         "fixture_name, file_name, line, col",
         [
             ("simple_package", "main.py", 3, 5),
-            ("classes", "models.py", 60, 8),  # Eagle.hunt
+            ("classes", "models.py", 80, 9),  # Eagle.hunt (def line)
         ],
     )
     def test_find_references(self, fixture_name: str, file_name: str, line: int, col: int) -> None:

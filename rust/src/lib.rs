@@ -21,44 +21,8 @@ mod files;
 #[pymodule]
 #[pyo3(name = "_native_impl")]
 fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // TyProject (the main project handle)
+    // TyProject (the main project handle) — the only PyO3 class exported.
     m.add_class::<project::PyTyProject>()?;
-
-    // DTO classes — native object transport layer
-    m.add_class::<dto::PositionDto>()?;
-    m.add_class::<dto::RangeDto>()?;
-    m.add_class::<dto::FileRangeDto>()?;
-    m.add_class::<dto::SymbolKindDto>()?;
-    m.add_class::<dto::SymbolDto>()?;
-    m.add_class::<dto::SeverityDto>()?;
-    m.add_class::<dto::DiagnosticDto>()?;
-    m.add_class::<dto::DefinitionTargetDto>()?;
-    m.add_class::<dto::ReferenceKindDto>()?;
-    m.add_class::<dto::ReferenceDto>()?;
-    m.add_class::<dto::HoverContentKindDto>()?;
-    m.add_class::<dto::HoverContentDto>()?;
-    m.add_class::<dto::HoverDto>()?;
-    m.add_class::<dto::CheckResultDto>()?;
-    m.add_class::<dto::SemanticTokenTypeDto>()?;
-    m.add_class::<dto::SemanticTokenModifierDto>()?;
-    m.add_class::<dto::SemanticTokenDto>()?;
-    m.add_class::<dto::TypeHierarchyItemDto>()?;
-    m.add_class::<dto::TypeHierarchyDto>()?;
-    m.add_class::<dto::ReferenceRoleDto>()?;
-    m.add_class::<dto::NameOccurrenceDto>()?;
-
-    // Enum type registry — Python uses this to identify PyO3 enum variants
-    // for str() conversion instead of dir()-based introspection.
-    // When adding a new PyO3 enum, add it here too.
-    m.add("_TYO3_ENUM_TYPES", vec![
-        m.getattr("NativeSymbolKind")?,
-        m.getattr("NativeSeverity")?,
-        m.getattr("NativeReferenceKind")?,
-        m.getattr("NativeReferenceRole")?,
-        m.getattr("NativeSemanticTokenType")?,
-        m.getattr("NativeSemanticTokenModifier")?,
-        m.getattr("NativeHoverContentKind")?,
-    ])?;
 
     // Exception types
     m.add("ProjectClosedError", m.py().get_type::<ProjectClosedError>())?;
