@@ -19,10 +19,12 @@ from tyo3.models.navigation import (
     HoverContentKind,
     HoverResult,
     NameOccurrence,
+    QuickFix,
     Reference,
     ReferenceKind,
     ReferenceRole,
     RenameEdit,
+    TextEdit,
     TypeHierarchy,
     TypeHierarchyItem,
     WorkspaceEdit,
@@ -74,6 +76,9 @@ __all__ = [  # noqa: F405
     # Rename
     "RenameEdit",
     "WorkspaceEdit",
+    # Code Actions
+    "QuickFix",
+    "TextEdit",
     # Editor
     "FoldingRangeKind",
     "FoldingRange",

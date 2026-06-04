@@ -145,6 +145,25 @@ class WorkspaceEdit(BaseModel):
     edits: list[RenameEdit]
 
 
+class TextEdit(BaseModel):
+    """A text edit to be applied to a source file."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    path: PurePosixPath
+    range: Range
+    new_text: str
+
+
+class QuickFix(BaseModel):
+    """A quick fix suggestion for a diagnostic."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str
+    edits: list[TextEdit]
+
+
 __all__ = [
     "ReferenceKind",
     "ReferenceRole",
@@ -158,4 +177,6 @@ __all__ = [
     "TypeHierarchy",
     "RenameEdit",
     "WorkspaceEdit",
+    "TextEdit",
+    "QuickFix",
 ]

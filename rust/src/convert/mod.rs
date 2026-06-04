@@ -10,4 +10,5 @@ pub mod folding;
 pub mod signature;
 pub mod completion;
 pub mod hints;
+pub mod code_action;
 

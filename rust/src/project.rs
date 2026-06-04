@@ -439,6 +439,39 @@ fn compute_inlay_hints(
         .collect())
 }
 
+/// Get code actions (quick fixes) for a diagnostic at a range.
+fn compute_code_actions(
+    state: &TyProjectState,
+    path: &str,
+    start_line: u32,
+    start_col: u32,
+    end_line: u32,
+    end_col: u32,
+    diagnostic_id: &str,
+) -> Result<Vec<dto::QuickFixDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let start_offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, start_line, start_col,
+    )
+    .map_err(AnalysisError::Position)?;
+    let end_offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, end_line, end_col,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    let diagnostic_range = ruff_text_size::TextRange::new(start_offset, end_offset);
+    let file_path = file.path(&state.db).as_str().to_string();
+
+    let fixes = ty_ide::code_actions(&state.db, file, diagnostic_range, diagnostic_id);
+    Ok(fixes
+        .iter()
+        .map(|fix| {
+            convert::code_action::convert_quick_fix(&source_str, &line_index, &file_path, fix)
+        })
+        .collect())
+}
+
 /// Get hints (unused bindings, unreachable code) for a file.
 fn compute_hints(
     state: &TyProjectState,
@@ -953,6 +986,30 @@ impl PyTyProject {
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
+    // ── Code Actions ─────────────────────────────────────────────────
+
+    /// Get quick fixes for a diagnostic at a range.
+    fn code_actions<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+        diagnostic_id: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "code_actions")?;
+        let path = path.to_owned();
+        let diagnostic_id = diagnostic_id.to_owned();
+        let dtos = py.detach(move || {
+            compute_code_actions(&state, &path, start_line, start_col, end_line, end_col, &diagnostic_id)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     // ── Selection Ranges ────────────────────────────────────────────
 
     /// Compute selection ranges at the given position.
@@ -1286,6 +1343,30 @@ impl PySnapshot {
         let path = path.to_owned();
         let dtos = py.detach(move || compute_hints(&state, &path))
             .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &dtos)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Code Actions ─────────────────────────────────────────
+
+    /// Get quick fixes for a diagnostic at a range.
+    fn code_actions<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+        diagnostic_id: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "code_actions")?;
+        let path = path.to_owned();
+        let diagnostic_id = diagnostic_id.to_owned();
+        let dtos = py.detach(move || {
+            compute_code_actions(&state, &path, start_line, start_col, end_line, end_col, &diagnostic_id)
+        })
+        .map_err(AnalysisError::into_pyerr)?;
         pythonize(py, &dtos)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }

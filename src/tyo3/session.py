@@ -35,6 +35,7 @@ from tyo3.models.navigation import (
     DefinitionTarget,
     HoverResult,
     NameOccurrence,
+    QuickFix,
     Reference,
     TypeHierarchy,
     WorkspaceEdit,
@@ -369,6 +370,36 @@ class _ReadOps:
             raise InternalTyError(f"Unexpected error in hints(): {e}") from e
 
         return [Hint.model_validate(r) for r in result]
+
+    # ── Code Actions ─────────────────────────────────────────────────
+
+    def code_actions(
+        self,
+        path: str | StdPath,
+        start_line: int,
+        start_col: int,
+        end_line: int,
+        end_col: int,
+        diagnostic_id: str,
+    ) -> list[QuickFix]:
+        """Get quick fixes for a diagnostic at a range."""
+        self._check_open()
+        try:
+            result = self._inner.code_actions(
+                str(path), start_line, start_col, end_line, end_col, diagnostic_id
+            )
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in code_actions(): {e}") from e
+
+        return [QuickFix.model_validate(r) for r in result]
 
     # ── Signature Help ──────────────────────────────────────────────
 

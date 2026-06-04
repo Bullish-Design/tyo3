@@ -11,6 +11,7 @@ mod folding;
 mod signature;
 mod completion;
 mod hints;
+mod code_action;
 pub use coordinates::*;
 pub use diagnostics::*;
 pub use hierarchy::*;
@@ -24,6 +25,7 @@ pub use folding::*;
 pub use signature::*;
 pub use completion::*;
 pub use hints::*;
+pub use code_action::*;
 
 /// Result of a project check.  Serialized to a Python dict via pythonize.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
