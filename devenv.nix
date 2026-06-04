@@ -105,6 +105,47 @@
     PYTHONPATH=src python -m pytest src/tyo3/tests/ -x -q --tb=short --cov=tyo3 --cov-report=term-missing 2>&1
   '';
 
+  # ── Fast inner-loop scripts (for the async/snapshot refactor) ───────
+  #
+  # During the refactor you edit Rust constantly. A full `build` (maturin
+  # develop) is ~17s and writes a 284MB .so; `cargo check` type-checks the
+  # same code (catching every Ungil/Send/borrow error) in ~1s. Use `check-rust`
+  # for the edit loop; only `build`/`rebuild` when you actually need to run
+  # Python. See OPTION_C_SNAPSHOT_IMPLEMENTATION.md §3.
+
+  scripts.check-rust.exec = ''
+    echo "═══ cargo check (fast type-check — no build/link/install) ═══"
+    cd "$DEVENV_ROOT/rust"
+    cargo check "$@" 2>&1
+  '';
+
+  scripts.clippy.exec = ''
+    echo "═══ cargo clippy (lint, -D warnings — matches CI gate) ═══"
+    cd "$DEVENV_ROOT/rust"
+    cargo clippy --all-targets -- -D warnings 2>&1
+  '';
+
+  scripts.rebuild.exec = ''
+    echo "═══ Removing stale .so + rebuilding (avoids abi3/cpython shadowing) ═══"
+    rm -f "$DEVENV_ROOT/src/tyo3/_native_impl"*.so
+    cd "$DEVENV_ROOT"
+    maturin develop 2>&1
+    echo "═══ Rebuild complete ═══"
+  '';
+
+  # Pass-through pytest: `devenv shell -- pytest src/tyo3/tests/test_concurrency.py -v`
+  scripts.pytest.exec = ''
+    cd "$DEVENV_ROOT"
+    PYTHONPATH=src python -m pytest "$@" 2>&1
+  '';
+
+  # Run an ad-hoc script with the package importable:
+  #   `devenv shell -- pyrun .scratch/validate.py`
+  scripts.pyrun.exec = ''
+    cd "$DEVENV_ROOT"
+    PYTHONPATH=src python "$@" 2>&1
+  '';
+
   # ── Utility scripts ──────────────────────────────────────────
 
   scripts.clean.exec = ''

@@ -343,6 +343,27 @@ class TyO3Session:
             return None
         return TypeHierarchy.model_validate(native_result)
 
+    # ── Snapshot ─────────────────────────────────────────────────────
+
+    def snapshot(self) -> Snapshot:
+        """Take a cheap, read-only, revision-pinned snapshot of the project.
+
+        The returned :class:`Snapshot` is safe to share across threads and
+        reflects the project exactly as it is now, regardless of later
+        ``reload()`` calls. Close it (or use it as a context manager) to free
+        the pinned revision.
+
+        (Slice: only ``check()`` is wired on the snapshot so far.)
+        """
+        self._check_open()
+        try:
+            native_snapshot = self._inner.snapshot()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in snapshot(): {e}") from e
+        return Snapshot(native_snapshot)
+
     # ── Lifecycle ────────────────────────────────────────────────────
 
     def reload(self) -> None:
@@ -379,6 +400,67 @@ class TyO3Session:
         if not getattr(self, "_closed", True):
             warnings.warn(
                 "TyO3Session was not closed explicitly. Use 'with TyO3Session(...)' or call session.close().",
+                ResourceWarning,
+                stacklevel=2,
+            )
+            try:
+                self.close()
+            except Exception:
+                pass
+
+
+# ── Snapshot ────────────────────────────────────────────────────────────────
+
+
+class Snapshot:
+    """An immutable, revision-pinned, thread-shareable read view of a project.
+
+    Created via :meth:`TyO3Session.snapshot`. All reads see the project exactly
+    as it was when the snapshot was taken, regardless of later session reloads,
+    and a single snapshot is safe to share across threads.
+
+    (Slice: only ``check()`` is wired so far; the remaining read methods follow
+    in the full Option-C implementation.)
+    """
+
+    def __init__(self, native_snapshot: object) -> None:
+        self._inner = native_snapshot
+        self._closed = False
+
+    def _check_open(self) -> None:
+        if self._closed:
+            raise ProjectClosedError("Snapshot is closed")
+
+    def check(self) -> CheckResult:
+        """Run the type-checker on the snapshot's pinned revision."""
+        self._check_open()
+        try:
+            native_result = self._inner.check()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in check(): {e}") from e
+        return CheckResult.model_validate(native_result)
+
+    def close(self) -> None:
+        """Release the pinned revision. Safe to call multiple times."""
+        if self._closed:
+            return
+        self._inner.close()
+        self._closed = True
+
+    def __enter__(self) -> Snapshot:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        if getattr(self, "_inner", None) is None:
+            return
+        if not getattr(self, "_closed", True):
+            warnings.warn(
+                "Snapshot was not closed explicitly. Use 'with session.snapshot()' or call snapshot.close().",
                 ResourceWarning,
                 stacklevel=2,
             )

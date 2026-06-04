@@ -63,6 +63,36 @@ fn lock_state<'a>(
     Ok(guard)
 }
 
+/// Lock, clone the frozen project state (a cheap salsa snapshot), then drop the
+/// lock. The returned owned `TyProjectState` is `Send`/`Ungil`, so it can drive
+/// GIL-released analysis inside `py.detach(...)`.
+///
+/// The lock is held only for the duration of the clone (microseconds); the heavy
+/// analysis then runs on the owned clone with both the lock and the GIL released.
+fn clone_locked_state(
+    inner: &Mutex<Option<TyProjectState>>,
+    op_name: &str,
+) -> PyResult<TyProjectState> {
+    let guard = lock_state(inner, op_name)?;
+    let s = guard.as_ref().unwrap();
+    Ok(TyProjectState {
+        db: s.db.clone(),
+        root: s.root.clone(),
+    })
+}
+
+/// GIL-free core of `check`: runs the project type-check and builds the DTO.
+/// Touches no Python state, so it is safe to call inside `py.detach(...)`.
+fn compute_check(state: &TyProjectState) -> dto::CheckResultDto {
+    let result = state.db.check();
+    let diagnostics = convert::diagnostics::convert_diagnostics(&state.db, &result);
+    dto::CheckResultDto {
+        diagnostics,
+        files_checked: None,
+        elapsed_ms: None,
+    }
+}
+
 /// Resolve a file handle and return its source text as a String.
 fn resolve_file_and_source(
     state: &TyProjectState,
@@ -195,6 +225,18 @@ impl PyTyProject {
         Ok(())
     }
 
+    // ── Snapshot ─────────────────────────────────────────────────────
+
+    /// Take a cheap, read-only, revision-pinned snapshot of the current project
+    /// state. The returned snapshot is safe to share across threads and is
+    /// isolated from later `reload()` calls (which swap in a fresh database).
+    fn snapshot(&self) -> PyResult<PySnapshot> {
+        let state = clone_locked_state(&self.inner, "snapshot")?;
+        Ok(PySnapshot {
+            inner: Mutex::new(Some(state)),
+        })
+    }
+
     // ── Files ────────────────────────────────────────────────────────
 
     /// List all source files in the project.
@@ -215,19 +257,13 @@ impl PyTyProject {
     // ── Check ────────────────────────────────────────────────────────
 
     /// Run the type checker on the entire project.
+    ///
+    /// Clones the database under a brief lock, then runs the analysis with the
+    /// GIL released (`py.detach`), so other Python threads make progress during
+    /// the scan. See the `TyProjectState` concurrency note.
     fn check<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let guard = lock_state(&self.inner, "check")?;
-        let state = guard.as_ref().unwrap();
-
-        let result = state.db.check();
-        let diagnostics = convert::diagnostics::convert_diagnostics(&state.db, &result);
-
-        let check_result = dto::CheckResultDto {
-            diagnostics,
-            files_checked: None,
-            elapsed_ms: None,
-        };
-
+        let state = clone_locked_state(&self.inner, "check")?;
+        let check_result = py.detach(move || compute_check(&state));
         pythonize(py, &check_result)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
@@ -605,5 +641,37 @@ impl PyTyProject {
                     .map_err(|e| PyRuntimeError::new_err(e.to_string()))
             }
         }
+    }
+}
+
+// ── Snapshot: immutable, revision-pinned, thread-shareable read view ──────────
+//
+// A `PySnapshot` owns its own clone of the project database, pinned to the
+// revision at `snapshot()` time. Each read clones that frozen db under a brief
+// lock and runs the analysis with the GIL released, so many threads can share
+// one snapshot and run reads in parallel.
+
+#[pyclass(name = "TySnapshot", module = "tyo3._native_impl")]
+pub struct PySnapshot {
+    inner: Mutex<Option<TyProjectState>>,
+}
+
+#[pymethods]
+impl PySnapshot {
+    /// Run the type checker on the snapshot's pinned revision (GIL released).
+    fn check<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "check")?;
+        let check_result = py.detach(move || compute_check(&state));
+        pythonize(py, &check_result)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Release the pinned revision early, freeing its database. Idempotent.
+    fn close(&self) -> PyResult<()> {
+        let mut guard = self.inner.lock().map_err(|e| {
+            PyRuntimeError::new_err(format!("Lock poisoned: {}", e))
+        })?;
+        *guard = None;
+        Ok(())
     }
 }

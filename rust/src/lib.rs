@@ -20,8 +20,9 @@ mod files;
 #[pymodule]
 #[pyo3(name = "_native_impl")]
 fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // TyProject (the main project handle) — the only PyO3 class exported.
+    // TyProject (the main project handle) and TySnapshot (read-only view).
     m.add_class::<project::PyTyProject>()?;
+    m.add_class::<project::PySnapshot>()?;
 
     // Exception types
     m.add("ProjectClosedError", m.py().get_type::<ProjectClosedError>())?;
