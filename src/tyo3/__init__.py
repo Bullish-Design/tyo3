@@ -8,10 +8,11 @@ from tyo3.graph import CodeGraph
 from tyo3.models.analysis import CheckResult, Diagnostic
 from tyo3.models.navigation import DefinitionTarget, HoverResult, Reference
 from tyo3.models.symbols import Symbol
-from tyo3.session import TyO3Session
+from tyo3.session import Snapshot, TyO3Session
 
 __all__ = [
     "TyO3Session",
+    "Snapshot",
     # Re-export commonly used types for convenience
     "CheckResult",
     "Diagnostic",

@@ -20,6 +20,7 @@ from __future__ import annotations
 import warnings
 from pathlib import Path as StdPath
 from pathlib import PurePosixPath
+from typing import Any
 
 from tyo3.exceptions import (
     InternalTyError,
@@ -74,45 +75,20 @@ except ImportError:
         pass
 
 
-# ── TyO3Session ────────────────────────────────────────────────────────────
+# ── _ReadOps — shared read-only analysis base ──────────────────────────────
 
 
-class TyO3Session:
-    """A live session with the ty semantic engine for a single project root.
+class _ReadOps:
+    """Read-only analysis methods shared by TyO3Session and Snapshot.
 
-    Owns an internal handle to the ``ProjectDatabase`` via the PyO3 boundary.
-    All data returned by Rust methods is already-native Python (dicts/lists
-    via pythonize) and validated directly through Pydantic's ``model_validate``.
-
-    Usage::
-
-        with TyO3Session("/path/to/project") as session:
-            result = session.check()
-            symbols = session.document_symbols("src/main.py")
-            definitions = session.goto_definition("src/main.py", 10, 5)
+    Subclasses must provide ``self._inner`` (native handle) and ``self._closed``.
     """
 
-    def __init__(self, root: str | StdPath) -> None:
-        if _native is None:
-            raise ProjectOpenError(
-                "Rust native extension is not built. Run `maturin develop` inside the devenv shell first."
-            )
-        root_str = str(root)
-        try:
-            self._inner = _native.TyProject.open(root_str)
-        except Exception as e:
-            raise ProjectOpenError(f"Cannot open project at '{root_str}': {e}") from e
-        self._root = StdPath(root_str).resolve()
-        self._closed = False
-
-    @property
-    def root(self) -> StdPath:
-        return self._root
-
-    # ── Guard ──────────────────────────────────────────────────────
+    _inner: Any
+    _closed: bool
 
     def _check_open(self) -> None:
-        """Raise ProjectClosedError if this session has been closed."""
+        """Raise ProjectClosedError if this handle has been closed."""
         if self._closed:
             raise ProjectClosedError("Project is closed")
 
@@ -343,6 +319,46 @@ class TyO3Session:
             return None
         return TypeHierarchy.model_validate(native_result)
 
+
+# ── TyO3Session ────────────────────────────────────────────────────────────
+
+
+class TyO3Session(_ReadOps):
+    """A live session with the ty semantic engine for a single project root.
+
+    Owns an internal handle to the ``ProjectDatabase`` via the PyO3 boundary.
+    All data returned by Rust methods is already-native Python (dicts/lists
+    via pythonize) and validated directly through Pydantic's ``model_validate``.
+
+    Session read methods release the GIL during analysis, so they are
+    non-blocking: a ``check()`` on one thread no longer freezes other threads
+    or the event loop.
+
+    Usage::
+
+        with TyO3Session("/path/to/project") as session:
+            result = session.check()
+            symbols = session.document_symbols("src/main.py")
+            definitions = session.goto_definition("src/main.py", 10, 5)
+    """
+
+    def __init__(self, root: str | StdPath) -> None:
+        if _native is None:
+            raise ProjectOpenError(
+                "Rust native extension is not built. Run `maturin develop` inside the devenv shell first."
+            )
+        root_str = str(root)
+        try:
+            self._inner = _native.TyProject.open(root_str)
+        except Exception as e:
+            raise ProjectOpenError(f"Cannot open project at '{root_str}': {e}") from e
+        self._root = StdPath(root_str).resolve()
+        self._closed = False
+
+    @property
+    def root(self) -> StdPath:
+        return self._root
+
     # ── Snapshot ─────────────────────────────────────────────────────
 
     def snapshot(self) -> Snapshot:
@@ -352,8 +368,6 @@ class TyO3Session:
         reflects the project exactly as it is now, regardless of later
         ``reload()`` calls. Close it (or use it as a context manager) to free
         the pinned revision.
-
-        (Slice: only ``check()`` is wired on the snapshot so far.)
         """
         self._check_open()
         try:
@@ -412,35 +426,18 @@ class TyO3Session:
 # ── Snapshot ────────────────────────────────────────────────────────────────
 
 
-class Snapshot:
-    """An immutable, revision-pinned, thread-shareable read view of a project.
+class Snapshot(_ReadOps):
+    """Immutable, revision-pinned, thread-shareable read view of a project.
 
-    Created via :meth:`TyO3Session.snapshot`. All reads see the project exactly
-    as it was when the snapshot was taken, regardless of later session reloads,
-    and a single snapshot is safe to share across threads.
-
-    (Slice: only ``check()`` is wired so far; the remaining read methods follow
-    in the full Option-C implementation.)
+    Created via :meth:`TyO3Session.snapshot`. Exposes every read method a
+    session does, but no ``reload()``. All reads see the project exactly as it
+    was when the snapshot was taken, regardless of later session reloads, and a
+    single snapshot is safe to share across threads.
     """
 
-    def __init__(self, native_snapshot: object) -> None:
+    def __init__(self, native_snapshot: Any) -> None:
         self._inner = native_snapshot
         self._closed = False
-
-    def _check_open(self) -> None:
-        if self._closed:
-            raise ProjectClosedError("Snapshot is closed")
-
-    def check(self) -> CheckResult:
-        """Run the type-checker on the snapshot's pinned revision."""
-        self._check_open()
-        try:
-            native_result = self._inner.check()
-        except _NativeClosedError as e:
-            raise ProjectClosedError(str(e)) from e
-        except Exception as e:
-            raise InternalTyError(f"Unexpected error in check(): {e}") from e
-        return CheckResult.model_validate(native_result)
 
     def close(self) -> None:
         """Release the pinned revision. Safe to call multiple times."""
@@ -460,7 +457,8 @@ class Snapshot:
             return
         if not getattr(self, "_closed", True):
             warnings.warn(
-                "Snapshot was not closed explicitly. Use 'with session.snapshot()' or call snapshot.close().",
+                "Snapshot was not closed explicitly. Use 'with session.snapshot()' "
+                "or call snapshot.close().",
                 ResourceWarning,
                 stacklevel=2,
             )
