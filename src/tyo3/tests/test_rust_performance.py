@@ -360,3 +360,101 @@ class TestCloseTiming:
             timeout=CLOSE_TIMEOUT,
         )
         print(f"\n  ⏱  close(): {elapsed:.3f}s")
+
+
+# ── CodeGraph benchmark (opt-in via --benchmark) ────────────────────────
+
+GRAPH_BUILD_TIMEOUT = 30.0
+
+
+@needs_native
+@pytest.mark.benchmark
+class TestCodeGraphBenchmark:
+    """Benchmark CodeGraph construction and query performance.
+
+    These tests run only when explicitly requested with:
+        pytest -m benchmark
+
+    They validate that building and querying a CodeGraph over a real
+    project completes within reasonable wall-clock limits, guarding
+    against catastrophic regressions in the cursor→graph pipeline.
+    """
+
+    def test_build_graph_simple_package(self) -> None:
+        """Build a CodeGraph over the simple_package fixture."""
+        from tyo3.graph import CodeGraph
+
+        t_start = time.perf_counter()
+        session = TyO3Session(fixture_path("simple_package"))
+        try:
+            graph = CodeGraph.build(session)
+            t_build = time.perf_counter() - t_start
+            print(
+                f"\n  ⏱  CodeGraph.build(simple_package): {t_build:.3f}s "
+                f"[nodes={graph.node_count}, edges={graph.edge_count}]"
+            )
+            assert t_build < GRAPH_BUILD_TIMEOUT, (
+                f"CodeGraph build took {t_build:.3f}s (timeout={GRAPH_BUILD_TIMEOUT}s)"
+            )
+            assert graph.node_count > 0, "Expected at least one node in graph"
+        finally:
+            session.close()
+
+    def test_build_graph_classes(self) -> None:
+        """Build a CodeGraph over the classes fixture."""
+        from tyo3.graph import CodeGraph
+
+        t_start = time.perf_counter()
+        session = TyO3Session(fixture_path("classes"))
+        try:
+            graph = CodeGraph.build(session)
+            t_build = time.perf_counter() - t_start
+            print(
+                f"\n  ⏱  CodeGraph.build(classes): {t_build:.3f}s [nodes={graph.node_count}, edges={graph.edge_count}]"
+            )
+            assert t_build < GRAPH_BUILD_TIMEOUT, (
+                f"CodeGraph build took {t_build:.3f}s (timeout={GRAPH_BUILD_TIMEOUT}s)"
+            )
+            assert graph.node_count > 0, "Expected at least one node in graph"
+        finally:
+            session.close()
+
+    def test_build_graph_imports(self) -> None:
+        """Build a CodeGraph over the imports fixture (multi-file)."""
+        from tyo3.graph import CodeGraph
+
+        t_start = time.perf_counter()
+        session = TyO3Session(fixture_path("imports"))
+        try:
+            graph = CodeGraph.build(session)
+            t_build = time.perf_counter() - t_start
+            print(
+                f"\n  ⏱  CodeGraph.build(imports): {t_build:.3f}s [nodes={graph.node_count}, edges={graph.edge_count}]"
+            )
+            assert t_build < GRAPH_BUILD_TIMEOUT, (
+                f"CodeGraph build took {t_build:.3f}s (timeout={GRAPH_BUILD_TIMEOUT}s)"
+            )
+            assert graph.node_count > 0, "Expected at least one node in graph"
+            # Multi-file fixture should create some edges
+            assert graph.edge_count > 0, "Expected edges between files in imports fixture"
+        finally:
+            session.close()
+
+    def test_transitive_query_performance(self) -> None:
+        """Benchmark transitive_dependencies on a built graph."""
+        from tyo3.graph import CodeGraph
+
+        session = TyO3Session(fixture_path("imports"))
+        try:
+            graph = CodeGraph.build(session)
+            # Query transitive deps for every symbol node
+            t_start = time.perf_counter()
+            node_indices = list(graph.graph.node_indices())
+            for idx in node_indices[:20]:  # Cap at 20 symbols to keep fast
+                symbol_id = graph.graph[idx].symbol_id
+                deps = graph.transitive_dependencies(symbol_id)
+                assert isinstance(deps, set)
+            t_query = time.perf_counter() - t_start
+            print(f"\n  ⏱  transitive_dependencies × {min(20, len(node_indices))} symbols: {t_query:.3f}s")
+        finally:
+            session.close()

@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Internal refactoring/project scaffolding
+.scratch/
+
 # Personal Dev Environment:
 .devenv/**
 .direnv/**

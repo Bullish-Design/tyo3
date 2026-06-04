@@ -31,8 +31,11 @@ python-source = "src"
 [tool.uv]
 
 [tool.pytest.ini_options]
-addopts = "-q --cov=tyo3 --cov-report=term-missing"
+addopts = "-q --cov=tyo3 --cov-report=term-missing --strict-markers"
 testpaths = ["src/tyo3/tests"]
+markers = [
+    "benchmark: opt-in performance and CodeGraph benchmarks (not run in default suite)",
+]
 
 [tool.ty]
 
