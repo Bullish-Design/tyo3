@@ -2,6 +2,7 @@ use ruff_source_file::LineIndex;
 
 use crate::coordinates;
 use crate::dto::{FileRangeDto, SymbolDto, SymbolKindDto};
+use crate::dto;
 
 /// Map a ty_ide SymbolKind to a SymbolKindDto.
 fn symbol_kind_to_dto(kind: &ty_ide::SymbolKind) -> SymbolKindDto {
@@ -52,5 +53,54 @@ pub fn convert_symbol(
         selection_range: Some(name_range_dto),
         container_name: container_name.map(|s| s.to_string()),
         deprecated,
+    }
+}
+
+/// Recursively collect document symbols from a hierarchical symbol tree.
+pub fn collect_symbols_recursive(
+    hierarchical: &ty_ide::HierarchicalSymbols,
+    id: ty_ide::SymbolId,
+    info: &ty_ide::SymbolInfo,
+    source: &str,
+    line_index: &ruff_source_file::LineIndex,
+    file_path: &str,
+    parent_name: Option<&str>,
+    symbols: &mut Vec<dto::SymbolDto>,
+) {
+    let qualified = match parent_name {
+        Some(p) => Some(format!("{}.{}", p, info.name)),
+        None => None,
+    };
+
+    let sym = convert_symbol(
+        source,
+        line_index,
+        file_path,
+        &info.name,
+        &info.kind,
+        info.deprecated,
+        info.name_range,
+        info.full_range,
+        parent_name,
+        qualified.clone(),
+    );
+    symbols.push(sym);
+
+    let own_name = match &qualified {
+        Some(q) => q.as_str(),
+        None => &info.name,
+    };
+
+    for (child_id, child_info) in hierarchical.children(id) {
+        collect_symbols_recursive(
+            hierarchical,
+            child_id,
+            &child_info,
+            source,
+            line_index,
+            file_path,
+            Some(own_name),
+            symbols,
+        );
     }
 }

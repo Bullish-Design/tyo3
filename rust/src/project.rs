@@ -121,55 +121,6 @@ fn navigate_to_targets<'py>(
     pythonize(py, &targets).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
-/// Recursively collect document symbols from a hierarchical symbol tree.
-fn collect_symbols_recursive(
-    hierarchical: &ty_ide::HierarchicalSymbols,
-    id: ty_ide::SymbolId,
-    info: &ty_ide::SymbolInfo,
-    source: &str,
-    line_index: &ruff_source_file::LineIndex,
-    file_path: &str,
-    parent_name: Option<&str>,
-    symbols: &mut Vec<dto::SymbolDto>,
-) {
-    let qualified = match parent_name {
-        Some(p) => Some(format!("{}.{}", p, info.name)),
-        None => None,
-    };
-
-    let sym = convert::symbols::convert_symbol(
-        source,
-        line_index,
-        file_path,
-        &info.name,
-        &info.kind,
-        info.deprecated,
-        info.name_range,
-        info.full_range,
-        parent_name,
-        qualified.clone(),
-    );
-    symbols.push(sym);
-
-    let own_name = match &qualified {
-        Some(q) => q.as_str(),
-        None => &info.name,
-    };
-
-    for (child_id, child_info) in hierarchical.children(id) {
-        collect_symbols_recursive(
-            hierarchical,
-            child_id,
-            &child_info,
-            source,
-            line_index,
-            file_path,
-            Some(own_name),
-            symbols,
-        );
-    }
-}
-
 // ── PyO3 Methods ─────────────────────────────────────────────────────────
 
 #[pymethods]
@@ -337,7 +288,7 @@ impl PyTyProject {
 
         let mut symbols: Vec<dto::SymbolDto> = Vec::new();
         for (id, info) in hierarchical.iter() {
-            collect_symbols_recursive(
+            convert::symbols::collect_symbols_recursive(
                 &hierarchical,
                 id,
                 &info,
