@@ -68,11 +68,29 @@ revisions. Bumping is a deliberate, tested operation:
 - The Rust extension (`rust/src/`) wraps ty/Ruff's semantic engine behind a
   PyO3 bridge. DTO conversion lives in `rust/src/convert/`; Python ↔ Rust
   marshalling uses `pythonize`.
-- `TyO3Session` (in `src/tyo3/session.py`) is the **only** public API class.
+- `TyO3Session` (in `src/tyo3/session.py`) is the **only** public API class
+  alongside `Snapshot`.
 - The `CodeGraph` (in `src/tyo3/graph/`) builds on the session cursor APIs to
   provide whole-project queries.
 - Zero `unsafe` in the PyO3 layer. All native methods take `py: Python<'_>`.
-- The GIL is released during heavy ty/Salsa work via `py.allow_threads`.
+- **GIL release:** All read methods on both `TyProject` and `TySnapshot`
+  release the GIL during heavy ty/Salsa analysis via `py.detach`. The pattern
+  is: lock → clone the database (cheap `Arc`-bump) → drop lock → run analysis
+  on the owned clone with GIL released. Because `#[pyclass]` only requires
+  `Send` (not `Sync`), the `Mutex` wrapping the database is **load-bearing**
+  for soundness once the GIL is released.
+- **Swap-don't-mutate invariant:** All mutation builds a **new** database and
+  swaps it in atomically — never mutating the canonical database in place.
+  This is what keeps outstanding clones (session-read clones *and* snapshots)
+  isolated and free of `salsa::Cancelled`. If you add an incremental-edit API,
+  it must follow the same swap pattern — do **not** call salsa setters on the
+  live database.
+- **Stale `.so` gotcha:** The wheel builds as abi3 → maturin writes
+  `src/tyo3/_native_impl.abi3.so`. If a previous build left a
+  `_native_impl.cpython-313-*.so` alongside it, CPython imports the more
+  specific file first, shadowing your fresh build. Symptom: a green build but
+  `AttributeError` for new methods/classes at runtime. Fix:
+  `devenv shell -- clean && devenv shell -- build`.
 
 ## Project structure
 

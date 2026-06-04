@@ -457,8 +457,7 @@ class Snapshot(_ReadOps):
             return
         if not getattr(self, "_closed", True):
             warnings.warn(
-                "Snapshot was not closed explicitly. Use 'with session.snapshot()' "
-                "or call snapshot.close().",
+                "Snapshot was not closed explicitly. Use 'with session.snapshot()' or call snapshot.close().",
                 ResourceWarning,
                 stacklevel=2,
             )

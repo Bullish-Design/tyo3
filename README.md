@@ -88,6 +88,12 @@ tyo3-demo https://github.com/psf/requests --branch main
 
 The main entry point. Use as a context manager to ensure proper cleanup.
 
+### `Snapshot`
+
+An immutable, revision-pinned, thread-shareable read view. Created via
+``session.snapshot()``. Exposes every read method that ``TyO3Session``
+does, but no ``reload()`` or ``snapshot()``. Use as a context manager.
+
 #### Lifecycle
 
 | Method | Returns | Description |
@@ -170,8 +176,43 @@ All exceptions inherit from `tyo3.exceptions.TyO3Error`:
 
 ### Thread Safety
 
-`TyO3Session` is **not thread-safe**.  Do not share a single session across
-threads.  Create separate sessions per thread if needed.
+**Session reads are non-blocking.** All read methods (``check()``,
+``document_symbols()``, ``hover()``, etc.) release the GIL during the
+analysis phase via ``py.detach``, so a long ``check()`` on one thread no
+longer freezes other threads or the event loop. This makes ``TyO3Session``
+ready for async use — just wrap calls in ``await asyncio.to_thread()``.
+
+For **revision-consistent multi-read operations** (building a ``CodeGraph``,
+serving a compound LSP request), use a **Snapshot** — a cheap, immutable,
+thread-shareable read view pinned to the database revision at creation time:
+
+```python
+from tyo3 import TyO3Session
+import asyncio
+
+async def analyze(session: TyO3Session):
+    # Non-blocking check — other threads/async tasks make progress
+    result = await asyncio.to_thread(session.check)
+
+    # Snapshot: consistent multi-read isolated from reload
+    with session.snapshot() as snap:
+        symbols = snap.document_symbols("src/main.py")
+        refs = snap.find_references("src/main.py", 10, 5)
+        # All reads see the exact same revision
+```
+
+A **single Snapshot is safe to share across threads** — each read clones
+the pinned database under a brief lock, then runs the heavy analysis
+GIL-free. Snapshots are terminal: they don't expose ``reload()`` or
+``snapshot()``.
+
+> **Why this works:** The underlying ``ProjectDatabase`` (Salsa 0.26) is
+> ``Send + Clone`` but not ``Sync``. Instead of sharing a ``&db`` across
+> threads (which would be unsound), every read method locks, **clones** the
+> database (an ``Arc``-bump — microseconds), drops the lock, and runs on
+> the owned clone with the GIL released. All mutation swaps the canonical
+> database wholesale (never mutating in place), so outstanding clones stay
+> isolated.
 
 ## Development
 
