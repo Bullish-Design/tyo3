@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # ── PyO3 ───────────────────────────────────────────────
-pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods"] }
+pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods", "abi3-py313"] }
 
 # ── Serialisation ──────────────────────────────────────
 serde = { version = "1", features = ["derive"] }
