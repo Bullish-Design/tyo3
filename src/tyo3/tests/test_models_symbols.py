@@ -5,11 +5,15 @@ Obligation groups:
 - Entity tests (Symbol)
 """
 
+from pathlib import PurePosixPath
+
 from tyo3.models.analysis import FileRange, Position, Range
 from tyo3.models.symbols import Symbol, SymbolKind
 
+SAMPLE_PATH = PurePosixPath("src/main.py")
 
-def _file_range(path) -> FileRange:
+
+def _file_range(path=SAMPLE_PATH) -> FileRange:
     return FileRange(
         path=path,
         range=Range(start=Position(line=1, column=1), end=Position(line=1, column=1)),
@@ -42,11 +46,11 @@ class TestSymbolKind:
 class TestSymbol:
     """Symbol entity tests."""
 
-    def test_required_fields(self, open_project, first_party_file) -> None:
+    def test_required_fields(self) -> None:
         sym = Symbol(
             name="foo",
             kind=SymbolKind.FUNCTION,
-            location=_file_range(first_party_file.path),
+            location=_file_range(),
         )
         assert sym.name == "foo"
         assert sym.kind == SymbolKind.FUNCTION
@@ -55,12 +59,12 @@ class TestSymbol:
         assert sym.container_name is None
         assert sym.deprecated is False
 
-    def test_symbol_with_qualified_name(self, open_project, first_party_file) -> None:
+    def test_symbol_with_qualified_name(self) -> None:
         sym = Symbol(
             name="MyClass",
             qualified_name="pkg.module.MyClass",
             kind=SymbolKind.CLASS,
-            location=_file_range(first_party_file.path),
+            location=_file_range(),
             container_name="module",
             deprecated=True,
         )
@@ -68,7 +72,7 @@ class TestSymbol:
         assert sym.container_name == "module"
         assert sym.deprecated is True
 
-    def test_all_symbol_kinds_creatable(self, open_project, first_party_file) -> None:
+    def test_all_symbol_kinds_creatable(self) -> None:
         for kind_name in [
             "module",
             "class_",
@@ -87,6 +91,6 @@ class TestSymbol:
             sym = Symbol(
                 name="sym",
                 kind=kind_name,
-                location=_file_range(first_party_file.path),
+                location=_file_range(),
             )
             assert sym.kind == kind_name

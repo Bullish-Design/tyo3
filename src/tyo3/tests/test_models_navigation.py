@@ -25,7 +25,7 @@ class TestReferenceKind:
 class TestDefinitionTarget:
     """DefinitionTarget entity tests."""
 
-    def test_required_fields(self, open_project) -> None:
+    def test_required_fields(self) -> None:
         from tyo3.models.analysis import Position, Range
 
         target = DefinitionTarget(
@@ -36,7 +36,7 @@ class TestDefinitionTarget:
         assert target.symbol is None
         assert target.selection_range is None
 
-    def test_with_optional_fields(self, open_project, symbol) -> None:
+    def test_with_optional_fields(self, symbol) -> None:
         from tyo3.models.analysis import Position, Range
 
         target = DefinitionTarget(
@@ -53,7 +53,7 @@ class TestDefinitionTarget:
 class TestReference:
     """Reference entity tests."""
 
-    def test_creation(self, open_project) -> None:
+    def test_creation(self) -> None:
         from tyo3.models.analysis import Position, Range
 
         ref = Reference(
@@ -63,7 +63,7 @@ class TestReference:
         )
         assert ref.kind == ReferenceKind.READ
 
-    def test_all_reference_kinds(self, open_project) -> None:
+    def test_all_reference_kinds(self) -> None:
         from tyo3.models.analysis import Position, Range
 
         r = Range(start=Position(line=1, column=1), end=Position(line=1, column=2))

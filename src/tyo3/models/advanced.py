@@ -2,9 +2,7 @@
 
 Derived from tyo3-advanced.allium
 
-> These are spec-anticipation models with no backend implementation yet.
-> ``SemanticToken.file`` uses ``PurePosixPath`` instead of ``ProjectFile``
-> until the project-file relationship has a backend source.
+> ``SemanticToken.file`` uses ``PurePosixPath`` for the file location.
 """
 
 from __future__ import annotations
