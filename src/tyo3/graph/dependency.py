@@ -11,6 +11,8 @@ import rustworkx as rx
 from typing import Any
 
 from tyo3.graph.models import EdgeData, EdgeKind, SymbolNode
+from tyo3.models.navigation import ReferenceRole
+from tyo3.models.symbols import SymbolKind
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +48,13 @@ class DependencyGraph:
             return None
         return self.graph[idx]
 
-    def symbols_of_kind(self, kind: str) -> list[SymbolNode]:
+    def symbols_of_kind(self, kind: SymbolKind) -> list[SymbolNode]:
         """All symbols of a given kind in this dependency."""
-        result: list[SymbolNode] = []
-        for i in self.graph.node_indices():
-            node = self.graph[i]
-            if node.kind == kind:
-                result.append(node)
-        return result
+        return [
+            self.graph[idx]
+            for idx in self.graph.node_indices()
+            if self.graph[idx].kind == kind
+        ]
 
     def all_symbols(self) -> list[SymbolNode]:
         """All symbols in this dependency graph."""
@@ -132,7 +133,7 @@ class DependencyGraph:
                         edge_obj = EdgeData(
                             kind=EdgeKind(raw_edge["kind"]),
                             file=raw_edge.get("file"),
-                            role=raw_edge.get("role"),
+                            role=ReferenceRole(role_raw) if (role_raw := raw_edge.get("role")) is not None else None,
                         )
                     else:
                         edge_obj = None

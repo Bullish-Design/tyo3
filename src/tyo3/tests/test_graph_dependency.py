@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
 import rustworkx as rx
 
-from tyo3.graph import CodeGraph, DependencyGraph, SymbolNode
+from tyo3.graph import CodeGraph, DependencyGraph, EdgeData, EdgeKind, SymbolNode
 from tyo3.models.analysis import Range
+from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import SymbolKind
 
 
@@ -110,6 +112,70 @@ class TestDependencyGraph:
         assert found.name == "Foo"
         assert found.external is True
         assert found.package == "testpkg"
+
+    def test_dependency_graph_edge_role_roundtrips(self, tmp_path, monkeypatch) -> None:
+        """Loaded dependency graph EdgeData.role is ReferenceRole, not raw string."""
+        monkeypatch.setattr(
+            "tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps"
+        )
+
+        g = rx.PyDiGraph()
+        n1 = SymbolNode(
+            symbol_id="testpkg::A",
+            name="A",
+            qualified_name="A",
+            kind=SymbolKind.CLASS,
+            file="<external>",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1},
+                 "end": {"line": 1, "column": 1}}
+            ),
+            external=True,
+            package="testpkg",
+        )
+        n2 = SymbolNode(
+            symbol_id="testpkg::B",
+            name="B",
+            qualified_name="B",
+            kind=SymbolKind.FUNCTION,
+            file="<external>",
+            range=Range.model_validate(
+                {"start": {"line": 1, "column": 1},
+                 "end": {"line": 1, "column": 1}}
+            ),
+            external=True,
+            package="testpkg",
+        )
+        idx1 = g.add_node(n1)
+        idx2 = g.add_node(n2)
+        g.add_edge(
+            idx1, idx2,
+            EdgeData(
+                kind=EdgeKind.REFERENCES,
+                role=ReferenceRole.READ,
+                file="<external>",
+            ),
+        )
+        id_to_index = {"testpkg::A": idx1, "testpkg::B": idx2}
+
+        dep = DependencyGraph("testpkg", "3.0", g, id_to_index)
+        dep.save()
+
+        loaded = DependencyGraph.load("testpkg", "3.0")
+        assert loaded is not None
+
+        # Verify the edge role is ReferenceRole, not a raw string
+        for edge_idx in loaded.graph.edge_indices():
+            edge_data = loaded.graph.get_edge_data_by_index(edge_idx)
+            assert edge_data is not None
+            assert edge_data.role == ReferenceRole.READ
+            assert isinstance(edge_data.role, ReferenceRole)
+            # It must not be the raw string "read"
+            # (ReferenceRole.READ compares equal to "read" since it's a StrEnum,
+            #  but isinstance() above already proved it's the right type)
+            break
+        else:
+            pytest.fail("No edges found in loaded graph")
 
     def test_load_nonexistent_returns_none(self) -> None:
         result = DependencyGraph.load("nonexistent_pkg", "99.9")
