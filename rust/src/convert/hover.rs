@@ -26,16 +26,4 @@ pub fn convert_hover_markdown_with_index(
     }
 }
 
-/// Build a HoverDto from a single rendered Markdown string.
-///
-/// Convenience wrapper around [`convert_hover_markdown_with_index`] that
-/// computes a `LineIndex` internally.
-pub fn convert_hover_markdown(
-    source: &str,
-    path: String,
-    range: ruff_db::files::FileRange,
-    markdown: String,
-) -> HoverDto {
-    let line_index = LineIndex::from_source_text(source);
-    convert_hover_markdown_with_index(source, &line_index, path, range, markdown)
-}
+

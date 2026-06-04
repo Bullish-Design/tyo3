@@ -1,4 +1,4 @@
-use ruff_db::diagnostic::{Diagnostic, DiagnosticId};
+use ruff_db::diagnostic::{Diagnostic, DiagnosticId, UnifiedFile};
 use ruff_db::source::{line_index, source_text};
 use ruff_db::Db;
 
@@ -46,7 +46,10 @@ fn extract_file_and_range(
 
     // All diagnostics from the ty checker carry ty `File` spans.
     // If we ever encounter a Ruff `SourceFile`, it's a bug we should catch.
-    let file = span.expect_ty_file();
+    let file = match span.file() {
+        UnifiedFile::Ty(file) => *file,
+        UnifiedFile::Ruff(_) => return (None, None),
+    };
     let path = file.path(db).as_str().to_string();
 
     let range = span.range().map(|r| {
@@ -70,7 +73,10 @@ pub fn diagnostic_matches_file(db: &dyn Db, d: &Diagnostic, target_path: &str) -
         None => return false,
     };
     let span = annotation.get_span();
-    let file = span.expect_ty_file();
+    let file = match span.file() {
+        UnifiedFile::Ty(file) => *file,
+        UnifiedFile::Ruff(_) => return false,
+    };
     let path = file.path(db).as_str();
     path == target_path
 }
