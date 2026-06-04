@@ -129,7 +129,35 @@ does, but no ``reload()`` or ``snapshot()``. Use as a context manager.
 | `goto_declaration(path, line, col)` | `list[DefinitionTarget]` | Go to declaration |
 | `goto_type_definition(path, line, col)` | `list[DefinitionTarget]` | Go to type definition |
 | `find_references(path, line, col)` | `list[Reference]` | Find all references |
+| `document_highlights(path, line, col)` | `list[Reference]` | Highlight in-file symbol occurrences |
 | `hover(path, line, col)` | `HoverResult \| None` | Hover/type information |
+| `type_hierarchy(path, line, col)` | `TypeHierarchy \| None` | Type hierarchy at position |
+| `file_occurrences(path)` | `list[NameOccurrence]` | Batch-resolve all name occurrences |
+
+#### Refactoring
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `can_rename(path, line, col)` | `Range \| None` | Check if symbol can be renamed |
+| `rename(path, line, col, new_name)` | `WorkspaceEdit \| None` | Compute rename workspace edit |
+
+#### Editor Features
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `selection_ranges(path, line, col)` | `list[Range]` | Selection ranges at position |
+| `folding_ranges(path)` | `list[FoldingRange]` | Folding ranges for a file |
+| `semantic_tokens(path, *, start_line, ...)` | `list[SemanticToken]` | Semantic tokens (optional range) |
+| `inlay_hints(path)` | `list[InlayHint]` | Inlay hints for a file |
+| `hints(path)` | `list[Hint]` | Unused binding / unreachable code hints |
+
+#### LSP Features
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `signature_help(path, line, col)` | `SignatureHelp \| None` | Function signature help |
+| `completions(path, line, col, *, auto_import)` | `list[Completion]` | Completion suggestions |
+| `code_actions(path, start_line, start_col, end_line, end_col, code)` | `list[QuickFix]` | Quick fixes for a diagnostic |
 
 All positions are **1-based** (line &ge; 1, column &ge; 1).  Passing a
 zero or negative position raises `PositionError`.

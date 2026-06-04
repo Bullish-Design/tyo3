@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tyo3.models.navigation import Reference
 from tyo3.models.analysis import Range
+from tyo3.models.navigation import Reference
 
 from .conftest import needs_native, shared_session
 
@@ -41,7 +41,7 @@ def test_document_highlights_snapshot_parity():
         snap_highlights = snap.document_highlights("main.py", 3, 5)
 
     assert len(highlights) == len(snap_highlights)
-    for h, sh in zip(highlights, snap_highlights):
+    for h, sh in zip(highlights, snap_highlights, strict=True):
         assert h.path == sh.path
 
 

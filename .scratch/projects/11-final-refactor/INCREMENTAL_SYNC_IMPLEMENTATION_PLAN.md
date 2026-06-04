@@ -5,14 +5,11 @@
 Implement disk-backed incremental sync for TyO3 as an explicit dual-mode backend:
 
 - Keep the current full-rebuild implementation as the default stable mode.
-- Add an `incremental_disk` mode that mutates the existing ty `ProjectDatabase`
-  through upstream ty change events.
+- Add an `incremental_disk` mode that mutates the existing ty `ProjectDatabase` through upstream ty change events.
 - Preserve the current session read API and eventually preserve the snapshot API.
-- Use the work as a natural stepping stone toward Option 6, without forcing
-  Option 6 into the first incremental milestone.
+- Use the work as a natural stepping stone toward Option 6, without forcing Option 6 into the first incremental milestone.
 
-This plan is based on the actual ty APIs available in the vendored Ruff/ty
-checkout, not on a hypothetical invalidation layer.
+This plan is based on the actual ty APIs available in the vendored Ruff/ty checkout, not on a hypothetical invalidation layer.
 
 ## What Ty Already Provides
 
@@ -40,15 +37,12 @@ This method handles the hard parts we do not want to duplicate:
 - File and directory deletion.
 - Recursive directory sync.
 - `.gitignore`, `.ignore`, and related ignore-file changes.
-- Project config rediscovery for `pyproject.toml`, `ty.toml`, config overrides,
-  and extra configuration paths.
+- Project config rediscovery for `pyproject.toml`, `ty.toml`, config overrides, and extra configuration paths.
 - Custom stdlib `VERSIONS` updates.
 - Incremental project-file discovery through `ProjectFilesWalker::incremental`.
 - Full rescan fallback through `ChangeEvent::Rescan`.
 
-This is the right primitive for disk-backed incremental sync. TyO3 should not
-attempt to hand-edit salsa inputs directly unless `apply_changes` proves
-insufficient for a specific feature.
+This is the right primitive for disk-backed incremental sync. TyO3 should not attempt to hand-edit salsa inputs directly unless `apply_changes` proves insufficient for a specific feature.
 
 ### `ChangeEvent`
 
@@ -75,8 +69,7 @@ Useful supporting types:
 - `ExistingPathKind::from_system(system, path)`
 - `ChangeEvent::file_content_changed(path)`
 
-TyO3 can synthesize these events from explicit `sync_path()` calls before it
-adds any real file watcher.
+TyO3 can synthesize these events from explicit `sync_path()` calls before it adds any real file watcher.
 
 ### `ProjectWatcher`
 
@@ -88,9 +81,7 @@ Ty also exposes `ty_project::watch::ProjectWatcher` and `directory_watcher`.
 - module search paths outside the project root,
 - extra configuration paths.
 
-This is useful for a later `watch` mode. It should not be part of the first
-incremental milestone because a manual `sync_path()` API is easier to test and
-easier to keep deterministic.
+This is useful for a later `watch` mode. It should not be part of the first incremental milestone because a manual `sync_path()` API is easier to test and easier to keep deterministic.
 
 ### Ruff Database File Helpers
 

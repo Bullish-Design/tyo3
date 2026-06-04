@@ -13,6 +13,21 @@ from tyo3.models.analysis import (
     Position,
     Range,
 )
+from tyo3.models.editor import (
+    FoldingRange,
+    FoldingRangeKind,
+    Hint,
+    HintKind,
+    InlayHint,
+    InlayHintKind,
+)
+from tyo3.models.lsp import (
+    Completion,
+    CompletionKind,
+    Parameter,
+    Signature,
+    SignatureHelp,
+)
 from tyo3.models.navigation import (
     DefinitionTarget,
     HoverContent,
@@ -30,21 +45,6 @@ from tyo3.models.navigation import (
     WorkspaceEdit,
 )
 from tyo3.models.symbols import Symbol, SymbolKind
-from tyo3.models.editor import (
-    FoldingRange,
-    FoldingRangeKind,
-    Hint,
-    HintKind,
-    InlayHint,
-    InlayHintKind,
-)
-from tyo3.models.lsp import (
-    Completion,
-    CompletionKind,
-    Parameter,
-    Signature,
-    SignatureHelp,
-)
 
 __all__ = [  # noqa: F405
     # Analysis

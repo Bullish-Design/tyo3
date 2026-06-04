@@ -7,7 +7,6 @@ from tyo3.models.editor import FoldingRange
 
 from .conftest import needs_native, shared_session
 
-
 # ── Selection Ranges ────────────────────────────────────────────────────
 
 
@@ -47,7 +46,7 @@ def test_selection_ranges_snapshot_parity():
         snap_ranges = snap.selection_ranges("main.py", 3, 5)
 
     assert len(ranges) == len(snap_ranges)
-    for a, b in zip(ranges, snap_ranges):
+    for a, b in zip(ranges, snap_ranges, strict=True):
         assert a.start.line == b.start.line
 
 

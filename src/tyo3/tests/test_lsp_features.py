@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from tyo3.models.lsp import Completion, SignatureHelp
+from tyo3.models.lsp import Completion
 
 from .conftest import needs_native, shared_session
-
 
 # ── Signature Help ───────────────────────────────────────────────────────
 

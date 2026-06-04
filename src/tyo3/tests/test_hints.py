@@ -6,7 +6,6 @@ from tyo3.models.editor import Hint, InlayHint
 
 from .conftest import needs_native, shared_session
 
-
 # ── Inlay Hints ─────────────────────────────────────────────────────────
 
 

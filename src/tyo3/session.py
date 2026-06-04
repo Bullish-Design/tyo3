@@ -31,6 +31,8 @@ from tyo3.exceptions import (
 )
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult, Range
+from tyo3.models.editor import FoldingRange, Hint, InlayHint
+from tyo3.models.lsp import Completion, SignatureHelp
 from tyo3.models.navigation import (
     DefinitionTarget,
     HoverResult,
@@ -40,8 +42,6 @@ from tyo3.models.navigation import (
     TypeHierarchy,
     WorkspaceEdit,
 )
-from tyo3.models.editor import FoldingRange, Hint, InlayHint
-from tyo3.models.lsp import Completion, SignatureHelp
 from tyo3.models.symbols import Symbol
 
 # ── Native extension import ──────────────────────────────────────────────
