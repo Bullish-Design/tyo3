@@ -2,8 +2,11 @@
 
 Derived from tyo3-core.allium
 
-> ``TyProjectConfig`` and ``BackendInfo`` are spec-anticipation models
-> moved to ``tyo3.models._spec`` until a backend implementation arrives.
+> ``TyProject``, ``ProjectFile``, ``TyProjectConfig``, and ``BackendInfo``
+> are spec-anticipation models with no backend yet.  ``TyProjectConfig``
+> and ``BackendInfo`` live in ``tyo3.models._spec``.  All four are
+> importable from this module for backward compatibility but are not
+> part of the active public API.
 """
 
 from __future__ import annotations
@@ -83,9 +86,4 @@ __all__ = [
     "ProjectStatus",
     "FileCategory",
     "CoordinateMode",
-    "TyProject",
-    "ProjectFile",
-    # Re-exported from _spec (backward compat):
-    "BackendInfo",
-    "TyProjectConfig",
 ]

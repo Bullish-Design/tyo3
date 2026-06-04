@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from tyo3.graph import EdgeData, EdgeKind, SymbolNode
 from tyo3.graph.identity import make_symbol_id
@@ -37,7 +38,7 @@ class TestSymbolNode:
             file="test.py",
             range={"start": {"line": 1, "column": 1}, "end": {"line": 10, "column": 1}},
         )
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             node.name = "Bar"  # type: ignore[misc]
 
     def test_optional_fields_default(self) -> None:

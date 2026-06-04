@@ -1,7 +1,8 @@
 """TyO3 domain models."""
 
-# Spec-anticipation models (no backend yet)
-from tyo3.models._spec import BackendInfo, TyProjectConfig
+# Spec-anticipation models (no backend yet) — available for backward
+# compatibility via direct import but not part of the public API.
+from tyo3.models._spec import BackendInfo, TyProjectConfig  # noqa: F401
 from tyo3.models.advanced import (
     SemanticToken,
     SemanticTokenModifier,
@@ -18,9 +19,7 @@ from tyo3.models.analysis import (
 from tyo3.models.core import (
     CoordinateMode,
     FileCategory,
-    ProjectFile,
     ProjectStatus,
-    TyProject,
 )
 from tyo3.models.navigation import (
     DefinitionTarget,
@@ -38,13 +37,9 @@ from tyo3.models.symbols import Symbol, SymbolKind
 
 __all__ = [  # noqa: F405
     # Core
-    "TyProjectConfig",
-    "BackendInfo",
     "ProjectStatus",
     "FileCategory",
     "CoordinateMode",
-    "TyProject",
-    "ProjectFile",
     # Analysis
     "Position",
     "Range",
