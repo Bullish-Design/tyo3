@@ -1,4 +1,4 @@
-use ruff_source_file::{LineIndex, OneIndexed, PositionEncoding};
+use ruff_source_file::{LineIndex, OneIndexed, PositionEncoding, SourceLocation};
 use ruff_text_size::TextSize;
 
 use crate::dto::{PositionDto, RangeDto};
@@ -33,55 +33,27 @@ pub fn position_to_offset_with_index(
         ));
     }
 
-    let line_start = line_index.line_start(OneIndexed::from_zero_indexed(line_idx), source);
-    let line_start_usize = line_start.to_usize();
-
-    // Extract the current line only (not the rest of the file).
-    let line_end_usize = if line_idx + 1 < total_lines {
-        line_index
-            .line_start(OneIndexed::from_zero_indexed(line_idx + 1), source)
-            .to_usize()
-    } else {
-        source.len()
-    };
-
-    let raw_line_text = &source[line_start_usize..line_end_usize];
-    let line_text = raw_line_text.trim_end_matches(['\n', '\r']);
-
     // Validate column does not go beyond one-past-the-end of the line.
     // Column line_length + 1 is allowed (position after last char);
     // column line_length + 2 is rejected.
-    let line_char_count = line_text.chars().count();
+    let line = OneIndexed::from_zero_indexed(line_idx);
+    let line_char_count = line_index.line_len(line, source, PositionEncoding::Utf32);
     if col > line_char_count {
         return Err(format!(
             "Column {} exceeds line {} length ({} characters)",
             column,
-            line,
+            line_idx + 1,
             line_char_count
         ));
     }
 
-    let byte_col = char_len_to_byte_offset(line_text, col);
-    Ok(line_start + byte_col)
-}
-
-/// Count characters from the start of the line text and return the byte offset.
-/// For v0.1, this handles ASCII and multi-byte UTF-8.
-/// A full implementation should use `unicode-width` for grapheme clusters.
-///
-/// ASSUMPTION: Input is always 1-based (Python default). If a future
-/// `CoordinateMode` ("rust" = 0-based) is added, the caller must convert
-/// before calling this function.
-fn char_len_to_byte_offset(text: &str, char_offset: usize) -> TextSize {
-    let mut byte_pos: usize = 0;
-    for (i, c) in text.chars().enumerate() {
-        if i >= char_offset {
-            break;
-        }
-        byte_pos += c.len_utf8();
-    }
-    // Safe: byte_pos is bounded by text.len() (indices from chars in the same text)
-    TextSize::try_from(byte_pos).unwrap_or_else(|_| TextSize::from(text.len() as u32))
+    // Use ruff's LineIndex for the offset computation — same encoding as
+    // range_to_dto_with_index, so both directions share one implementation.
+    let source_location = SourceLocation {
+        line,
+        character_offset: OneIndexed::from_zero_indexed(col),
+    };
+    Ok(line_index.offset(source_location, source, PositionEncoding::Utf32))
 }
 
 /// Convert a ruff TextRange to a Python-friendly RangeDto using a precomputed LineIndex.
