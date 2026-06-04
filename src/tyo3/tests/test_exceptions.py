@@ -1,7 +1,5 @@
 """Unit tests for TyO3 exception hierarchy and error wrapping.
 
-Tests for Phase 5 of RUST_BACKEND_IMPLEMENTATION.md §8.2.
-
 These tests do NOT require the Rust native extension — they test the Python
 exception classes directly.
 """

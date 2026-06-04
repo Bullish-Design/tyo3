@@ -1,7 +1,5 @@
 """Snapshot tests for symbol/document_symbols output from the Rust backend.
 
-Tests for Phase 4 of RUST_BACKEND_IMPLEMENTATION.md §8.3.
-
 These tests record JSON snapshots of symbol outputs to detect regressions
 in the Rust DTO conversion layer. When the snapshots change, review the
 diffs to ensure the changes are intentional.

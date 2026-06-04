@@ -1,7 +1,5 @@
 """Performance benchmarks for Rust backend operations.
 
-Tests for Phase 5 of RUST_BACKEND_IMPLEMENTATION.md §8.
-
 Measures and documents type-checking latency for:
 1. **Project open** — time to create a ProjectDatabase
 2. **File listing** — time to enumerate project files

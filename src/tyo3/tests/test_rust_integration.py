@@ -1,7 +1,5 @@
 """Integration tests exercising RUST `use_rust=True` code paths with real fixtures.
 
-Tests for Phase 4 of RUST_BACKEND_IMPLEMENTATION.md §7.
-
 These tests require the Rust native extension to be built.
 Run with: PYTHONPATH=src pytest src/tyo3/tests/test_rust_integration.py -v
 

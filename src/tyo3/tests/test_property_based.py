@@ -1,7 +1,5 @@
 """Property-based tests for TyO3 coordinate conversion and symbol invariants.
 
-Tests for Phase 5 of RUST_BACKEND_IMPLEMENTATION.md §8.
-
 Uses Hypothesis to generate random positions, paths, and fixture combinations
 to verify:
 

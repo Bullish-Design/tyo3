@@ -1,7 +1,5 @@
 """Coordinate conversion edge case tests.
 
-Tests for Phase 4 of RUST_BACKEND_IMPLEMENTATION.md §8.4.
-
 Validates that position conversion (1-based Python ↔ byte-offset Rust)
 handles edge cases correctly:
 - File boundaries (start, end, beyond)
