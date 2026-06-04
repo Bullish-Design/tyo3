@@ -31,7 +31,7 @@ except ImportError:
 
 from pydantic import ValidationError
 
-from tyo3.exceptions import PositionError
+from tyo3.exceptions import PathResolutionError, PositionError
 from tyo3.models.analysis import Position
 
 # ── Path helpers ──────────────────────────────────────────────────────────
@@ -271,8 +271,6 @@ class TestEmptyFileEdgeCases:
 # ═══════════════════════════════════════════════════════════════════════════
 # Phase 2: Exception mapping tests (requires native extension)
 # ═══════════════════════════════════════════════════════════════════════════
-
-from tyo3.exceptions import PathResolutionError
 
 
 @needs_native

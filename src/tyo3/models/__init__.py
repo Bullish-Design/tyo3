@@ -1,5 +1,7 @@
 """TyO3 domain models."""
 
+# Spec-anticipation models (no backend yet)
+from tyo3.models._spec import BackendInfo, TyProjectConfig
 from tyo3.models.advanced import (
     SemanticToken,
     SemanticTokenModifier,
@@ -33,9 +35,6 @@ from tyo3.models.navigation import (
     TypeHierarchyItem,
 )
 from tyo3.models.symbols import Symbol, SymbolKind
-
-# Spec-anticipation models (no backend yet)
-from tyo3.models._spec import BackendInfo, TyProjectConfig
 
 __all__ = [  # noqa: F405
     # Core

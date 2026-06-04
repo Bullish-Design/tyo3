@@ -38,7 +38,6 @@ try:
 except ImportError:
     _HAS_NATIVE = False
 
-from tyo3.models.advanced import SemanticToken, SemanticTokenType
 from tyo3.models.analysis import (
     CheckResult,
     Diagnostic,

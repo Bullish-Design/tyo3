@@ -5,7 +5,7 @@ from __future__ import annotations
 from tyo3.graph import CodeGraph, EdgeData, EdgeKind, SymbolNode
 from tyo3.models.analysis import Range
 from tyo3.models.symbols import SymbolKind
-from tyo3.tests.conftest import needs_native, get_graph
+from tyo3.tests.conftest import get_graph, needs_native
 
 
 class TestImportCycles:
@@ -300,7 +300,7 @@ class TestImportCyclesIntegration:
         graph = get_graph("circular_imports")
         cycles = graph.import_cycles()
         assert cycles, (
-            f"Expected at least one import cycle in circular_imports fixture"
+            "Expected at least one import cycle in circular_imports fixture"
         )
         # Verify the cycle contains both modules
         all_sids_in_cycles = {sid for cycle in cycles for sid in cycle}

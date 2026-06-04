@@ -1,6 +1,6 @@
 """Main module that imports from math_ops."""
 
-from math_ops import add, multiply, PI
+from math_ops import PI, add, multiply
 
 
 def calculate(a: int, b: int) -> int:

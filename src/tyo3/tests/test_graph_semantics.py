@@ -7,12 +7,10 @@ See TyO3_REVIEW_2_REFACTORING_GUIDE.md §Phase 0.
 from __future__ import annotations
 
 from tyo3.graph import CodeGraph, EdgeData, EdgeKind, SymbolNode
-from tyo3.graph.models import ReferenceRole
 from tyo3.models.analysis import Range
 from tyo3.models.symbols import SymbolKind
-from tyo3.tests.conftest import needs_native, get_graph, get_session
-from tyo3.tests.graph_helpers import find_one, edges_of_kind
-
+from tyo3.tests.conftest import get_graph, needs_native
+from tyo3.tests.graph_helpers import edges_of_kind, find_one
 
 # ── Phase 0.2: References attach to functions, not modules ───────────────
 

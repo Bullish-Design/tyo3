@@ -18,9 +18,9 @@ from tyo3.graph.models import (
     GraphBuildReport,
     SymbolNode,
 )
-from tyo3.models.advanced import SemanticTokenType, SemanticTokenModifier
+from tyo3.models.advanced import SemanticTokenModifier, SemanticTokenType
 from tyo3.models.analysis import Diagnostic, Range
-from tyo3.models.navigation import NameOccurrence, ReferenceRole
+from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import Symbol, SymbolKind
 from tyo3.session import TyO3Session
 

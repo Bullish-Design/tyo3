@@ -7,12 +7,10 @@ from unittest.mock import MagicMock
 
 from tyo3.graph import (
     CodeGraph,
-    GraphBuildFailure,
     GraphBuildReport,
-    SymbolNode,
 )
 from tyo3.models.symbols import SymbolKind
-from tyo3.tests.conftest import needs_native, get_graph, get_session
+from tyo3.tests.conftest import get_graph, get_session, needs_native
 
 FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
@@ -126,6 +124,7 @@ class TestQualifiedNameResolution:
         has_qualified = any(
             occ.target_qualified_name is not None for occ in occurrences
         )
+        assert has_qualified, "Expected at least one occurrence with a qualified target name"
 
 
 # ── Phase 6: Build Reports ───────────────────────────────────
@@ -175,7 +174,7 @@ class TestBuildReports:
 
     def test_build_report_records_inheritance_failure(self) -> None:
         """When type_hierarchy raises for a class, the report captures it."""
-        from tyo3.models.analysis import FileRange, Position, Range
+        from tyo3.models.analysis import FileRange, Range
         from tyo3.models.symbols import Symbol
 
         class_range = Range.model_validate(

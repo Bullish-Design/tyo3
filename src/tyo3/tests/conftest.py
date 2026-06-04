@@ -8,8 +8,6 @@ from pathlib import PurePosixPath
 
 import pytest
 
-import pytest
-
 from tyo3.models.advanced import SemanticToken, SemanticTokenModifier, SemanticTokenType
 from tyo3.models.analysis import Diagnostic, DiagnosticSeverity, Position, Range
 from tyo3.models.core import (

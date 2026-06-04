@@ -6,7 +6,7 @@ from tyo3.graph import CodeGraph, EdgeData, EdgeKind, SymbolNode
 from tyo3.graph.models import ReferenceRole
 from tyo3.models.analysis import Range
 from tyo3.models.symbols import SymbolKind
-from tyo3.tests.conftest import needs_native, get_graph, get_session
+from tyo3.tests.conftest import get_graph, needs_native
 
 
 @needs_native

@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
-import rustworkx as rx
-
 from tyo3.graph import CodeGraph, EdgeData, EdgeKind, SymbolNode
 from tyo3.models.analysis import Range
 from tyo3.models.symbols import SymbolKind
-from pathlib import Path as StdPath
-from tyo3.tests.conftest import needs_native, get_graph
+from tyo3.tests.conftest import get_graph, needs_native
 
 
 class TestHubSymbols:
@@ -118,7 +114,7 @@ class TestSubgraphForFile:
     def test_extracts_file_nodes_and_neighbours(self) -> None:
         graph = CodeGraph()
         mod_a = self._make_module_node(graph, "a.py", "a")
-        mod_b = self._make_module_node(graph, "b.py", "b")
+        self._make_module_node(graph, "b.py", "b")
         func_a = self._make_func_node(graph, "foo", "a.py")
         func_b = self._make_func_node(graph, "bar", "b.py")
 
@@ -136,7 +132,6 @@ class TestSubgraphForFile:
         graph = CodeGraph()
         self._make_module_node(graph, "a.py", "a")
         func_a = self._make_func_node(graph, "foo", "a.py")
-        func_b = self._make_func_node(graph, "bar", "a.py")
         edge = EdgeData(kind=EdgeKind.CONTAINS)
         graph._add_edge("a.py::<module>", func_a, edge, "a.py")
 

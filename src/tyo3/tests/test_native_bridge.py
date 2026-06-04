@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 try:
-    from tyo3 import _native_impl as _native
     from tyo3 import _HAS_NATIVE
+    from tyo3 import _native_impl as _native
 except ImportError:
     _HAS_NATIVE = False
     _native = None

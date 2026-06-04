@@ -7,7 +7,6 @@ import pytest
 from tyo3.graph import EdgeData, EdgeKind, SymbolNode
 from tyo3.graph.identity import make_symbol_id
 from tyo3.graph.models import ReferenceRole
-from tyo3.models.analysis import Range
 from tyo3.models.symbols import SymbolKind
 
 
@@ -38,7 +37,7 @@ class TestSymbolNode:
             file="test.py",
             range={"start": {"line": 1, "column": 1}, "end": {"line": 10, "column": 1}},
         )
-        with pytest.raises(Exception):
+        with pytest.raises(TypeError):
             node.name = "Bar"  # type: ignore[misc]
 
     def test_optional_fields_default(self) -> None:

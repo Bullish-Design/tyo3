@@ -12,7 +12,6 @@ from tyo3.models.analysis import Range
 from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import SymbolKind
 
-
 # ── Node payload (Pydantic — consistency + serialization) ──
 
 

@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import rustworkx as rx
-
-from typing import Any
 
 from tyo3.graph.models import EdgeData, EdgeKind, SymbolNode
 from tyo3.models.navigation import ReferenceRole

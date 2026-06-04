@@ -6,7 +6,7 @@ from pathlib import Path as StdPath
 
 from tyo3.graph import CodeGraph
 from tyo3.models.symbols import SymbolKind
-from tyo3.tests.conftest import needs_native, get_session
+from tyo3.tests.conftest import get_session, needs_native
 from tyo3.tests.graph_helpers import find_one
 
 FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
@@ -31,7 +31,6 @@ class TestUpdateFile:
     def test_update_preserves_other_files(self) -> None:
         session = get_session("graph_test")
         graph = self._fresh_graph()
-        original_count = graph.node_count
         symbols_in_models = graph.symbols_in_file("models.py")
         assert len(symbols_in_models) > 0
 

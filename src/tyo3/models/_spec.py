@@ -10,8 +10,9 @@ promoted to the appropriate active module (e.g. ``core.py``).
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
 from pathlib import PurePosixPath
+
+from pydantic import BaseModel, Field
 
 # ── Config / Metadata (no backend yet) ────────────────────────────────────
 

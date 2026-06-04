@@ -11,7 +11,6 @@ import shutil
 from pathlib import Path as StdPath
 
 from tyo3.graph import CodeGraph
-from tyo3.models.symbols import SymbolKind
 from tyo3.session import TyO3Session
 from tyo3.tests.conftest import needs_native
 
