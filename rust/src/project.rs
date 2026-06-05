@@ -741,11 +741,16 @@ fn compute_hover(
 /// Build a live HEAD over an `OverlaySystem`, seeding the overlay from
 /// `initial_store` (an empty store on first open; the preserved store on reload).
 ///
-/// Construction mirrors ty_server (`ty_server/src/session.rs:602`):
+/// Construction mirrors ty_server (`ty_server/src/session.rs:602`), but keeps
+/// the caller's root as a hard project boundary. `ProjectMetadata::discover`
+/// walks upward, which is correct for a CLI but wrong for TyO3 fixture/session
+/// roots: opening `fixtures/simple_package` must not analyze the whole repo.
+///
 ///   1. discover project metadata from disk (`pyproject.toml` / `ty.toml`),
-///   2. layer user-level configuration on top,
-///   3. build the db with `fallible` (surfaces config errors),
-///   4. on any failure, fall back to a default blank project (never panic).
+///   2. discard discovered metadata if it came from an ancestor root,
+///   3. layer user-level configuration on top,
+///   4. build the db with `fallible` (surfaces config errors),
+///   5. on any failure, fall back to a default blank project (never panic).
 fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
     use ruff_python_ast::name::Name;
 
@@ -754,10 +759,21 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
     // to the db.
     let system = OverlaySystem::live(root.clone(), initial_store.capture());
 
-    // 1+2+3: discover → apply user config → build. Each step's error is mapped to
-    // a string so the chain has one error type (no `anyhow` dependency).
+    // 1+2+3+4: discover → clamp → apply user config → build. Each step's error
+    // is mapped to a string so the chain has one error type (no `anyhow`
+    // dependency).
     let built: Result<ProjectDatabase, String> = ProjectMetadata::discover(&root, &system)
         .map_err(|e| format!("project discovery failed: {e}"))
+        .map(|metadata| {
+            if metadata.root() == &*root {
+                metadata
+            } else {
+                ProjectMetadata::new(
+                    Name::new(root.file_name().unwrap_or("root")),
+                    root.clone(),
+                )
+            }
+        })
         .and_then(|mut metadata| {
             metadata
                 .apply_configuration_files(&system)

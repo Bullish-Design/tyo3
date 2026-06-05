@@ -66,6 +66,15 @@ def get_project(fixture_name: str) -> TyO3Session:
 class TestProjectLifecycle:
     """Test open, reload, close lifecycle with real Rust backend."""
 
+    def test_open_simple_package_is_scoped_to_fixture_root(self) -> None:
+        rp = TyO3Session(fixture_path("simple_package"))
+        try:
+            files = rp.files()
+            assert len(files) == 1
+            assert str(files[0]).endswith("fixtures/simple_package/main.py")
+        finally:
+            rp.close()
+
     def test_open_simple_package(self) -> None:
         rp = get_project("simple_package")
         files = rp.files()
