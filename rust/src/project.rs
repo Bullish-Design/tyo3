@@ -845,7 +845,7 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
         Ok(db) => db,
         Err(err) => {
             // 4. Fallback: blank project over the same overlay, defaults substituted.
-            eprintln!("WARNING: {err}. Falling back to default project settings.");
+            log::warn!("{err}. Falling back to default project settings.");
             let metadata = ProjectMetadata::new(Name::new("tyo3-project"), root.clone());
             ProjectDatabase::use_defaults(metadata, system.clone())
         }
@@ -960,7 +960,7 @@ fn build_frozen(root: SystemPathBuf, generation: Generation, rev: Revision) -> T
     let db = match built {
         Ok(db) => db,
         Err(err) => {
-            eprintln!("WARNING: {err}. Falling back to default project settings for snapshot.");
+            log::warn!("{err}. Falling back to default project settings for snapshot.");
             let metadata =
                 ProjectMetadata::new(Name::new("tyo3-project"), root.clone());
             ProjectDatabase::use_defaults(metadata, system)
@@ -1330,14 +1330,16 @@ impl PyTyProject {
         Ok(())
     }
 
-    // ── Write path (Phase 3) ───────────────────────────────────────
+    // ── Write path ─────────────────────────────────────────────────
     //
-    // All writes hold the GIL (§7.3) and mutate the HeadState in-place.
+    // All writes hold the GIL and mutate the HeadState in-place.
     // Each returns a SyncResult dict (via pythonize) describing the delta.
     //
-    // IMPORTANT: a live snapshot (`snapshot()`) shares the HEAD Zalsa and
-    // will block `apply_changes` forever (architecture §0). Always close()
-    // snapshots before calling any write method. Phase 4 fixes this.
+    // ARCHITECTURE: HEAD is mutated in place; snapshots are independent
+    // frozen databases that never block or are blocked by writes.  Every
+    // write advances the application revision, records content in the
+    // generation, and publishes the new generation so a reader observing
+    // revision R sees consistent content (§3.3.3).
 
     /// Overlay `path` with in-memory `text` (no disk write). Returns a
     /// SyncResult dict with the new revision and the affected paths.
