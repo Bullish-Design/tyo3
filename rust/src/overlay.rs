@@ -23,6 +23,7 @@
 //! membership, not canonical path resolution).
 
 use std::any::Any;
+use std::collections::BTreeSet;
 use std::panic::RefUnwindSafe;
 use std::sync::Arc;
 
@@ -247,19 +248,68 @@ impl System for OverlaySystem {
         &'a self,
         path: &SystemPath,
     ) -> std::io::Result<Box<dyn Iterator<Item = std::io::Result<DirectoryEntry>> + 'a>> {
-        // Step 6 will replace this with generation-based enumeration for
-        // frozen views.  For now, live head delegates to native; frozen
-        // views produce an empty listing (pre-population not yet wired).
         if self.frozen.is_some() {
-            // TODO Step 6: enumerate from generation keys
-            return Ok(Box::new(std::iter::empty()));
+            // Enumerate direct children from the generation.
+            // Only `Document::Text` entries appear; tombstones are absent.
+            // Intermediate sub-directories are synthesised from key prefixes.
+            let path_buf = path.to_path_buf();
+            let mut direct_dirs: BTreeSet<SystemPathBuf> = BTreeSet::new();
+            let mut entries: Vec<DirectoryEntry> = Vec::new();
+
+            for key in self.system_keys() {
+                // Find keys that are direct children of `path_buf`.
+                let Ok(rest) = key.strip_prefix(&path_buf) else {
+                    continue;
+                };
+                let rest = rest.as_str();
+                // Skip "" or "/" entries (the directory itself).
+                if rest.is_empty() || rest == "/" {
+                    continue;
+                }
+                // Strip leading '/'.
+                let rest = rest.strip_prefix('/').unwrap_or(rest);
+
+                if let Some(slash_pos) = rest.find('/') {
+                    // This is a descendant in a sub-directory: synthesise a
+                    // Directory entry for the immediate sub-directory.
+                    let dir_name = &rest[..slash_pos];
+                    let dir_path = path_buf.join(dir_name);
+                    direct_dirs.insert(dir_path);
+                } else {
+                    // Direct child file.
+                    // Check it's a Text document (not a tombstone).
+                    if let Some(doc) = self.document(&key) {
+                        if matches!(doc, Document::Text { .. }) {
+                            let file_path = path_buf.join(rest);
+                            entries.push(DirectoryEntry::new(file_path, FileType::File));
+                        }
+                        // Tombstones (Deleted) are skipped — absent from listing.
+                    }
+                }
+            }
+
+            // Add synthesised directory entries.
+            for dir_path in direct_dirs {
+                entries.push(DirectoryEntry::new(dir_path, FileType::Directory));
+            }
+
+            Ok(Box::new(entries.into_iter().map(Ok)))
+        } else {
+            // Live head — delegate to native disk.
+            self.native.read_directory(path)
         }
-        self.native.read_directory(path)
     }
 
     fn walk_directory(&self, path: &SystemPath) -> WalkDirectoryBuilder {
-        // Step 6 will replace this with generation-based walk for frozen
-        // views.  For now, live head delegates to native.
+        // NOTE: walk_directory currently delegates to native even for frozen
+        // views, because ruff_db's walk_directory::DirectoryEntry is not
+        // publicly constructible from outside the ruff_db crate.  This is
+        // acceptable under Design A because any file discovered by the walk
+        // that is not in the frozen generation will fail on read_to_string
+        // (returning not_found).  If full generation-based walking becomes
+        // necessary, this is the trigger to either (a) upstream a public
+        // constructor for walk_directory::DirectoryEntry, or (b) switch to
+        // Design B with shared-generation intern.
         self.native.walk_directory(path)
     }
 
@@ -441,5 +491,105 @@ mod tests {
         let db = ProjectDatabase::use_defaults(metadata, system);
         let file = ruff_db::files::system_path_to_file(&db, &a).unwrap();
         assert!(source_text(&db, file).as_str().contains("VALUE = 42"));
+    }
+
+    // ── Step 6: Directory membership pinned at a revision ─────────
+
+    /// A frozen generation containing files at root and in a subdirectory
+    /// enumerates direct children correctly via `read_directory`.
+    #[test]
+    fn frozen_read_directory_from_generation() {
+        let (_dir, root, a) = fixture("X = 1\n");
+        // Build a generation with multiple paths at different depths.
+        let mut map = ContentMap::new();
+        let a_path = root.join("a.py");
+        let sub_b = root.join("sub/b.py");
+        map.system = map.system.insert(a_path.clone(), Document::text("x", 1));
+        map.system = map.system.insert(sub_b.clone(), Document::text("y", 2));
+        let gen = Arc::new(map);
+
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        // read_directory(root) should list a.py and sub/
+        let entries: Vec<DirectoryEntry> = frozen
+            .read_directory(&root)
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let paths: Vec<&str> = entries.iter().map(|e| e.path().as_str()).collect();
+        // a.py is a direct child file
+        assert!(paths.iter().any(|p| p.ends_with("/a.py") || *p == "/a.py" || p.ends_with("a.py")),
+            "expected a.py in listing, got {paths:?}");
+        // sub/ is a synthesised directory
+        assert!(paths.iter().any(|p| p.contains("/sub") || p.ends_with("sub")),
+            "expected sub/ directory in listing, got {paths:?}");
+    }
+
+    /// A tombstoned path does NOT appear in frozen directory enumeration.
+    #[test]
+    fn tombstoned_path_absent_from_frozen_directory() {
+        let (_dir, root, _a) = fixture("X = 1\n");
+        let mut map = ContentMap::new();
+        let a_path = root.join("a.py");
+        let b_path = root.join("b.py");
+        map.system = map.system.insert(a_path.clone(), Document::text("x", 1));
+        // b.py is tombstoned.
+        map.system = map.system.insert(b_path.clone(), Document::Deleted { version: 2 });
+        let gen = Arc::new(map);
+
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+        let entries: Vec<DirectoryEntry> = frozen
+            .read_directory(&root)
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let paths: Vec<&str> = entries.iter().map(|e| e.path().as_str()).collect();
+        // b.py should NOT appear — it's a tombstone.
+        assert!(!paths.iter().any(|p| p.contains("b.py")),
+            "tombstoned b.py must not appear in listing, got {paths:?}");
+        // a.py SHOULD appear.
+        assert!(paths.iter().any(|p| p.contains("a.py")),
+            "Text a.py must appear in listing, got {paths:?}");
+    }
+
+    /// The gate: a file created on disk AFTER building a frozen view does NOT
+    /// appear in the frozen enumeration, but DOES appear in a live view.
+    #[test]
+    fn new_disk_file_absent_from_frozen_present_in_live() {
+        let (_dir, root, _a) = fixture("X = 1\n");
+        // Pre-populate only a.py in the frozen generation.
+        let mut map = ContentMap::new();
+        let a_path = root.join("a.py");
+        map.system = map.system.insert(a_path.clone(), Document::text("X = 1\n", 1));
+        let gen = Arc::new(map);
+
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        // Create c.py on disk AFTER the frozen view is built.
+        std::fs::write(_dir.path().join("c.py"), b"Y = 2\n").unwrap();
+
+        // Frozen enumeration does NOT include c.py.
+        let frozen_entries: Vec<DirectoryEntry> = frozen
+            .read_directory(&root)
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        let frozen_names: Vec<&str> = frozen_entries.iter().map(|e| e.path().as_str()).collect();
+        assert!(!frozen_names.iter().any(|p| p.contains("c.py")),
+            "c.py must NOT appear in frozen enumeration, got {frozen_names:?}");
+
+        // Live view DOES include c.py (via native disk).
+        let live = OverlaySystem::live(root, Arc::new(ContentMap::new()));
+        let tmp_root = SystemPathBuf::from_path_buf(_dir.path().to_path_buf()).unwrap();
+        let live_entries: Vec<DirectoryEntry> = live
+            .read_directory(&tmp_root)
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        let live_names: Vec<&str> = live_entries.iter().map(|e| e.path().as_str()).collect();
+        assert!(live_names.iter().any(|p| p.contains("c.py")),
+            "c.py must appear in live enumeration, got {live_names:?}");
     }
 }
