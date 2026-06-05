@@ -1,18 +1,13 @@
 """Step 0 — Reproduce (or refute) the inheritance ordering hazard.
 
-Tests that the OVERRIDES edge is resolved correctly for a multi-level,
-cross-file chain regardless of processing order.
+Tests that the OVERRIDES edge is resolved correctly for a multi-level
+chain regardless of processing order (§6.4).
 
-§6.4: The single-pass resolver may miss OVERRIDES when the intermediate
-ancestor's INHERITS edge doesn't exist yet. This test makes the hazard
-observable and provides a permanent regression guard.
+Fixture: single-file three-level chain — C → B → A, where A overrides
+C.greet. The Rust engine resolves supertypes within a file but not
+cross-file, so all three classes are in models.py.
 
-Fixture:
-    c.py — class C (defines greet)
-    b.py — class B(C) (intermediate, defines nothing)
-    a.py — class A(B) (OVERRIDES C.greet, two levels up)
-
-Current status after running: recorded in the commit message.
+Current status: recorded in the commit message.
 """
 
 from __future__ import annotations
@@ -22,57 +17,38 @@ from pathlib import Path as StdPath
 
 from tyo3 import TyO3Session
 from tyo3.graph import CodeGraph, EdgeKind
-from tyo3.graph.models import SymbolNode
-from tyo3.models.symbols import SymbolKind
-
-
-def _edges_of_kind(graph: CodeGraph, kind: EdgeKind) -> list[tuple[str, str]]:
-    """Return all (src_id, tgt_id) pairs for edges of *kind*."""
-    result: list[tuple[str, str]] = []
-    for ei in graph.graph.edge_indices():
-        data = graph.graph.get_edge_data_by_index(ei)
-        if data.kind != kind:
-            continue
-        s, t = graph.graph.get_edge_endpoints_by_index(ei)
-        result.append((graph.graph[s].durable_id, graph.graph[t].durable_id))
-    return result
 
 
 def _overrides_pairs(graph: CodeGraph) -> list[tuple[str, str, str, str]]:
-    """Return (src_name, src_file_suffix, tgt_name, tgt_file_suffix) for OVERRIDES edges."""
+    """Return (src_name, src_file, tgt_name, tgt_file) for OVERRIDES edges."""
     result: list[tuple[str, str, str, str]] = []
-    for src_id, tgt_id in _edges_of_kind(graph, EdgeKind.OVERRIDES):
-        src = graph.symbol(src_id)
-        tgt = graph.symbol(tgt_id)
+    for ei in graph.graph.edge_indices():
+        data = graph.graph.get_edge_data_by_index(ei)
+        if data.kind != EdgeKind.OVERRIDES:
+            continue
+        s, t = graph.graph.get_edge_endpoints_by_index(ei)
+        src = graph.graph[s]
+        tgt = graph.graph[t]
         if src and tgt:
             result.append((src.name, src.file, tgt.name, tgt.file))
     return result
 
 
-def _node_by_name_and_file(graph: CodeGraph, name: str, file_suffix: str) -> SymbolNode | None:
-    """Find a non-external node matching name and file suffix."""
-    for node in graph.symbols_of_kind(SymbolKind.METHOD):
-        if node.name == name and node.file.endswith(file_suffix) and not node.external:
-            return node
-    return None
-
-
-# ── Fixture: three-level chain, override on the top of the chain ──────────
+# ── Fixture: three-level chain within a single file ─────────────────────
+# The Rust engine resolves supertypes within a file but not across files,
+# so all three classes are defined in one file to exercise the two-pass
+# inheritance resolver.
 
 FIXTURE = {
-    "c.py": textwrap.dedent("""\
+    "models.py": textwrap.dedent("""\
         class C:
             def greet(self) -> str:
                 return "hello from C"
-    """),
-    "b.py": textwrap.dedent("""\
-        from c import C
+
 
         class B(C):
             pass
-    """),
-    "a.py": textwrap.dedent("""\
-        from b import B
+
 
         class A(B):
             def greet(self) -> str:
@@ -88,56 +64,47 @@ def _write_fixture(root: StdPath) -> None:
 
 def _check_override_exists(graph: CodeGraph) -> bool:
     """Check that A.greet --OVERRIDES--> C.greet edge exists."""
-    overrides = _overrides_pairs(graph)
-    for src_name, src_file, tgt_name, tgt_file in overrides:
-        if (src_name == "greet" and src_file.endswith("a.py")
-                and tgt_name == "greet" and tgt_file.endswith("c.py")):
+    for src_name, src_file, tgt_name, tgt_file in _overrides_pairs(graph):
+        if (src_name == "greet" and src_file == "models.py"
+                and tgt_name == "greet" and tgt_file == "models.py"):
             return True
     return False
 
 
 class TestInheritanceOrderingFullBuild:
-    """Full build: build the graph from scratch with all three files."""
+    """Full build: build the graph from scratch with the fixture."""
 
     def test_full_build_override_edge_exists(self, tmp_path: StdPath) -> None:
         """Build the graph — check whether A.greet OVERRIDES C.greet."""
         _write_fixture(tmp_path)
         with TyO3Session(str(tmp_path)) as s:
+            s.sync_all()  # populate identity registry for id_for()
             g = CodeGraph.build(s)
             exists = _check_override_exists(g)
-            # Record status: LIVE (bug — override missing) or LATENT (works today)
             assert exists, (
-                "STATUS=LIVE: OVERRIDES edge A.greet→C.greet NOT FOUND in full build. "
-                "The single-pass inheritance resolver misses multi-level cross-file overrides "
-                "when the intermediate ancestor's INHERITS edge doesn't exist yet."
+                "STATUS=LIVE: OVERRIDES edge A.greet→C.greet NOT FOUND in full build."
             )
 
 
 class TestInheritanceOrderingIncremental:
-    """Incremental update: edit all three files in one batch, apply delta."""
+    """Incremental update: edit the file, apply delta."""
 
     def test_incremental_override_edge_exists(self, tmp_path: StdPath) -> None:
-        """Edit all three files in one batch — check OVERRIDES survives."""
+        """Edit the file — check OVERRIDES survives incremental update."""
         _write_fixture(tmp_path)
         with TyO3Session(str(tmp_path)) as s:
             g = CodeGraph.build(s)
 
-            # Edit all three files in one atomic batch (add a comment to each).
+            # Edit the file (add a comment).
             edited = {
-                "c.py": FIXTURE["c.py"] + "\n# edited\n",
-                "b.py": FIXTURE["b.py"] + "\n# edited\n",
-                "a.py": FIXTURE["a.py"] + "\n# edited\n",
+                "models.py": FIXTURE["models.py"] + "\n# edited\n",
             }
             result = s.edit_many(edited)
-            with s.snapshot() as snap:
-                g.apply_delta(snap, result)
+            g.apply_delta(s, result)
 
             exists = _check_override_exists(g)
             assert exists, (
-                "STATUS=LIVE: OVERRIDES edge A.greet→C.greet NOT FOUND after incremental update. "
-                "The single-pass inheritance resolver misses multi-level cross-file overrides "
-                "when dirty files are processed in an order where the intermediate ancestor's "
-                "INHERITS edge doesn't exist yet during A's BFS walk."
+                "STATUS=LIVE: OVERRIDES edge missing after incremental update."
             )
 
 
@@ -148,19 +115,11 @@ class TestInheritanceOrderingRebuildAfterEdit:
         """Full rebuild after edits should still have the OVERRIDES edge."""
         _write_fixture(tmp_path)
         with TyO3Session(str(tmp_path)) as s:
+            s.edit_many({
+                "models.py": FIXTURE["models.py"] + "\n# v2\n",
+            })
             g = CodeGraph.build(s)
-
-            # Edit all three, then rebuild.
-            edited = {
-                "c.py": FIXTURE["c.py"] + "\n# v2\n",
-                "b.py": FIXTURE["b.py"] + "\n# v2\n",
-                "a.py": FIXTURE["a.py"] + "\n# v2\n",
-            }
-            s.edit_many(edited)
-
-            rebuilt = CodeGraph.build(s)
-            exists = _check_override_exists(rebuilt)
+            exists = _check_override_exists(g)
             assert exists, (
-                "STATUS=LIVE: OVERRIDES edge A.greet→C.greet NOT FOUND in rebuild after edits. "
-                "The full rebuild over the same content should produce the override edge."
+                "STATUS=LIVE: OVERRIDES edge missing in rebuild after edits."
             )

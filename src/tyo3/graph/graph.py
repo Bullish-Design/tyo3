@@ -211,17 +211,22 @@ class CodeGraph:
                 native_by_graph=native_by_graph,
             )
 
-        # ── Pass 5: inheritance and overrides ─────────────────
-        for file_str, symbols in symbols_by_file.items():
-            graph._resolve_inheritance(
-                session,
-                file_str,
-                symbols,
-                report=report,
-                root=root_resolved,
-                native_by_graph=native_by_graph,
-                project_files=project_files,
-            )
+        # ── Pass 5: inheritance — two passes (§6.4) ─────
+        # Pass I: all INHERITS edges for all classes in the project
+        graph._inherits_pass_I(
+            session,
+            symbols_by_file,
+            report=report,
+            root=root_resolved,
+            native_by_graph=native_by_graph,
+            project_files=project_files,
+        )
+        # Pass II: all OVERRIDES edges (BFS walks complete INHERITS chains)
+        graph._overrides_pass_II(
+            symbols_by_file,
+            report=report,
+            native_by_graph=native_by_graph,
+        )
 
         # ── Pass 6: diagnostics (single check, distribute per-file)
         graph._collect_all_diagnostics(
@@ -377,7 +382,12 @@ class CodeGraph:
         """Add DEFINES/CONTAINS edges for all symbols in one file."""
         module_id = make_module_durable_id(file_str)
         for symbol in symbols:
-            did = derive_durable_id(session, file_str, symbol)
+            # For nested symbols, derive the compound id (parent::qualified_name)
+            # to match the DurableId assigned in _materialize_file_nodes.
+            parent_did = None
+            if symbol.container_name:
+                parent_did = self._find_symbol_in_file(file_str, symbol.container_name)
+            did = derive_durable_id(session, file_str, symbol, parent_durable_id=parent_did)
             if did is None:
                 continue
             parent_id = self._resolve_parent_id(file_str, symbol, module_id)
@@ -927,116 +937,144 @@ class CodeGraph:
                         return parts[i + 1]
         return None
 
-    # ── Inheritance resolution ────────────────────────────────
+    # ── Inheritance resolution (two-pass, §6.4) ───────────────
 
-    def _resolve_inheritance(
+    def _inherits_pass_I(
         self,
         session: TyO3Session,
-        file_str: str,
-        symbols: list[Symbol],
+        symbols_by_file: dict[str, list[Symbol]],
         *,
         report: GraphBuildReport | None = None,
         root: Path | None = None,
         native_by_graph: dict[str, str] | None = None,
         project_files: set[str] | None = None,
     ) -> None:
-        """Add INHERITS and OVERRIDES edges for class symbols."""
-        native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
-        for symbol in symbols:
-            if symbol.kind != SymbolKind.CLASS:
-                continue
+        """Pass I: Add INHERITS edges for ALL classes in the dirty set.
 
-            start = symbol.selection_range.start if symbol.selection_range else symbol.location.range.start
-            try:
-                # Only supertypes are needed for INHERITS edges. class_supertypes
-                # skips the project-wide subtype scan that type_hierarchy performs
-                # (and that this build discarded), which dominated build time.
-                supertypes = session.class_supertypes(native_file, start.line, start.column)
-            except Exception as e:
-                if report is not None:
-                    report.failures.append(
-                        GraphBuildFailure(
-                            file=file_str,
-                            phase="inheritance",
-                            error_type=type(e).__name__,
-                            message=str(e),
-                        )
-                    )
-                continue
-
-            did = derive_durable_id(session, file_str, symbol)
-
-            # Add INHERITS edges to supertypes
-            for supertype in supertypes:
-                super_file_raw = str(supertype.path)
-                super_file = (
-                    _normalize_result_path(root, super_file_raw, project_files)
-                    if root is not None and project_files is not None
-                    else super_file_raw
-                )
-                super_did = self._find_symbol_in_file(super_file, supertype.name)
-
-                # If not found locally, create an external stub node
-                if super_did is None:
-                    package = self._infer_package(super_file)
-                    if package is None and super_file not in self._file_to_nodes:
-                        package = "unknown"
-                    if package:
-                        ext_did = f"{package}::{supertype.name}"
-                        kind = SymbolKind.CLASS
-                        super_did = ext_did
-                        if ext_did not in self._id_to_index:
-                            self._add_stub_node(
-                                durable_id=ext_did,
-                                name=supertype.name,
-                                qualified_name=(f"{package}.{supertype.name}"),
-                                kind=kind,
-                                package=package,
-                            )
-                    else:
-                        continue
-
-                edge = EdgeData(kind=EdgeKind.INHERITS)
-                self._add_edge(did, super_did, edge, file_str)
-
-            # Derive OVERRIDES: collect methods from the child class,
-            # then walk the full supertype chain to find overridden
-            # methods.
-            child_methods = [s for s in symbols if s.kind in _METHOD_KINDS and s.container_name == symbol.name]
-            if not child_methods:
-                continue
-
-            # Collect ancestor methods by walking the INHERITS chain
-            ancestor_methods: dict[str, str] = {}  # name -> durable_id
-            visited: set[str] = {did}
-            queue: deque[str] = deque([did])
-
-            while queue:
-                current_did = queue.popleft()
-                current_idx = self._id_to_index.get(current_did)
-                if current_idx is None:
+        MUST complete for the entire set before _overrides_pass_II runs
+        anywhere (§6.4). Every class in every file in the set gets its
+        direct INHERITS edge to each supertype. After this pass, the
+        INHERITS chain is complete for BFS walks.
+        """
+        for file_str, symbols in symbols_by_file.items():
+            native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
+            for symbol in symbols:
+                if symbol.kind != SymbolKind.CLASS:
                     continue
 
-                for _src, succ_idx, edge_data in self._graph.out_edges(current_idx):
-                    if edge_data.kind != EdgeKind.INHERITS:
+                start = symbol.selection_range.start if symbol.selection_range else symbol.location.range.start
+                try:
+                    supertypes = session.class_supertypes(native_file, start.line, start.column)
+                except Exception as e:
+                    if report is not None:
+                        report.failures.append(
+                            GraphBuildFailure(
+                                file=file_str,
+                                phase="inheritance",
+                                error_type=type(e).__name__,
+                                message=str(e),
+                            )
+                        )
+                    continue
+
+                did = derive_durable_id(session, file_str, symbol)
+
+                for supertype in supertypes:
+                    super_file_raw = str(supertype.path)
+                    super_file = (
+                        _normalize_result_path(root, super_file_raw, project_files)
+                        if root is not None and project_files is not None
+                        else super_file_raw
+                    )
+                    super_did = self._find_symbol_in_file(super_file, supertype.name)
+
+                    if super_did is None:
+                        package = self._infer_package(super_file)
+                        if package is None and super_file not in self._file_to_nodes:
+                            package = "unknown"
+                        if package:
+                            ext_did = f"{package}::{supertype.name}"
+                            super_did = ext_did
+                            if ext_did not in self._id_to_index:
+                                self._add_stub_node(
+                                    durable_id=ext_did,
+                                    name=supertype.name,
+                                    qualified_name=(f"{package}.{supertype.name}"),
+                                    kind=SymbolKind.CLASS,
+                                    package=package,
+                                )
+                        else:
+                            continue
+
+                    edge = EdgeData(kind=EdgeKind.INHERITS)
+                    self._add_edge(did, super_did, edge, file_str)
+
+    def _overrides_pass_II(
+        self,
+        symbols_by_file: dict[str, list[Symbol]],
+        *,
+        report: GraphBuildReport | None = None,
+        native_by_graph: dict[str, str] | None = None,
+    ) -> None:
+        """Pass II: Add OVERRIDES edges AFTER all INHERITS edges exist.
+
+        Runs only after _inherits_pass_I has completed for the entire
+        dirty set (§6.4). BFS-walks the now-complete INHERITS chain for
+        each class to collect ancestor methods, then adds OVERRIDES edges
+        for child methods that match ancestor methods by name.
+        """
+        for file_str, symbols in symbols_by_file.items():
+            for symbol in symbols:
+                if symbol.kind != SymbolKind.CLASS:
+                    continue
+
+                did = self._find_symbol_in_file(
+                    file_str,
+                    symbol.qualified_name or symbol.name,
+                )
+                if did is None:
+                    continue
+
+                # Collect methods from the child class
+                child_methods = [
+                    s for s in symbols
+                    if s.kind in _METHOD_KINDS and s.container_name == symbol.name
+                ]
+                if not child_methods:
+                    continue
+
+                # BFS walk the INHERITS chain (all edges exist from Pass I)
+                ancestor_methods: dict[str, str] = {}  # name -> durable_id
+                visited: set[str] = {did}
+                queue: deque[str] = deque([did])
+
+                while queue:
+                    current_did = queue.popleft()
+                    current_idx = self._id_to_index.get(current_did)
+                    if current_idx is None:
                         continue
 
-                    parent_did = self._graph[succ_idx].durable_id
-                    if parent_did not in visited:
-                        visited.add(parent_did)
-                        queue.append(parent_did)
+                    for _src, succ_idx, edge_data in self._graph.out_edges(current_idx):
+                        if edge_data.kind != EdgeKind.INHERITS:
+                            continue
 
-                    # Collect this parent's methods
-                    for c in self.children(parent_did):
-                        if c.kind in _METHOD_KINDS and c.name not in ancestor_methods:
-                            ancestor_methods[c.name] = c.durable_id
+                        parent_did = self._graph[succ_idx].durable_id
+                        if parent_did not in visited:
+                            visited.add(parent_did)
+                            queue.append(parent_did)
 
-            for method in child_methods:
-                if method.name in ancestor_methods:
-                    method_did = derive_durable_id(session, file_str, method, parent_durable_id=did)
-                    parent_method_did = ancestor_methods[method.name]
-                    edge = EdgeData(kind=EdgeKind.OVERRIDES)
-                    self._add_edge(method_did, parent_method_did, edge, file_str)
+                        for c in self.children(parent_did):
+                            if c.kind in _METHOD_KINDS and c.name not in ancestor_methods:
+                                ancestor_methods[c.name] = c.durable_id
+
+                for method in child_methods:
+                    if method.name in ancestor_methods:
+                        # Compound id: class_durable_id::qualified_name
+                        qn = method.qualified_name or method.name
+                        method_did = f"{did}::{qn}"
+                        parent_method_did = ancestor_methods[method.name]
+                        edge = EdgeData(kind=EdgeKind.OVERRIDES)
+                        self._add_edge(method_did, parent_method_did, edge, file_str)
 
     def _find_enclosing_symbol(self, file_str: str, range: Range) -> str | None:
         """Find the innermost symbol in *file_str* that contains *range*.
@@ -1280,16 +1318,20 @@ class CodeGraph:
                 native_by_graph=native_by_graph,
             )
 
-        for file_str, symbols in symbols_by_file.items():
-            self._resolve_inheritance(
-                session,
-                file_str,
-                symbols,
-                report=report,
-                root=root,
-                native_by_graph=native_by_graph,
-                project_files=project_files,
-            )
+        # Inheritance — two passes (§6.4)
+        self._inherits_pass_I(
+            session,
+            symbols_by_file,
+            report=report,
+            root=root,
+            native_by_graph=native_by_graph,
+            project_files=project_files,
+        )
+        self._overrides_pass_II(
+            symbols_by_file,
+            report=report,
+            native_by_graph=native_by_graph,
+        )
 
     def _add_stub_node(
         self,
