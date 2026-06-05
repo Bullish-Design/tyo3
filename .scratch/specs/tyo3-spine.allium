@@ -42,6 +42,12 @@ given {
 -- distinction is not a behavioural one at this layer.
 external entity Participant {}
 
+-- TyO3's own identity-reconciliation component — a code party, not a person. It
+-- runs inside every commit, mints durable ids for new entities, and produces the
+-- identity-lifecycle outcomes (ambiguous re-bind, vanished, reappeared) the
+-- spine reacts to. Modelled as a party at the reconciler<->identity seam.
+external entity Reconciler {}
+
 -- The delegated analysis engine (parsing, type analysis, symbol extraction,
 -- incremental change application) is not modelled as an entity: it is a pure
 -- delegation boundary, captured by the SourceAnalysis contract below.
@@ -310,6 +316,24 @@ rule RescanProject {
         -- marked is_rescan; consumers rebuild rather than trust per-entity deltas.
 }
 
+rule MintEntity {
+    when: EntityDiscovered(reconciler, durable_id, qualified_path, kind, content_hash)
+    ensures: CodeEntity.created(
+        durable_id: durable_id
+        qualified_path: qualified_path
+        content_hash: content_hash
+        kind: kind
+        identity_status: active
+        first_seen: project.head
+        last_seen: project.head
+    )
+    @guidance
+        -- A newly-seen entity that reconciliation could not match to any existing
+        -- durable id is minted a fresh one and enters as active. This is the
+        -- `created` arm of the delta; the matching that decides mint-vs-rebind is
+        -- the deferred Reconciliation spec.
+}
+
 rule OpenSnapshot {
     when: OpenSnapshot(participant, at)
     ensures: Snapshot.created(
@@ -332,7 +356,7 @@ rule CloseSnapshot {
 }
 
 rule FlagForReview {
-    when: EntityRebindAmbiguous(entity)
+    when: EntityRebindAmbiguous(_, entity)
     requires: entity.identity_status = active
     ensures: entity.identity_status = needs_review
     @guidance
@@ -344,7 +368,7 @@ rule FlagForReview {
 }
 
 rule OrphanEntity {
-    when: EntityVanished(entity)
+    when: EntityVanished(_, entity)
     requires: entity.identity_status in {active, needs_review}
     ensures: entity.identity_status = orphaned
     @guidance
@@ -363,7 +387,7 @@ rule ConfirmIdentity {
 }
 
 rule ReboundVanishedEntity {
-    when: EntityReappeared(entity)
+    when: EntityReappeared(_, entity)
     requires: entity.identity_status = orphaned
     ensures: entity.identity_status = active
     @guidance
@@ -501,6 +525,29 @@ surface IdentityReviewSurface {
         -- Every ambiguous re-bind surfaces here as needs_review and every lost
         -- entity as orphaned. Reconciliation never drops a durable identity (and
         -- so never drops the authored knowledge keyed by it).
+}
+
+surface ReconciliationProcess {
+    facing reconciler: Reconciler
+
+    context entity: CodeEntity
+
+    exposes:
+        entity.durable_id
+        entity.identity_status
+
+    provides:
+        EntityDiscovered(reconciler, durable_id: DurableId, qualified_path: QualifiedPath, kind: SymbolKind, content_hash: ContentHash)
+        EntityRebindAmbiguous(reconciler, entity)
+        EntityVanished(reconciler, entity)
+        EntityReappeared(reconciler, entity)
+
+    @guidance
+        -- The internal seam between TyO3's reconciler and the identity model.
+        -- Reconciliation runs within each commit (see the CommitTransaction
+        -- contract in tyo3-coordination.allium); these are its observable
+        -- outcomes. A clean EXACT/HASH re-bind produces no outcome here — the
+        -- entity keeps its durable id silently, which is the common case.
 }
 
 surface CommitDeltaSurface {
