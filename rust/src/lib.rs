@@ -9,6 +9,7 @@ create_exception!(tyo3._native_impl, ProjectClosedError, pyo3::exceptions::PyRun
 create_exception!(tyo3._native_impl, PathResolutionError, pyo3::exceptions::PyRuntimeError);
 create_exception!(tyo3._native_impl, PositionError, pyo3::exceptions::PyRuntimeError);
 
+mod hash;
 mod content;
 mod convert;
 mod dto;
