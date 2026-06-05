@@ -19,7 +19,7 @@ from tyo3.graph.models import (
     SymbolNode,
 )
 from tyo3.models.advanced import SemanticTokenModifier, SemanticTokenType
-from tyo3.models.analysis import Diagnostic, Range
+from tyo3.models.analysis import Diagnostic, Range, SyncResult
 from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import Symbol, SymbolKind
 from tyo3.session import TyO3Session
@@ -93,6 +93,17 @@ class CodeGraph:
         self._file_to_nodes: dict[str, list[int]] = defaultdict(list)
         self._file_to_edges: dict[str, list[int]] = defaultdict(list)
 
+        # Reverse-dependency index (Phase 6): target_file -> {source_files that import it}.
+        # Maintained in _add_import_edge (incremental) and rebuilt authoritatively in
+        # _rebuild_indexes. Drives inbound edge revalidation in apply_delta without a
+        # global rescan (architecture §5.1).
+        self._file_importers: dict[str, set[str]] = defaultdict(set)
+
+        # The resolved project root, set at build() time. apply_delta needs it to map
+        # the delta's absolute paths to project-relative graph paths, and `source` may
+        # be a Snapshot (no .root). None until build() runs.
+        self._root: Path | None = None
+
         # Pre-materialized range cache for _find_enclosing_symbol (B1)
         #   file_str -> list of (start_line, start_col, end_line, end_col, symbol_id)
         #   sorted by range size ascending (smallest first)
@@ -117,11 +128,12 @@ class CodeGraph:
     @classmethod
     def build(
         cls,
-        session: TyO3Session,
+        session,
         *,
         report: GraphBuildReport | None = None,
+        root: Path | None = None,
     ) -> CodeGraph:
-        """Build a complete code graph from a TyO3 session.
+        """Build a complete code graph from a TyO3 session or Snapshot.
 
         Six-pass deterministic construction: all project nodes and all
         range caches exist before any reference is resolved.  This
@@ -132,13 +144,20 @@ class CodeGraph:
         First-party paths are normalized to project-relative POSIX
         paths so symbol IDs are portable and snapshot-friendly.
 
+        *root* overrides the project root when *session* is a Snapshot
+        (which has no ``.root`` attribute). Defaults to ``session.root``
+        for TyO3Session.
+
         If *report* is provided, failures are recorded on it so
         callers can programmatically inspect whether the graph is
         complete.
         """
         graph = cls()
-        root = session.root
-        root_resolved = root.resolve()
+        if root is not None:
+            root_resolved = root
+        else:
+            root_resolved = session.root.resolve()
+        graph._root = root_resolved
         native_paths = [str(p) for p in session.files()]
         graph_paths = [_to_relative(root_resolved, p) for p in native_paths]
         native_by_graph = dict(zip(graph_paths, native_paths, strict=True))
@@ -363,6 +382,25 @@ class CodeGraph:
                 )
                 self._diagnostics.setdefault(norm_file, []).append(diagnostic)
 
+    def _refresh_diagnostics(
+        self,
+        session,
+        *,
+        root: Path | None = None,
+        project_files: set[str] | None = None,
+    ) -> None:
+        """Clear and recompute all diagnostics from one project-wide check().
+
+        apply_delta uses this instead of touching only dirty files: a change in one
+        file can add/remove diagnostics in importers and dependents, so a partial
+        update would be incorrect. One check() over the pinned source is consistent
+        with the structural update's revision.
+        """
+        self._diagnostics.clear()
+        self._collect_all_diagnostics(
+            session, root=root, project_files=project_files
+        )
+
     # ── Parent resolution for containment ─────────────────────
 
     def _resolve_parent_id(
@@ -417,6 +455,7 @@ class CodeGraph:
         report: GraphBuildReport | None = None,
         root: Path | None = None,
         native_by_graph: dict[str, str] | None = None,
+        restrict_targets: set[str] | None = None,
     ) -> None:
         """Resolve references using the batch file_occurrences API.
 
@@ -464,6 +503,11 @@ class CodeGraph:
             target_file = (
                 _normalize_result_path(root, target_file_raw, project_files) if root is not None else target_file_raw
             )
+
+            # Phase 6 inbound revalidation: only (re-)add edges INTO the dirty set.
+            if restrict_targets is not None and target_file not in restrict_targets:
+                continue
+
             target_name = occ.target_name
 
             # Build the target's symbol_id.
@@ -555,6 +599,25 @@ class CodeGraph:
             EdgeData(kind=EdgeKind.IMPORTS, file=source_file, range=range),
             source_file,
         )
+
+        # Phase 6: reverse-dependency bookkeeping. Only record project→project
+        # imports; external targets (package::<module>) are never queried as dirty
+        # files.
+        if target_file in project_files and target_file != source_file:
+            self._file_importers[target_file].add(source_file)
+
+    def _importers_of(self, files: set[str]) -> set[str]:
+        """Graph paths of project files that import any file in *files*.
+
+        Reads the reverse-dependency index built from IMPORTS edges. Used by
+        apply_delta to find inbound cross-file edges that must be revalidated when
+        *files* (the dirty set) change. Excludes the dirty files themselves — a file's
+        own out-edges are rebuilt by re-indexing it, not by inbound revalidation.
+        """
+        importers: set[str] = set()
+        for f in files:
+            importers |= self._file_importers.get(f, set())
+        return importers - files
 
     def _ensure_target_node_simple(
         self,
@@ -934,6 +997,7 @@ class CodeGraph:
         self._file_to_edges.clear()
         self._file_node_ranges.clear()
         self._name_prefix_index.clear()
+        self._file_importers.clear()
         self._semantic_subgraph_cache.clear()
         for idx in self._graph.node_indices():
             node: SymbolNode = self._graph[idx]
@@ -949,6 +1013,16 @@ class CodeGraph:
             data = self._graph.get_edge_data_by_index(edge_idx)
             if data is not None and hasattr(data, "file") and data.file is not None:
                 self._file_to_edges[data.file].append(edge_idx)
+            if data is not None and data.kind == EdgeKind.IMPORTS:
+                src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
+                src_file = self._graph[src].file
+                tgt_file = self._graph[tgt].file
+                if (
+                    tgt_file != "<external>"
+                    and src_file != "<external>"
+                    and tgt_file != src_file
+                ):
+                    self._file_importers[tgt_file].add(src_file)
         # Rebuild range cache (B1)
         for file_str in self._file_to_nodes:
             self._file_node_ranges[file_str] = sorted(
@@ -965,6 +1039,55 @@ class CodeGraph:
                     if node.kind != SymbolKind.MODULE
                 ],
                 key=_range_size,
+            )
+
+    # ── Incremental update helpers (Phase 6) ──────────────────
+
+    def _index_files(
+        self,
+        session,
+        graph_paths: list[str],
+        project_files: set[str],
+        *,
+        root: Path,
+        native_by_graph: dict[str, str],
+        report: GraphBuildReport | None = None,
+    ) -> None:
+        """Run passes 1–5 over *graph_paths* (a subset of the project).
+
+        Mirrors CodeGraph.build's pass ordering for a subset: collect symbols for all
+        of them, materialize all their nodes, then structural edges + range caches,
+        then references, then inheritance. Keeping the sub-pass split (rather than a
+        per-file loop) is what lets two simultaneously-changed files that reference
+        each other resolve correctly — every dirty node exists before any reference is
+        resolved. Targets in *non*-dirty files already exist in the graph (they were
+        never removed), so cross-file references out of the dirty set resolve too.
+        """
+        symbols_by_file: dict[str, list[Symbol]] = {}
+        for graph_path in graph_paths:
+            native_path = native_by_graph.get(graph_path, graph_path)
+            symbols = self._collect_symbols_for_file(session, native_path, report=report)
+            if symbols is not None:
+                symbols_by_file[graph_path] = symbols
+
+        for file_str, symbols in symbols_by_file.items():
+            self._materialize_file_nodes(file_str, symbols)
+
+        for file_str, symbols in symbols_by_file.items():
+            self._add_containment_edges_for_file(file_str, symbols)
+            self._build_range_cache_for_file(file_str)
+
+        for file_str in symbols_by_file:
+            self._resolve_references_via_occurrences(
+                session, file_str, project_files,
+                report=report, root=root, native_by_graph=native_by_graph,
+            )
+
+        for file_str, symbols in symbols_by_file.items():
+            self._resolve_inheritance(
+                session, file_str, symbols,
+                report=report, root=root, native_by_graph=native_by_graph,
+                project_files=project_files,
             )
 
     def _add_stub_node(
@@ -1370,16 +1493,97 @@ class CodeGraph:
 
     # ── Incremental updates ───────────────────────────────────
 
-    def rebuild(self, session: TyO3Session, path: str) -> None:
-        """Rebuild the entire code graph.
-
-        Currently performs a full rebuild from the session.  The *path*
-        parameter is accepted for API compatibility but is unused — all
-        files are re-indexed.
-        """
-        fresh = CodeGraph.build(session)
-        # Swap all internal state — the old graph is discarded.
+    def _replace_with(self, fresh: CodeGraph) -> None:
+        """Replace all internal state with *fresh*'s (used by rescan / rebuild)."""
         self.__dict__.update(fresh.__dict__)
+
+    def rebuild(self, session: TyO3Session, path: str) -> None:
+        """Full rebuild (the rescan fallback). *path* is accepted for API
+        compatibility but unused; prefer apply_delta for incremental updates."""
+        self._replace_with(CodeGraph.build(session))
+
+    def apply_delta(
+        self,
+        source,
+        delta: SyncResult,
+        *,
+        report: GraphBuildReport | None = None,
+    ) -> None:
+        """Incrementally update the HEAD graph from a write's SyncResult.
+
+        *source* is a consistent read surface for ``delta.revision`` — pass the
+        ``Snapshot`` pinned at that revision (``session.snapshot()`` right after the
+        edit) for true MVCC consistency; a ``TyO3Session`` also works ("latest", fine
+        because nothing mutates HEAD during one apply_delta).
+
+        Drops nodes owned by changed+deleted files, re-indexes created+changed files,
+        and revalidates inbound cross-file edges into the changed set. On a rescan
+        (``delta.rescan``) the delta is unknown, so it full-rebuilds. The result is
+        structurally equal to ``CodeGraph.build(source)`` over the same revision.
+
+        Requires ``self._root`` (set by build). Build the graph once with
+        ``CodeGraph.build`` before applying deltas.
+        """
+        if self._root is None:
+            raise RuntimeError("apply_delta requires a graph built via CodeGraph.build()")
+
+        # Rescan: delta unknown ⇒ rebuild wholesale (architecture §5.1).
+        if delta.rescan:
+            self._replace_with(CodeGraph.build(source, report=report, root=self._root))
+            return
+
+        root = self._root
+        # Project-wide path maps from the CURRENT file set (includes created files,
+        # excludes deleted ones). Native (absolute) paths feed read calls; graph paths
+        # are project-relative. Mirrors build (graph.py:142-146).
+        native_paths = [str(p) for p in source.files()]
+        native_by_graph = {_to_relative(root, p): p for p in native_paths}
+        project_files = set(native_by_graph.keys())
+
+        created = {_to_relative(root, p) for p in delta.created}
+        changed = {_to_relative(root, p) for p in delta.changed}
+        deleted = {_to_relative(root, p) for p in delta.deleted}
+
+        dirty = changed | deleted               # nodes to drop
+        to_index = sorted(created | changed)    # files to (re-)extract
+
+        # 0. Snapshot inbound dependencies BEFORE removal — step 1 deletes the edges
+        #    that encode them (they are incident to dirty nodes).
+        importers = self._importers_of(dirty)
+        importers -= set(to_index)              # re-indexed files rebuild their own out-edges
+        importers &= project_files              # only files that still exist
+
+        # 1. Drop every node owned by a dirty file. rustworkx removes incident edges
+        #    (including inbound cross-file edges) automatically.
+        doomed = [idx for f in dirty for idx in self._file_to_nodes.get(f, [])]
+        if doomed:
+            self._graph.remove_nodes_from(doomed)
+        # swap-and-pop invalidated stored indices: rebuild every secondary index
+        # (incl. _file_importers) from the surviving graph.
+        self._rebuild_indexes()
+
+        # 2. Re-extract created + changed files (passes 1–5).
+        self._index_files(
+            source, to_index, project_files,
+            root=root, native_by_graph=native_by_graph, report=report,
+        )
+
+        # 3. Revalidate INBOUND edges: re-resolve each importer's references INTO the
+        #    dirty set only (its edges into non-dirty files survived step 1 untouched).
+        for importer in sorted(importers):
+            self._resolve_references_via_occurrences(
+                source, importer, project_files,
+                report=report, root=root, native_by_graph=native_by_graph,
+                restrict_targets=dirty,
+            )
+
+        # 4. Diagnostics: one project-wide check(), redistributed. A change in one file
+        #    can alter diagnostics in others, so refresh wholesale (architecture §5 the
+        #    snapshot's check() is the same revision as the structural update).
+        self._refresh_diagnostics(source, root=root, project_files=project_files)
+
+        # Drop stale memoized subgraphs (defensive; _add_* already clear it).
+        self._semantic_subgraph_cache.clear()
 
     # ── Previously implemented algorithms ─────────────────────
 
