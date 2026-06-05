@@ -559,6 +559,17 @@ class CodeGraph:
             return
 
         for occ in occurrences:
+            # Handle import occurrences that lack resolved targets.
+            # The file_occurrences API reports import-role tokens but may not
+            # resolve their definition targets (target_file is None). Fall back
+            # to goto_definition for these to build IMPORTS edges.
+            if occ.role == ReferenceRole.IMPORT and occ.target_file is None:
+                self._resolve_import_via_goto(
+                    session, native_file, occ.range, file_str,
+                    project_files, root, native_by_graph,
+                )
+                continue
+
             if occ.target_file is None or occ.target_name is None:
                 continue
 
@@ -666,6 +677,40 @@ class CodeGraph:
         # files.
         if target_file in project_files and target_file != source_file:
             self._file_importers[target_file].add(source_file)
+
+    def _resolve_import_via_goto(
+        self,
+        session,
+        native_file: str,
+        occ_range: Range,
+        file_str: str,
+        project_files: set[str],
+        root: Path | None,
+        native_by_graph: dict[str, str] | None,
+    ) -> None:
+        """Resolve an import occurrence by falling back to goto_definition.
+
+        When file_occurrences reports an import with target_file=None, use
+        goto_definition at the import position to find the target module.
+        Creates an IMPORTS edge if the target is a project file.
+        """
+        try:
+            targets = session.goto_definition(
+                native_file, occ_range.start.line, occ_range.start.column
+            )
+        except Exception:
+            return
+        if not targets:
+            return
+        target = targets[0]
+        target_file_raw = str(target.path)
+        target_file = (
+            _normalize_result_path(root, target_file_raw, project_files)
+            if root is not None and project_files is not None
+            else target_file_raw
+        )
+        if target_file and target_file != file_str:
+            self._add_import_edge(file_str, target_file, occ_range, project_files)
 
     def _importers_of(self, files: set[str]) -> set[str]:
         """Graph paths of project files that import any file in *files*.
