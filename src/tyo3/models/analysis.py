@@ -88,6 +88,9 @@ class SyncResult(BaseModel):
     created: list[str] = Field(default_factory=list)
     changed: list[str] = Field(default_factory=list)
     deleted: list[str] = Field(default_factory=list)
+    moved: list[str] = Field(default_factory=list)
+    needs_review: list[str] = Field(default_factory=list)
+    orphaned: list[str] = Field(default_factory=list)
     project_changed: bool = False
     custom_stdlib_changed: bool = False
     rescan: bool = False
