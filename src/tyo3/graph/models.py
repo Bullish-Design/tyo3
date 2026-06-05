@@ -60,6 +60,29 @@ class EdgeData:
     role: ReferenceRole | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class EdgeDiff:
+    """One edge-level graph diff entry."""
+
+    source_id: str
+    target_id: str
+    data: EdgeData
+
+
+@dataclass(frozen=True, slots=True)
+class GraphDiff:
+    """Structural difference between two CodeGraph revisions."""
+
+    added_nodes: list[SymbolNode]
+    removed_nodes: list[SymbolNode]
+    added_edges: list[EdgeDiff]
+    removed_edges: list[EdgeDiff]
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.added_nodes or self.removed_nodes or self.added_edges or self.removed_edges)
+
+
 # ── Build report models ───────────────────────────────────────
 
 

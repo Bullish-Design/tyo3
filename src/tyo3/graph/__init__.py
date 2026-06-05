@@ -7,9 +7,11 @@ from tyo3.graph.export import to_dot, to_json
 from tyo3.graph.graph import CodeGraph
 from tyo3.graph.models import (
     EdgeData,
+    EdgeDiff,
     EdgeKind,
     GraphBuildFailure,
     GraphBuildReport,
+    GraphDiff,
     ReferenceRole,
     SymbolNode,
 )
@@ -18,7 +20,9 @@ __all__ = [
     "CodeGraph",
     "DependencyGraph",
     "EdgeData",
+    "EdgeDiff",
     "EdgeKind",
+    "GraphDiff",
     "GraphBuildFailure",
     "GraphBuildReport",
     "ReferenceRole",

@@ -234,12 +234,12 @@ impl System for OverlaySystem {
                 .or(Some(PySourceType::Python)),
             Some(Document::Deleted { .. }) => None,
             None if self.frozen.is_some() => {
-                // Capture so the type is decided against pinned content.
+                // Capture so reads are pinned, but keep ty/native source-type
+                // classification for disk files. Unknown extensions like
+                // ".keep" must stay non-source; overlaid text above is the
+                // only branch that defaults extensionless content to Python.
                 match self.capture_disk_file(path) {
-                    Ok(Document::Text { .. }) => path
-                        .extension()
-                        .and_then(PySourceType::try_from_extension)
-                        .or(Some(PySourceType::Python)),
+                    Ok(Document::Text { .. }) => self.native.source_type(path),
                     _ => None,
                 }
             }

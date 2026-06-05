@@ -37,7 +37,9 @@ pub fn position_to_offset_with_index(
     // Column line_length + 1 is allowed (position after last char);
     // column line_length + 2 is rejected.
     let line = OneIndexed::from_zero_indexed(line_idx);
-    let line_char_count = line_index.line_len(line, source, PositionEncoding::Utf32);
+    let raw_line = source.split('\n').nth(line_idx).unwrap_or("");
+    let line_text = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+    let line_char_count = line_text.chars().count();
     if col > line_char_count {
         return Err(format!(
             "Column {} exceeds line {} length ({} characters)",
@@ -54,6 +56,40 @@ pub fn position_to_offset_with_index(
         character_offset: OneIndexed::from_zero_indexed(col),
     };
     Ok(line_index.offset(source_location, source, PositionEncoding::Utf32))
+}
+
+/// Convert a 1-based position to an offset, clamping columns beyond the visible
+/// line end to the line-end position. Use for range *end* positions only.
+pub fn position_to_offset_clamped_line_end_with_index(
+    source: &str,
+    line_index: &LineIndex,
+    line: u32,
+    column: u32,
+) -> Result<TextSize, String> {
+    match position_to_offset_with_index(source, line_index, line, column) {
+        Ok(offset) => Ok(offset),
+        Err(_) => {
+            let line_idx = line
+                .checked_sub(1)
+                .ok_or_else(|| "Line must be >= 1".to_string())? as usize;
+            if line_idx >= line_index.line_count() {
+                return Err(format!(
+                    "Line {} exceeds file length ({} lines)",
+                    line,
+                    line_index.line_count()
+                ));
+            }
+
+            let raw_line = source.split('\n').nth(line_idx).unwrap_or("");
+            let line_text = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+            position_to_offset_with_index(
+                source,
+                line_index,
+                line,
+                line_text.chars().count() as u32 + 1,
+            )
+        }
+    }
 }
 
 /// Convert a ruff TextRange to a Python-friendly RangeDto using a precomputed LineIndex.
@@ -122,5 +158,15 @@ mod tests {
         let source = "x = 1\r\ny = 2\r\n";
         assert!(offset(source, 1, 6).is_ok());
         assert!(offset(source, 1, 7).is_err());
+    }
+
+    #[test]
+    fn clamps_range_end_columns() {
+        let source = "x = 1\r\ny = 2\r\n";
+        let index = LineIndex::from_source_text(source);
+        let strict = offset(source, 1, 500);
+        let clamped = position_to_offset_clamped_line_end_with_index(source, &index, 1, 500);
+        assert!(strict.is_err());
+        assert_eq!(clamped.unwrap().to_u32(), offset(source, 1, 6).unwrap());
     }
 }

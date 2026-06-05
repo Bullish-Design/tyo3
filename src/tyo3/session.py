@@ -239,9 +239,7 @@ class _ReadOps:
 
     # ── Document Highlights ───────────────────────────────────────
 
-    def document_highlights(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[Reference]:
+    def document_highlights(self, path: str | StdPath, line: int, column: int) -> list[Reference]:
         """Highlight all in-file occurrences of the symbol at *(line, column)*.
 
         Like ``find_references`` but scoped to the current file. Returns an
@@ -285,9 +283,7 @@ class _ReadOps:
             return None
         return Range.model_validate(native_range)
 
-    def rename(
-        self, path: str | StdPath, line: int, column: int, new_name: str
-    ) -> WorkspaceEdit | None:
+    def rename(self, path: str | StdPath, line: int, column: int, new_name: str) -> WorkspaceEdit | None:
         """Compute the workspace edit to rename the symbol at *(line, column)*."""
         self._check_open()
         try:
@@ -309,9 +305,7 @@ class _ReadOps:
 
     # ── Selection Ranges ───────────────────────────────────────────
 
-    def selection_ranges(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[Range]:
+    def selection_ranges(self, path: str | StdPath, line: int, column: int) -> list[Range]:
         """Compute selection ranges at *(line, column)*."""
         self._check_open()
         try:
@@ -391,9 +385,7 @@ class _ReadOps:
         """Get quick fixes for a diagnostic at a range."""
         self._check_open()
         try:
-            result = self._native().code_actions(
-                str(path), start_line, start_col, end_line, end_col, diagnostic_id
-            )
+            result = self._native().code_actions(str(path), start_line, start_col, end_line, end_col, diagnostic_id)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -409,9 +401,7 @@ class _ReadOps:
 
     # ── Signature Help ──────────────────────────────────────────────
 
-    def signature_help(
-        self, path: str | StdPath, line: int, column: int
-    ) -> SignatureHelp | None:
+    def signature_help(self, path: str | StdPath, line: int, column: int) -> SignatureHelp | None:
         """Get signature help at *(line, column)*."""
         self._check_open()
         try:
@@ -433,9 +423,7 @@ class _ReadOps:
 
     # ── Completion ─────────────────────────────────────────────────
 
-    def completions(
-        self, path: str | StdPath, line: int, column: int, *, auto_import: bool = True
-    ) -> list[Completion]:
+    def completions(self, path: str | StdPath, line: int, column: int, *, auto_import: bool = True) -> list[Completion]:
         """Get completion suggestions at *(line, column)*."""
         self._check_open()
         try:
@@ -563,9 +551,7 @@ class _ReadOps:
 
     # ── Class Supertypes ─────────────────────────────────────────
 
-    def class_supertypes(
-        self, path: str | StdPath, line: int, column: int
-    ) -> list[TypeHierarchyItem]:
+    def class_supertypes(self, path: str | StdPath, line: int, column: int) -> list[TypeHierarchyItem]:
         """Return the direct base classes of the class at *(line, column)*.
 
         Lean counterpart to :meth:`type_hierarchy` for graph construction:
@@ -623,6 +609,7 @@ class TyO3Session(_ReadOps):
         self._root = StdPath(root_str).resolve()
         self._closed = False
         self._head_snap: Any = None  # cached native head snapshot (current revision)
+        self._head_graph: Any = None  # lazily-built mutable CodeGraph for HEAD
 
     @property
     def root(self) -> StdPath:
@@ -649,6 +636,20 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in latest: {e}") from e
         return LatestView(native_head_view)
+
+    @property
+    def graph(self):
+        """The mutable live HEAD graph, updated incrementally after writes."""
+        self._check_open()
+        if self._head_graph is None:
+            from tyo3.graph import CodeGraph
+
+            self._head_graph = CodeGraph.build(self)
+        return self._head_graph
+
+    def _head_graph_or_none(self) -> Any:
+        """Return the live HEAD graph if materialized; never build it."""
+        return self._head_graph
 
     # ── Head snapshot caching ───────────────────────────────────────
 
@@ -684,7 +685,11 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in snapshot(): {e}") from e
-        return Snapshot(native_snapshot)
+        return Snapshot(
+            native_snapshot,
+            root=self._root,
+            head_graph_getter=self._head_graph_or_none,
+        )
 
     # ── Write path ────────────────────────────────────────────────────
 
@@ -699,7 +704,9 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit(): {e}") from e
-        return SyncResult.model_validate(native_result)
+        result = SyncResult.model_validate(native_result)
+        self._apply_graph_delta(result)
+        return result
 
     def edit_many(self, edits: dict[str, str]) -> SyncResult:
         """Overlay many files atomically (one publish, one revision)."""
@@ -711,7 +718,9 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit_many(): {e}") from e
-        return SyncResult.model_validate(native_result)
+        result = SyncResult.model_validate(native_result)
+        self._apply_graph_delta(result)
+        return result
 
     def edit_virtual(self, uri: str, text: str) -> SyncResult:
         """Overlay a virtual/unsaved buffer (e.g. "untitled:1").
@@ -724,7 +733,9 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit_virtual(): {e}") from e
-        return SyncResult.model_validate(native_result)
+        result = SyncResult.model_validate(native_result)
+        self._apply_graph_delta(result)
+        return result
 
     def sync_path(self, path: str | StdPath) -> SyncResult:
         """Ingest a disk change for ``path``: drop any overlay and re-read
@@ -737,7 +748,9 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_path(): {e}") from e
-        return SyncResult.model_validate(native_result)
+        result = SyncResult.model_validate(native_result)
+        self._apply_graph_delta(result)
+        return result
 
     def discard(self, path: str | StdPath) -> SyncResult:
         """Drop the overlay buffer for ``path``, reverting to disk."""
@@ -749,7 +762,9 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in discard(): {e}") from e
-        return SyncResult.model_validate(native_result)
+        result = SyncResult.model_validate(native_result)
+        self._apply_graph_delta(result)
+        return result
 
     def sync_all(self) -> SyncResult:
         """Rescan everything (in-place). Existing overlay buffers are
@@ -762,7 +777,9 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_all(): {e}") from e
-        return SyncResult.model_validate(native_result)
+        result = SyncResult.model_validate(native_result)
+        self._apply_graph_delta(result)
+        return result
 
     # ── File watching (Phase 8) ────────────────────────────────────
 
@@ -835,8 +852,11 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in _inject_changes(): {e}") from e
 
     def _apply_graph_delta(self, result: SyncResult) -> None:
-        """No-op stub — graph delta application wired in Phase 6/7."""
-        pass
+        """Apply a write delta to the materialized HEAD graph, if any."""
+        if self._head_graph is None:
+            return
+        with self.snapshot(at=result.revision) as snap:
+            self._head_graph.apply_delta(snap, result)
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -850,6 +870,7 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in reload(): {e}") from e
+        self._head_graph = None
 
     def close(self) -> None:
         """Close the project and free Rust-side resources.
@@ -859,6 +880,7 @@ class TyO3Session(_ReadOps):
         if self._closed:
             return
         self._invalidate_head_snap()
+        self._head_graph = None
         self._inner.close()
         self._closed = True
 
@@ -897,9 +919,18 @@ class Snapshot(_ReadOps):
     single snapshot is safe to share across threads.
     """
 
-    def __init__(self, native_snapshot: Any) -> None:
+    def __init__(
+        self,
+        native_snapshot: Any,
+        *,
+        root: StdPath,
+        head_graph_getter: Any | None = None,
+    ) -> None:
         self._inner = native_snapshot
         self._closed = False
+        self._root = root
+        self._head_graph_getter = head_graph_getter
+        self._graph: Any = None
 
     def _native(self) -> Any:
         self._check_open()
@@ -911,11 +942,28 @@ class Snapshot(_ReadOps):
         self._check_open()
         return self._inner.revision
 
+    def graph(self):
+        """Return an immutable CodeGraph pinned at this snapshot's revision."""
+        self._check_open()
+        if self._graph is not None:
+            return self._graph
+
+        head_graph = self._head_graph_getter() if self._head_graph_getter is not None else None
+        if head_graph is not None and head_graph.revision == self.revision:
+            self._graph = head_graph._pin_at(self.revision)
+            return self._graph
+
+        from tyo3.graph import CodeGraph
+
+        self._graph = CodeGraph.build(self, root=self._root)._pin_at(self.revision)
+        return self._graph
+
     def close(self) -> None:
         """Release the pinned revision. Safe to call multiple times."""
         if self._closed:
             return
         self._inner.close()
+        self._graph = None
         self._closed = True
 
     def __enter__(self) -> Snapshot:

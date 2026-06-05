@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import rustworkx as rx
 
@@ -13,16 +13,20 @@ from tyo3.graph.dependency import DependencyGraph
 from tyo3.graph.identity import file_from_symbol_id, symbol_id_from_symbol
 from tyo3.graph.models import (
     EdgeData,
+    EdgeDiff,
     EdgeKind,
     GraphBuildFailure,
     GraphBuildReport,
+    GraphDiff,
     SymbolNode,
 )
 from tyo3.models.advanced import SemanticTokenModifier, SemanticTokenType
 from tyo3.models.analysis import Diagnostic, Range, SyncResult
 from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import Symbol, SymbolKind
-from tyo3.session import TyO3Session
+
+if TYPE_CHECKING:
+    from tyo3.session import TyO3Session
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +127,11 @@ class CodeGraph:
         #   frozenset[EdgeKind] -> rx.PyDiGraph
         self._semantic_subgraph_cache: dict[frozenset[EdgeKind], rx.PyDiGraph] = {}
 
+        # MVCC graph state (Phase 7). HEAD graphs are mutable and advance via
+        # apply_delta; pinned graphs are immutable copies tied to one revision.
+        self._revision: int | None = None
+        self._frozen = False
+
     # ── Construction ──────────────────────────────────────────
 
     @classmethod
@@ -217,6 +226,8 @@ class CodeGraph:
             project_files=project_files,
         )
 
+        graph._revision = getattr(session, "revision", getattr(session, "head", None))
+
         return graph
 
     @classmethod
@@ -265,6 +276,7 @@ class CodeGraph:
 
     def _materialize_file_nodes(self, file_str: str, symbols: list[Symbol]) -> None:
         """Create module and symbol nodes for one file in the graph."""
+        self._assert_mutable()
         module_id = f"{file_str}::<module>"
         module_node = SymbolNode(
             symbol_id=module_id,
@@ -397,9 +409,7 @@ class CodeGraph:
         with the structural update's revision.
         """
         self._diagnostics.clear()
-        self._collect_all_diagnostics(
-            session, root=root, project_files=project_files
-        )
+        self._collect_all_diagnostics(session, root=root, project_files=project_files)
 
     # ── Parent resolution for containment ─────────────────────
 
@@ -954,6 +964,7 @@ class CodeGraph:
 
     def _add_node(self, node: SymbolNode) -> int:
         """Add a SymbolNode to the graph and update indexes."""
+        self._assert_mutable()
         if node.symbol_id in self._id_to_index:
             return self._id_to_index[node.symbol_id]
         idx = self._graph.add_node(node)
@@ -976,6 +987,7 @@ class CodeGraph:
         file: str,
     ) -> int | None:
         """Add an edge between two symbols by their IDs."""
+        self._assert_mutable()
         src_idx = self._id_to_index.get(source_id)
         tgt_idx = self._id_to_index.get(target_id)
         if src_idx is None or tgt_idx is None:
@@ -1017,11 +1029,7 @@ class CodeGraph:
                 src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
                 src_file = self._graph[src].file
                 tgt_file = self._graph[tgt].file
-                if (
-                    tgt_file != "<external>"
-                    and src_file != "<external>"
-                    and tgt_file != src_file
-                ):
+                if tgt_file != "<external>" and src_file != "<external>" and tgt_file != src_file:
                     self._file_importers[tgt_file].add(src_file)
         # Rebuild range cache (B1)
         for file_str in self._file_to_nodes:
@@ -1040,6 +1048,77 @@ class CodeGraph:
                 ],
                 key=_range_size,
             )
+
+    def _assert_mutable(self) -> None:
+        """Reject structural mutations on a revision-pinned graph."""
+        if self._frozen:
+            raise RuntimeError("Cannot mutate a revision-pinned CodeGraph")
+
+    def _pin_at(self, revision: int) -> CodeGraph:
+        """Return an immutable copy of this graph pinned at *revision*."""
+        pinned = CodeGraph()
+        pinned._graph = self._graph.copy()
+        pinned._id_to_index = dict(self._id_to_index)
+        pinned._file_to_nodes = defaultdict(list, {k: list(v) for k, v in self._file_to_nodes.items()})
+        pinned._file_to_edges = defaultdict(list, {k: list(v) for k, v in self._file_to_edges.items()})
+        pinned._file_importers = defaultdict(set, {k: set(v) for k, v in self._file_importers.items()})
+        pinned._root = self._root
+        pinned._file_node_ranges = {k: list(v) for k, v in self._file_node_ranges.items()}
+        pinned._name_prefix_index = dict(self._name_prefix_index)
+        pinned._diagnostics = {k: list(v) for k, v in self._diagnostics.items()}
+        pinned._dependency_cache = dict(self._dependency_cache)
+        pinned._semantic_subgraph_cache = {}
+        pinned._revision = revision
+        pinned._frozen = True
+        return pinned
+
+    @staticmethod
+    def _range_key(range_: Range | None) -> tuple[int, int, int, int] | None:
+        if range_ is None:
+            return None
+        return (
+            range_.start.line,
+            range_.start.column,
+            range_.end.line,
+            range_.end.column,
+        )
+
+    def _edge_map(self) -> dict[tuple[Any, ...], EdgeDiff]:
+        edges: dict[tuple[Any, ...], EdgeDiff] = {}
+        counts: dict[tuple[Any, ...], int] = defaultdict(int)
+        for edge_idx in self._graph.edge_indices():
+            data = self._graph.get_edge_data_by_index(edge_idx)
+            src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
+            source_id = self._graph[src].symbol_id
+            target_id = self._graph[tgt].symbol_id
+            base_key = (
+                source_id,
+                target_id,
+                data.kind,
+                data.file,
+                self._range_key(data.range),
+                data.role,
+            )
+            ordinal = counts[base_key]
+            counts[base_key] += 1
+            key = (*base_key, ordinal)
+            edges[key] = EdgeDiff(source_id, target_id, data)
+        return edges
+
+    def diff(self, before: CodeGraph) -> GraphDiff:
+        """Return the structural graph delta from *before* to ``self``."""
+        before_nodes = {before._graph[idx].symbol_id: before._graph[idx] for idx in before._graph.node_indices()}
+        after_nodes = {self._graph[idx].symbol_id: self._graph[idx] for idx in self._graph.node_indices()}
+
+        before_edges = before._edge_map()
+        after_edges = self._edge_map()
+
+        return GraphDiff(
+            added_nodes=[after_nodes[sid] for sid in sorted(after_nodes.keys() - before_nodes.keys())],
+            removed_nodes=[before_nodes[sid] for sid in sorted(before_nodes.keys() - after_nodes.keys())],
+            added_edges=[after_edges[key] for key in sorted(after_edges.keys() - before_edges.keys(), key=repr)],
+            removed_edges=[before_edges[key] for key in sorted(before_edges.keys() - after_edges.keys(), key=repr)],
+        )
 
     # ── Incremental update helpers (Phase 6) ──────────────────
 
@@ -1079,14 +1158,22 @@ class CodeGraph:
 
         for file_str in symbols_by_file:
             self._resolve_references_via_occurrences(
-                session, file_str, project_files,
-                report=report, root=root, native_by_graph=native_by_graph,
+                session,
+                file_str,
+                project_files,
+                report=report,
+                root=root,
+                native_by_graph=native_by_graph,
             )
 
         for file_str, symbols in symbols_by_file.items():
             self._resolve_inheritance(
-                session, file_str, symbols,
-                report=report, root=root, native_by_graph=native_by_graph,
+                session,
+                file_str,
+                symbols,
+                report=report,
+                root=root,
+                native_by_graph=native_by_graph,
                 project_files=project_files,
             )
 
@@ -1152,7 +1239,19 @@ class CodeGraph:
     @property
     def graph(self) -> rx.PyDiGraph:
         """The underlying RustworkX directed graph."""
+        if self._frozen:
+            return self._graph.copy()
         return self._graph
+
+    @property
+    def revision(self) -> int | None:
+        """The application revision this graph describes, if known."""
+        return self._revision
+
+    @property
+    def frozen(self) -> bool:
+        """Whether this graph is pinned and structurally immutable."""
+        return self._frozen
 
     @property
     def node_count(self) -> int:
@@ -1495,11 +1594,14 @@ class CodeGraph:
 
     def _replace_with(self, fresh: CodeGraph) -> None:
         """Replace all internal state with *fresh*'s (used by rescan / rebuild)."""
+        self._assert_mutable()
         self.__dict__.update(fresh.__dict__)
+        self._frozen = False
 
     def rebuild(self, session: TyO3Session, path: str) -> None:
         """Full rebuild (the rescan fallback). *path* is accepted for API
         compatibility but unused; prefer apply_delta for incremental updates."""
+        self._assert_mutable()
         self._replace_with(CodeGraph.build(session))
 
     def apply_delta(
@@ -1524,12 +1626,14 @@ class CodeGraph:
         Requires ``self._root`` (set by build). Build the graph once with
         ``CodeGraph.build`` before applying deltas.
         """
+        self._assert_mutable()
         if self._root is None:
             raise RuntimeError("apply_delta requires a graph built via CodeGraph.build()")
 
         # Rescan: delta unknown ⇒ rebuild wholesale (architecture §5.1).
         if delta.rescan:
             self._replace_with(CodeGraph.build(source, report=report, root=self._root))
+            self._revision = delta.revision
             return
 
         root = self._root
@@ -1544,14 +1648,14 @@ class CodeGraph:
         changed = {_to_relative(root, p) for p in delta.changed}
         deleted = {_to_relative(root, p) for p in delta.deleted}
 
-        dirty = changed | deleted               # nodes to drop
-        to_index = sorted(created | changed)    # files to (re-)extract
+        dirty = changed | deleted  # nodes to drop
+        to_index = sorted(created | changed)  # files to (re-)extract
 
         # 0. Snapshot inbound dependencies BEFORE removal — step 1 deletes the edges
         #    that encode them (they are incident to dirty nodes).
         importers = self._importers_of(dirty)
-        importers -= set(to_index)              # re-indexed files rebuild their own out-edges
-        importers &= project_files              # only files that still exist
+        importers -= set(to_index)  # re-indexed files rebuild their own out-edges
+        importers &= project_files  # only files that still exist
 
         # 1. Drop every node owned by a dirty file. rustworkx removes incident edges
         #    (including inbound cross-file edges) automatically.
@@ -1564,16 +1668,24 @@ class CodeGraph:
 
         # 2. Re-extract created + changed files (passes 1–5).
         self._index_files(
-            source, to_index, project_files,
-            root=root, native_by_graph=native_by_graph, report=report,
+            source,
+            to_index,
+            project_files,
+            root=root,
+            native_by_graph=native_by_graph,
+            report=report,
         )
 
         # 3. Revalidate INBOUND edges: re-resolve each importer's references INTO the
         #    dirty set only (its edges into non-dirty files survived step 1 untouched).
         for importer in sorted(importers):
             self._resolve_references_via_occurrences(
-                source, importer, project_files,
-                report=report, root=root, native_by_graph=native_by_graph,
+                source,
+                importer,
+                project_files,
+                report=report,
+                root=root,
+                native_by_graph=native_by_graph,
                 restrict_targets=dirty,
             )
 
@@ -1584,6 +1696,7 @@ class CodeGraph:
 
         # Drop stale memoized subgraphs (defensive; _add_* already clear it).
         self._semantic_subgraph_cache.clear()
+        self._revision = delta.revision
 
     # ── Previously implemented algorithms ─────────────────────
 

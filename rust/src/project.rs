@@ -21,7 +21,7 @@ use ty_project::{ProjectDatabase, ProjectMetadata};
 use crate::content::{ContentStore, Generation, Revision};
 use crate::overlay::OverlaySystem;
 
-use ruff_python_ast::name::Name;
+use ruff_python_ast::{name::Name, PySourceType};
 
 use crate::convert;
 use crate::coordinates;
@@ -194,6 +194,12 @@ fn compute_files(state: &TyProjectState) -> Vec<String> {
     let indexed = project.files(&state.db);
     indexed
         .iter()
+        .filter(|f: &&File| {
+            f.path(&state.db)
+                .extension()
+                .and_then(PySourceType::try_from_extension)
+                .is_some()
+        })
         .map(|f: &File| f.path(&state.db).as_str().to_string())
         .collect()
 }
@@ -391,7 +397,7 @@ fn compute_semantic_tokens(
                 &source_str, &line_index, sl, sc,
             )
             .map_err(AnalysisError::Position)?;
-            let end = coordinates::position_to_offset_with_index(
+            let end = coordinates::position_to_offset_clamped_line_end_with_index(
                 &source_str, &line_index, el, ec,
             )
             .map_err(AnalysisError::Position)?;
@@ -2513,6 +2519,17 @@ mod phase4_tests {
     fn read(state: &TyProjectState, path: &SystemPathBuf) -> String {
         let f = ruff_db::files::system_path_to_file(&state.db, path).unwrap();
         source_text(&state.db, f).as_str().to_string()
+    }
+
+    #[test]
+    fn files_filters_non_python_project_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".keep"), "").unwrap();
+        let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
+        let head = build_head(root.clone(), ContentStore::new());
+        let snap = build_frozen(root, head.store.capture(), head.store.revision());
+
+        assert!(compute_files(&snap).is_empty());
     }
 
     /// THE Phase-4 invariant: a snapshot pinned at R keeps reading R's content
