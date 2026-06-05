@@ -7,6 +7,8 @@
 
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
+
 use ruff_db::files::File;
 use ruff_db::source::source_text;
 use ruff_source_file::LineIndex;
@@ -20,7 +22,7 @@ use crate::project::TyProjectState;
 /// The kind of an addressable symbol. Mirrors `ty_ide::SymbolKind`, kept as an
 /// independent enum so the identity layer does not depend on ty_ide types for
 /// its core data model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SymbolKind {
     Module,
     Class,

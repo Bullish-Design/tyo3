@@ -21,12 +21,14 @@
 //! excluded) do not change the hash. The resulting hash is the `ContentHash`
 //! carried on every `Entity` and used as the secondary reconciliation key.
 
+use serde::{Deserialize, Serialize};
+
 /// A 128-bit content hash.
 ///
 /// Derived properties (`Ord`, `Hash`, etc.) exist so `ContentHash` can be used
 /// as a key in collections, but no one currently *needs* ordering — it is here
 /// because it costs nothing and prevents surprises.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ContentHash(pub u128);
 
 /// Hash an arbitrary byte slice, returning a 128-bit hash.

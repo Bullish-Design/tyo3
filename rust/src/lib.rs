@@ -13,6 +13,7 @@ create_exception!(tyo3._native_impl, RevisionEvictedError, pyo3::exceptions::PyV
 mod hash;
 mod content;
 mod entity;
+mod identity;
 mod convert;
 mod dto;
 mod overlay;

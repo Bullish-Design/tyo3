@@ -12,10 +12,11 @@ use ruff_db::system::{SystemPathBuf, SystemVirtualPathBuf};
 use rpds::HashTrieMapSync;
 
 use crate::hash::{hash_text, ContentHash};
+use serde::{Deserialize, Serialize};
 
 /// Application-level monotonic revision. Distinct from salsa's internal revision;
 /// this is the number we will eventually hand back to Python as `SyncResult.revision`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Revision(pub u64);
 
 /// One overlaid document, or a tombstone marking a path as known-absent.
