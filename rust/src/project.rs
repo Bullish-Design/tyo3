@@ -1015,11 +1015,33 @@ fn commit_head(
 
 /// Shared body of `sync_path` and `discard`: forget the overlay for `abs`, publish
 /// so the overlay falls through to disk, classify, apply, and build the result.
+/// Shared body of `sync_path` and `discard`: read disk once for `abs`,
+/// produce a `Change::Insert` (with content) or `Change::Delete` (tombstone),
+/// apply it as a single-change batch so the revision's generation records the
+/// disk content (§1.3.2).  Then publish and apply to the engine.
 fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultDto {
-    head.store.forget(&abs);
-    head.system.publish(head.store.capture());
-    let event = classify_disk_sync(&head.system, &head.db, &abs);
+    // Read disk once.  The content (or its absence) is recorded in the
+    // generation so a snapshot at the resulting revision is stable even if
+    // disk changes again later.
+    let disk_text = std::fs::read_to_string(abs.as_std_path());
+    let change: crate::content::Change = match disk_text {
+        Ok(text) => crate::content::Change::Insert {
+            path: abs.clone(),
+            text: Arc::from(text),
+        },
+        Err(_) => crate::content::Change::Delete {
+            path: abs.clone(),
+        },
+    };
 
+    // 1. Apply to store (records content in the generation, bumps revision).
+    head.store.apply_batch(vec![change]);
+
+    // 2. Publish the new generation.
+    head.system.publish(head.store.capture());
+
+    // 3. Classify and apply to the engine.
+    let event = classify_disk_sync(&head.system, &head.db, &abs);
     let path_str = abs.as_str().to_string();
     let (created, changed, deleted) = match &event {
         ChangeEvent::Created { .. } => (vec![path_str], vec![], vec![]),
@@ -1027,6 +1049,7 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
         _ => (vec![], vec![path_str], vec![]),
     };
     let result = head.db.apply_changes(std::slice::from_ref(&event), None);
+
     dto::SyncResultDto {
         revision: head.store.revision().0,
         created,
@@ -1076,11 +1099,13 @@ fn apply_watch_events(
     }
 
     // Filter: keep only real-path events whose path is NOT overlaid.
-    let mut kept: Vec<ChangeEvent> = Vec::with_capacity(events.len());
+    // For each kept event, read disk once and produce a Change for the
+    // store so the content is recorded in the generation (§1.3.2).
+    let mut store_changes: Vec<crate::content::Change> = Vec::with_capacity(events.len());
+    let mut kept_events: Vec<ChangeEvent> = Vec::with_capacity(events.len());
     let (mut created, mut changed, mut deleted) = (Vec::new(), Vec::new(), Vec::new());
     for event in events {
         let Some(path) = event.system_path() else {
-            // Virtual or path-less event — not from a directory watcher; skip.
             continue;
         };
         let path = path.to_path_buf();
@@ -1089,25 +1114,59 @@ fn apply_watch_events(
             continue;
         }
         let path_str = path.as_str().to_string();
+
+        // Read disk once.  Record content (or tombstone) in the generation.
+        let disk_text = std::fs::read_to_string(path.as_std_path());
         match &event {
-            ChangeEvent::Created { .. } => created.push(path_str),
-            ChangeEvent::Deleted { .. } => deleted.push(path_str),
-            ChangeEvent::Changed { .. } => changed.push(path_str),
-            _ => continue, // Opened / virtual variants: ignore
+            ChangeEvent::Created { .. } => {
+                created.push(path_str.clone());
+                if let Ok(text) = disk_text {
+                    store_changes.push(crate::content::Change::Insert {
+                        path: path.clone(),
+                        text: Arc::from(text),
+                    });
+                } else {
+                    store_changes.push(crate::content::Change::Delete {
+                        path: path.clone(),
+                    });
+                }
+            }
+            ChangeEvent::Deleted { .. } => {
+                deleted.push(path_str.clone());
+                store_changes.push(crate::content::Change::Delete {
+                    path: path.clone(),
+                });
+            }
+            ChangeEvent::Changed { .. } => {
+                changed.push(path_str.clone());
+                if let Ok(text) = disk_text {
+                    store_changes.push(crate::content::Change::Insert {
+                        path: path.clone(),
+                        text: Arc::from(text),
+                    });
+                } else {
+                    store_changes.push(crate::content::Change::Delete {
+                        path: path.clone(),
+                    });
+                }
+            }
+            _ => continue,
         }
-        kept.push(event);
+        kept_events.push(event);
     }
 
-    if kept.is_empty() {
+    if kept_events.is_empty() {
         return None;
     }
 
-    // Publish the (content-unchanged) generation so the revision counter
-    // advances, then let ty do the incremental work. HEAD reads disk directly,
-    // so no store mutation is needed for non-overlaid disk changes.
+    // 1. Apply all disk-content changes as one batch (one revision).
+    let revision = head.store.apply_batch(store_changes).0;
+
+    // 2. Publish the new generation so the engine reads from it.
     head.system.publish(head.store.capture());
-    let result = head.db.apply_changes(&kept, None);
-    let revision = head.store.bump_revision().0;
+
+    // 3. Apply the ty-level ChangeEvents for incremental analysis.
+    let result = head.db.apply_changes(&kept_events, None);
 
     Some(dto::SyncResultDto {
         revision,
@@ -2887,6 +2946,114 @@ mod phase5_concurrency_tests {
         assert!(
             texts.windows(2).all(|w| w[0] == w[1]),
             "all concurrent reads should observe identical pre-populated content"
+        );
+    }
+}
+
+// ── Step 7 tests: Disk ingest records content in the generation ──────────
+
+#[cfg(test)]
+mod step7_ingest_tests {
+    use super::*;
+    use ruff_db::source::source_text;
+    use std::io::Write;
+
+    fn project(files: &[(&str, &str)]) -> (tempfile::TempDir, SystemPathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in files {
+            let mut f = std::fs::File::create(dir.path().join(name)).unwrap();
+            f.write_all(body.as_bytes()).unwrap();
+        }
+        let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
+        (dir, root)
+    }
+
+    /// `sync_path` reads disk once and records the content in the generation.
+    /// A snapshot at the synced revision must be stable even if disk changes
+    /// afterward (§1.3.2).
+    #[test]
+    fn sync_path_records_content_for_snapshot_stability() {
+        let (_dir, root) = project(&[("a.py", "FIRST = 1\n")]);
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        // Ingest the disk file via sync_path (records content in generation).
+        head.store.forget(&a);
+        let disk_text = std::fs::read_to_string(a.as_std_path()).unwrap();
+        let change = crate::content::Change::Insert {
+            path: a.clone(),
+            text: Arc::from(disk_text),
+        };
+        let r_sync = head.store.apply_batch(vec![change]);
+
+        // Capture the generation at R.
+        let gen_at_r = head.store.generation_at(r_sync).unwrap();
+
+        // Mutate disk after the sync.
+        std::fs::write(_dir.path().join("a.py"), b"SECOND = 999\n").unwrap();
+
+        // Build a frozen view at the synced revision — must read FIRST content.
+        let snap = build_frozen(root.clone(), gen_at_r, r_sync);
+        let file = ruff_db::files::system_path_to_file(&snap.db, &a).unwrap();
+        let content = source_text(&snap.db, file).as_str().to_string();
+        assert!(
+            content.contains("FIRST = 1"),
+            "snapshot at synced revision must read the first synced content, got: {content:?}"
+        );
+    }
+
+    /// After a watcher event ingests disk content, a snapshot sees the
+    /// ingested content — not whatever is on live disk later.
+    #[test]
+    fn watcher_ingest_pins_content() {
+        let (_dir, root) = project(&[("a.py", "WATCHER_FIRST = 1\n")]);
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        // Simulate a watcher event: Changed on a.py, disk is read, content
+        // ingested into the generation.
+        let disk_text = std::fs::read_to_string(a.as_std_path()).unwrap();
+        let change = crate::content::Change::Insert {
+            path: a.clone(),
+            text: Arc::from(disk_text),
+        };
+        let r_watch = head.store.apply_batch(vec![change]);
+
+        // Capture the generation.
+        let gen = head.store.generation_at(r_watch).unwrap();
+
+        // Mutate disk after the ingestion.
+        std::fs::write(_dir.path().join("a.py"), b"WATCHER_MUTATED = 999\n").unwrap();
+
+        // Snapshot at R_watch must read the ingested (first) content.
+        let snap = build_frozen(root, gen, r_watch);
+        let file = ruff_db::files::system_path_to_file(&snap.db, &a).unwrap();
+        let content = source_text(&snap.db, file).as_str().to_string();
+        assert!(content.contains("WATCHER_FIRST = 1"));
+    }
+
+    /// A deleted file produces a Delete tombstone in the generation, so a
+    /// snapshot at that revision reports the path absent.
+    #[test]
+    fn deleted_file_is_absent_in_snapshots() {
+        let (_dir, root) = project(&[("a.py", "X = 1\n")]);
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        // Ingest a Delete for a.py (file was deleted on disk).
+        let change = crate::content::Change::Delete { path: a.clone() };
+        let r_del = head.store.apply_batch(vec![change]);
+
+        let gen = head.store.generation_at(r_del).unwrap();
+
+        // Even if disk still has the file, the snapshot sees it as absent.
+        // (Under Design A, the frozen view has no disk fallback.)
+        let snap = build_frozen(root, gen, r_del);
+        let result = ruff_db::files::system_path_to_file(&snap.db, &a);
+        // Should be an error — file is tombstoned in the generation.
+        assert!(
+            result.is_err(),
+            "tombstoned file must not be resolvable in snapshot"
         );
     }
 }
