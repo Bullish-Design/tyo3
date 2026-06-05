@@ -272,4 +272,28 @@ mod tests {
         assert_eq!(doc.hash(), None);
         assert_eq!(doc.version(), 1);
     }
+
+    // ── Step 3: ContentMap / Generation persistence tests ──────────
+
+    /// Cloning a ContentMap shares structure; mutating the clone must not
+    /// affect the original (persistent data structure guarantee).
+    #[test]
+    fn content_map_clone_is_independent() {
+        let m1 = ContentMap::new();
+        let mut m2 = m1.clone();
+        let path = SystemPathBuf::from("/test/a.py");
+        let doc = Document::text("hello", 1);
+        m2.system = m2.system.insert(path.clone(), doc);
+        // Original is unchanged.
+        assert!(m1.system.get(&path).is_none());
+        assert!(m2.system.get(&path).is_some());
+    }
+
+    /// `Arc::clone` on a Generation is O(1): it shares the same allocation.
+    #[test]
+    fn generation_capture_is_o1_arc_clone() {
+        let gen: Generation = Arc::new(ContentMap::new());
+        let capture = Arc::clone(&gen);
+        assert!(Arc::ptr_eq(&gen, &capture));
+    }
 }
