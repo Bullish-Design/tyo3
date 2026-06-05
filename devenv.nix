@@ -7,15 +7,21 @@ let
   pytestFullLogArgs = "--strict-markers -vv --verbosity=2 --tb=long --showlocals --show-capture=all --capture=tee-sys -o log_cli=true --log-cli-level=DEBUG";
   # Lean default: quiet, short tracebacks. Fast to run and read.
   pytestLeanArgs = "--strict-markers -q --tb=short";
+  # Per-test default: lists every test with its PASSED/FAILED result, short
+  # tracebacks. Verbose enough to see each outcome, still no debug noise.
+  pytestPerTestArgs = "--strict-markers -v --tb=short";
   pytestDefaultMarkerArgs = "-m \"not benchmark\"";
 
-  # Shared prelude for test scripts. Selects lean (default) or full output flags
-  # into $PYTEST_LOG_ARGS, and strips `--detail` from "$@" so the remaining args
-  # still pass through to pytest. Usage in a script:
-  #   ${detailPrelude}
+  # Shared prelude for test scripts. Selects a lean default or the full output
+  # flags into $PYTEST_LOG_ARGS, and strips `--detail` from "$@" so the
+  # remaining args still pass through to pytest. The default flags are
+  # parameterized so the top-level `tests` runner can default to per-test
+  # output while the focused scripts stay quiet. Usage in a script:
+  #   ${detailPrelude}            # quiet default
+  #   ${detailPreludePerTest}     # per-test PASSED/FAILED default
   #   ... python -m pytest $PYTEST_LOG_ARGS <fixed args> "$@" ...
-  detailPrelude = ''
-    PYTEST_LOG_ARGS="${pytestLeanArgs}"
+  mkDetailPrelude = defaultArgs: ''
+    PYTEST_LOG_ARGS="${defaultArgs}"
     _detail_filtered=()
     for _arg in "$@"; do
       case "$_arg" in
@@ -25,6 +31,8 @@ let
     done
     set -- "''${_detail_filtered[@]}"
   '';
+  detailPrelude = mkDetailPrelude pytestLeanArgs;
+  detailPreludePerTest = mkDetailPrelude pytestPerTestArgs;
 in
 {
   env.GREET = "devenv";
@@ -84,10 +92,26 @@ in
   # ── Test scripts ─────────────────────────────────────────────
 
   scripts.tests.exec = ''
-    ${detailPrelude}
+    ${detailPreludePerTest}
     echo "═══ Running all tests ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing "$@" 2>&1
+    # -ra adds pytest's "short test summary info" block listing every failure.
+    # Tee the run so we can print a friendly pass/fail banner afterward, and
+    # preserve pytest's own exit code (PIPESTATUS[0]) for CI.
+    _out="$(mktemp)"
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS -ra ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing "$@" 2>&1 | tee "$_out"
+    _rc=''${PIPESTATUS[0]}
+    echo ""
+    if [ "$_rc" -eq 0 ]; then
+      _passed="$(grep -oE '[0-9]+ passed' "$_out" | tail -1 | grep -oE '^[0-9]+')"
+      echo "═══ ✅ ''${_passed:-0} of ''${_passed:-0} tests pass ═══"
+    else
+      echo "═══ ❌ Failures ═══"
+      grep -E '^(FAILED|ERROR) ' "$_out" || true
+      grep -E '^=+ .*(failed|error).* =+$' "$_out" | tail -1
+    fi
+    rm -f "$_out"
+    exit "$_rc"
   '';
 
   scripts.test-quick.exec = ''

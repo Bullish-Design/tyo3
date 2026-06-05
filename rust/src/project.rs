@@ -62,9 +62,9 @@ impl AnalysisError {
 /// run inside `py.detach(...)` to release the GIL. Because `#[pyclass]` only
 /// requires `Send` (not `Sync`), the `Mutex` below is what makes concurrent `&self`
 /// access sound once the GIL is released.
-struct TyProjectState {
-    db: ProjectDatabase,
-    root: SystemPathBuf,
+pub(crate) struct TyProjectState {
+    pub(crate) db: ProjectDatabase,
+    pub(crate) root: SystemPathBuf,
 }
 
 /// The live, mutable HEAD of a session. Owns the database plus the content

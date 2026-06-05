@@ -18,6 +18,7 @@ pythonize = "0.28"
 
 # ── Hashing ────────────────────────────────────────────
 xxhash-rust = { version = "0.8", features = ["xxh3"] }  # 128-bit xxh3 for content hashing (Step 1)
+ulid = "1"            # ULID generation for DurableId (Gate 2)
 
 # ── Logging ────────────────────────────────────────────
 log = "0.4"          # lightweight logging facade (replaces eprintln!)
