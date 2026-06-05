@@ -12,6 +12,7 @@ from tyo3.models.analysis import (
     FileRange,
     Position,
     Range,
+    SyncResult,
 )
 from tyo3.models.editor import (
     FoldingRange,
@@ -52,6 +53,7 @@ __all__ = [  # noqa: F405
     "Range",
     "FileRange",
     "CheckResult",
+    "SyncResult",
     "DiagnosticSeverity",
     "Diagnostic",
     # Symbols

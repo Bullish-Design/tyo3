@@ -11,10 +11,17 @@ from __future__ import annotations
 import pytest
 from tyo3._native_impl import TyProject
 
+try:
+    from tyo3 import TyO3Session
 
-def _num_diags(check_result: dict) -> int:
-    """Count diagnostics in a native check result dict."""
-    return len(check_result.get("diagnostics", []))
+    _HAS_SESSION = True
+except ImportError:
+    _HAS_SESSION = False
+
+
+def _num_diags(check_result) -> int:
+    """Count diagnostics in a check result."""
+    return len(check_result.diagnostics)
 
 
 # ── Overlay edit changes diagnostics without touching disk ─────────────
@@ -24,35 +31,35 @@ def test_edit_changes_diagnostics_without_disk_write(tmp_path):
     """An overlay edit introduces a type error, but disk is unchanged."""
     p = tmp_path / "a.py"
     p.write_text("x: int = 1\n")
-    proj = TyProject.open(str(tmp_path))
+    session = TyO3Session(str(tmp_path))
     try:
-        before = proj.check()
-        r = proj.edit("a.py", "x: int = 'not an int'\n")
-        assert r["revision"] > 0
-        assert any("a.py" in c for c in r["changed"])
-        after = proj.check()
+        before = session.check()
+        r = session.edit("a.py", "x: int = 'not an int'\n")
+        assert r.revision > 0
+        assert any("a.py" in c for c in r.changed)
+        after = session.check()
         assert _num_diags(after) > _num_diags(before)
         # Disk is untouched
         assert p.read_text() == "x: int = 1\n"
     finally:
-        proj.close()
+        session.close()
 
 
 def test_edit_preserves_existing_file_state(tmp_path):
     """Editing a file that already exists changes what check() sees."""
     p = tmp_path / "a.py"
     p.write_text("x = 1\n")
-    proj = TyProject.open(str(tmp_path))
+    session = TyO3Session(str(tmp_path))
     try:
-        before = proj.check()
-        r = proj.edit("a.py", "x: int = 'not an int'\n")
-        assert r["revision"] > 0
-        assert any("a.py" in c for c in r["changed"])
-        assert len(r["created"]) == 0
-        after = proj.check()
+        before = session.check()
+        r = session.edit("a.py", "x: int = 'not an int'\n")
+        assert r.revision > 0
+        assert any("a.py" in c for c in r.changed)
+        assert len(r.created) == 0
+        after = session.check()
         assert _num_diags(after) > _num_diags(before)
     finally:
-        proj.close()
+        session.close()
 
 
 # ── Revision advances ──────────────────────────────────────────────────

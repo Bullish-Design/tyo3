@@ -30,7 +30,7 @@ from tyo3.exceptions import (
     ProjectOpenError,
 )
 from tyo3.models.advanced import SemanticToken
-from tyo3.models.analysis import CheckResult, Range
+from tyo3.models.analysis import CheckResult, Range, SyncResult
 from tyo3.models.editor import FoldingRange, Hint, InlayHint
 from tyo3.models.lsp import Completion, SignatureHelp
 from tyo3.models.navigation import (
@@ -96,13 +96,18 @@ class _ReadOps:
         if self._closed:
             raise ProjectClosedError("Project is closed")
 
+    def _native(self) -> Any:
+        """The native handle that read methods dispatch to. Overridden by
+        TyO3Session to return a cached head snapshot; Snapshot uses itself."""
+        return self._inner
+
     # ── Files ────────────────────────────────────────────────────────
 
     def files(self) -> list[PurePosixPath]:
         """Return the file paths known to this project."""
         self._check_open()
         try:
-            raw: list[str] = self._inner.files()
+            raw: list[str] = self._native().files()
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
@@ -115,7 +120,7 @@ class _ReadOps:
         """Run the type-checker and return structured diagnostics."""
         self._check_open()
         try:
-            native_result = self._inner.check()
+            native_result = self._native().check()
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
@@ -127,7 +132,7 @@ class _ReadOps:
         """Run the type-checker and return diagnostics for a single file."""
         self._check_open()
         try:
-            native_result = self._inner.check_file(str(path))
+            native_result = self._native().check_file(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
@@ -143,7 +148,7 @@ class _ReadOps:
         """Return symbols defined in the given file."""
         self._check_open()
         try:
-            native_symbols = self._inner.document_symbols(str(path))
+            native_symbols = self._native().document_symbols(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
@@ -161,7 +166,7 @@ class _ReadOps:
         if not query:
             return []
         try:
-            native_symbols = self._inner.workspace_symbols(query)
+            native_symbols = self._native().workspace_symbols(query)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
@@ -191,7 +196,7 @@ class _ReadOps:
         """Shared implementation for all goto-* methods."""
         self._check_open()
         try:
-            native_targets = getattr(self._inner, method)(str(path), line, column)
+            native_targets = getattr(self._native(), method)(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -217,7 +222,7 @@ class _ReadOps:
         """Find all references to the symbol at *(line, column)*."""
         self._check_open()
         try:
-            native_refs = self._inner.find_references(str(path), line, column, include_declaration)
+            native_refs = self._native().find_references(str(path), line, column, include_declaration)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -243,7 +248,7 @@ class _ReadOps:
         """
         self._check_open()
         try:
-            native_refs = self._inner.document_highlights(str(path), line, column)
+            native_refs = self._native().document_highlights(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -263,7 +268,7 @@ class _ReadOps:
         """Return the editable range if the symbol at *(line, column)* can be renamed."""
         self._check_open()
         try:
-            native_range = self._inner.can_rename(str(path), line, column)
+            native_range = self._native().can_rename(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -285,7 +290,7 @@ class _ReadOps:
         """Compute the workspace edit to rename the symbol at *(line, column)*."""
         self._check_open()
         try:
-            native_edit = self._inner.rename(str(path), line, column, new_name)
+            native_edit = self._native().rename(str(path), line, column, new_name)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -309,7 +314,7 @@ class _ReadOps:
         """Compute selection ranges at *(line, column)*."""
         self._check_open()
         try:
-            native_ranges = self._inner.selection_ranges(str(path), line, column)
+            native_ranges = self._native().selection_ranges(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -329,7 +334,7 @@ class _ReadOps:
         """Return folding ranges for a file."""
         self._check_open()
         try:
-            native_ranges = self._inner.folding_ranges(str(path))
+            native_ranges = self._native().folding_ranges(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
@@ -345,7 +350,7 @@ class _ReadOps:
         """Return inlay hints for a file."""
         self._check_open()
         try:
-            result = self._inner.inlay_hints(str(path))
+            result = self._native().inlay_hints(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
@@ -361,7 +366,7 @@ class _ReadOps:
         """Return hints (unused bindings, unreachable code) for a file."""
         self._check_open()
         try:
-            result = self._inner.hints(str(path))
+            result = self._native().hints(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
@@ -385,7 +390,7 @@ class _ReadOps:
         """Get quick fixes for a diagnostic at a range."""
         self._check_open()
         try:
-            result = self._inner.code_actions(
+            result = self._native().code_actions(
                 str(path), start_line, start_col, end_line, end_col, diagnostic_id
             )
         except _NativeClosedError as e:
@@ -409,7 +414,7 @@ class _ReadOps:
         """Get signature help at *(line, column)*."""
         self._check_open()
         try:
-            result = self._inner.signature_help(str(path), line, column)
+            result = self._native().signature_help(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -433,7 +438,7 @@ class _ReadOps:
         """Get completion suggestions at *(line, column)*."""
         self._check_open()
         try:
-            result = self._inner.completions(str(path), line, column, auto_import=auto_import)
+            result = self._native().completions(str(path), line, column, auto_import=auto_import)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -461,7 +466,7 @@ class _ReadOps:
         """Return semantic tokens for a file, optionally scoped to a range."""
         self._check_open()
         try:
-            native_result = self._inner.semantic_tokens(
+            native_result = self._native().semantic_tokens(
                 str(path),
                 start_line=start_line,
                 start_col=start_col,
@@ -497,7 +502,7 @@ class _ReadOps:
         """
         self._check_open()
         try:
-            native_result = self._inner.file_occurrences(str(path))
+            native_result = self._native().file_occurrences(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
@@ -516,7 +521,7 @@ class _ReadOps:
         """
         self._check_open()
         try:
-            native_hover = self._inner.hover(str(path), line, column)
+            native_hover = self._native().hover(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePositionError as e:
@@ -539,7 +544,7 @@ class _ReadOps:
         """Query type hierarchy at a position."""
         self._check_open()
         try:
-            native_result = self._inner.type_hierarchy(str(path), line, column)
+            native_result = self._native().type_hierarchy(str(path), line, column)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except _NativePathError as e:
@@ -588,35 +593,138 @@ class TyO3Session(_ReadOps):
             raise ProjectOpenError(f"Cannot open project at '{root_str}': {e}") from e
         self._root = StdPath(root_str).resolve()
         self._closed = False
+        self._head_snap: Any = None  # cached native head snapshot (current revision)
 
     @property
     def root(self) -> StdPath:
         return self._root
 
+    @property
+    def head(self) -> int:
+        """The current application revision."""
+        self._check_open()
+        return self._inner.head
+
+    # ── Head snapshot caching ───────────────────────────────────────
+
+    def _native(self) -> Any:
+        """A head snapshot pinned at the current revision, built lazily and
+        reused across reads until the next mutation invalidates it. Because
+        snapshots are independent (own Zalsa), holding it does NOT block a
+        later edit."""
+        self._check_open()
+        if self._head_snap is None:
+            self._head_snap = self._inner.snapshot(None)
+        return self._head_snap
+
+    def _invalidate_head_snap(self) -> None:
+        """Drop the cached head snapshot reference after a mutation so the
+        next read re-pins at the new revision.
+
+        Does NOT forcibly close the old native snapshot — any in-flight read
+        that already grabbed it may finish; Python drops it when the last
+        reference is gone. This trades prompt cache cleanup for thread safety
+        (Phase 5 §5.1)."""
+        self._head_snap = None
+
     # ── Snapshot ─────────────────────────────────────────────────────
 
-    def snapshot(self) -> Snapshot:
-        """Take a cheap, read-only, revision-pinned snapshot of the project.
-
-        The returned :class:`Snapshot` is safe to share across threads and
-        reflects the project exactly as it is now, regardless of later
-        ``reload()`` calls. Close it (or use it as a context manager) to free
-        the pinned revision.
-        """
+    def snapshot(self, at: int | None = None) -> Snapshot:
+        """Pin an explicit MVCC snapshot. ``at=None`` pins the current
+        revision; ``at=r`` time-travels to a still-retained revision."""
         self._check_open()
         try:
-            native_snapshot = self._inner.snapshot()
+            native_snapshot = self._inner.snapshot(at)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in snapshot(): {e}") from e
         return Snapshot(native_snapshot)
 
+    # ── Write path ────────────────────────────────────────────────────
+
+    def edit(self, path: str | StdPath, text: str) -> SyncResult:
+        """Overlay ``path`` with in-memory ``text`` (no disk write).
+        Returns a SyncResult with the new revision and affected paths."""
+        self._check_open()
+        self._invalidate_head_snap()
+        try:
+            native_result = self._inner.edit(str(path), text)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in edit(): {e}") from e
+        return SyncResult.model_validate(native_result)
+
+    def edit_many(self, edits: dict[str, str]) -> SyncResult:
+        """Overlay many files atomically (one publish, one revision)."""
+        self._check_open()
+        self._invalidate_head_snap()
+        try:
+            native_result = self._inner.edit_many(edits)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in edit_many(): {e}") from e
+        return SyncResult.model_validate(native_result)
+
+    def edit_virtual(self, uri: str, text: str) -> SyncResult:
+        """Overlay a virtual/unsaved buffer (e.g. "untitled:1").
+        No disk involvement."""
+        self._check_open()
+        self._invalidate_head_snap()
+        try:
+            native_result = self._inner.edit_virtual(uri, text)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in edit_virtual(): {e}") from e
+        return SyncResult.model_validate(native_result)
+
+    def sync_path(self, path: str | StdPath) -> SyncResult:
+        """Ingest a disk change for ``path``: drop any overlay and re-read
+        disk."""
+        self._check_open()
+        self._invalidate_head_snap()
+        try:
+            native_result = self._inner.sync_path(str(path))
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in sync_path(): {e}") from e
+        return SyncResult.model_validate(native_result)
+
+    def discard(self, path: str | StdPath) -> SyncResult:
+        """Drop the overlay buffer for ``path``, reverting to disk."""
+        self._check_open()
+        self._invalidate_head_snap()
+        try:
+            native_result = self._inner.discard(str(path))
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in discard(): {e}") from e
+        return SyncResult.model_validate(native_result)
+
+    def sync_all(self) -> SyncResult:
+        """Rescan everything (in-place). Existing overlay buffers are
+        preserved; ty re-walks and re-reads all files."""
+        self._check_open()
+        self._invalidate_head_snap()
+        try:
+            native_result = self._inner.sync_all()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in sync_all(): {e}") from e
+        return SyncResult.model_validate(native_result)
+
     # ── Lifecycle ────────────────────────────────────────────────────
 
     def reload(self) -> None:
         """Reload the project, clearing cached diagnostics and re-scanning."""
         self._check_open()
+        self._invalidate_head_snap()
         try:
             self._inner.reload()
         except _NativeClosedError as e:
@@ -631,6 +739,7 @@ class TyO3Session(_ReadOps):
         """
         if self._closed:
             return
+        self._invalidate_head_snap()
         self._inner.close()
         self._closed = True
 
@@ -672,6 +781,16 @@ class Snapshot(_ReadOps):
     def __init__(self, native_snapshot: Any) -> None:
         self._inner = native_snapshot
         self._closed = False
+
+    def _native(self) -> Any:
+        self._check_open()
+        return self._inner
+
+    @property
+    def revision(self) -> int:
+        """The revision this snapshot is pinned to."""
+        self._check_open()
+        return self._inner.revision
 
     def close(self) -> None:
         """Release the pinned revision. Safe to call multiple times."""

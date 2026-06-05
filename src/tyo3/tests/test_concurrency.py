@@ -333,11 +333,10 @@ class TestSnapshotIsolation:
             pre_names = {s.name for s in snap.document_symbols("main.py")}
             assert added_symbol not in pre_names
 
-            main_py.write_text(
-                main_py.read_text() + f"\n\ndef {added_symbol}() -> int:\n    return 1\n",
-            )
-
-            session.reload()
+            # Use edit() instead of direct disk write — changes flow through
+            # the substrate (architecture §2.2 invariant).
+            new_text = main_py.read_text() + f"\n\ndef {added_symbol}() -> int:\n    return 1\n"
+            session.edit("main.py", new_text)
 
             old_snapshot_names = {s.name for s in snap.document_symbols("main.py")}
             session_names = {s.name for s in session.document_symbols("main.py")}
@@ -354,9 +353,8 @@ class TestSnapshotIsolation:
             snap.close()
 
     def test_snapshot_pinned_without_preread(self, tmp_path: StdPath) -> None:
-        """Snapshot stays pinned even when its first read happens AFTER a disk
-        edit + reload — the scenario-A shape that would fail without eager
-        materialization at snapshot() time (Option 1)."""
+        """Snapshot stays pinned even when its first read happens AFTER edits
+        land on HEAD — the scenario-A shape that proves independent Zalsa."""
         project_root = tmp_path / "project"
         shutil.copytree(FIXTURES_DIR / "simple_package", project_root)
 
@@ -367,11 +365,9 @@ class TestSnapshotIsolation:
         snap = session.snapshot()
         try:
             # NO pre-read of the snapshot — this is the key difference from
-            # test_snapshot_isolated_from_reload.  We edit+reload first.
-            main_py.write_text(
-                main_py.read_text() + f"\n\ndef {added_symbol}() -> int:\n    return 1\n",
-            )
-            session.reload()
+            # test_snapshot_isolated_from_reload.  We edit first.
+            new_text = main_py.read_text() + f"\n\ndef {added_symbol}() -> int:\n    return 1\n"
+            session.edit("main.py", new_text)
 
             # First read on the old snapshot happens now — after the edit.
             snapshot_names = {s.name for s in snap.document_symbols("main.py")}
@@ -857,6 +853,7 @@ class TestMultiSnapshotIsolation:
 
         sym1 = "added_symbol_one"
         sym2 = "added_symbol_two"
+        base_text = main_py.read_text()
 
         session = TyO3Session(project_root)
         snaps = []
@@ -864,13 +861,12 @@ class TestMultiSnapshotIsolation:
             snap_a = session.snapshot()  # revision 0: neither symbol
             snaps.append(snap_a)
 
-            main_py.write_text(main_py.read_text() + f"\n\ndef {sym1}() -> int:\n    return 1\n")
-            session.reload()
+            # Use edit() — changes flow through the substrate
+            session.edit("main.py", base_text + f"\n\ndef {sym1}() -> int:\n    return 1\n")
             snap_b = session.snapshot()  # revision 1: sym1 only
             snaps.append(snap_b)
 
-            main_py.write_text(main_py.read_text() + f"\n\ndef {sym2}() -> int:\n    return 2\n")
-            session.reload()
+            session.edit("main.py", base_text + f"\n\ndef {sym1}() -> int:\n    return 1\n\ndef {sym2}() -> int:\n    return 2\n")
             snap_c = session.snapshot()  # revision 2: sym1 + sym2
             snaps.append(snap_c)
 

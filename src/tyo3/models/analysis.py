@@ -79,6 +79,20 @@ class DiagnosticSeverity(StrEnum):
 # ── Entities ─────────────────────────────────────────────────────────────
 
 
+class SyncResult(BaseModel):
+    """Delta produced by a write to the head."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    revision: int
+    created: list[str] = Field(default_factory=list)
+    changed: list[str] = Field(default_factory=list)
+    deleted: list[str] = Field(default_factory=list)
+    project_changed: bool = False
+    custom_stdlib_changed: bool = False
+    rescan: bool = False
+
+
 class Diagnostic(BaseModel):
     """A type-checking diagnostic for a specific location in a project file."""
 
@@ -97,6 +111,7 @@ __all__ = [
     "Range",
     "FileRange",
     "CheckResult",
+    "SyncResult",
     "DiagnosticSeverity",
     "Diagnostic",
 ]
