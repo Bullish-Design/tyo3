@@ -19,6 +19,8 @@ use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
 use crate::content::{ContentStore, Document, Generation, Revision};
+use crate::entity::{extract_entities, Entity};
+use crate::identity::{reconcile, DurableId, IdentityRegistry, IdentityStatus};
 use crate::overlay::OverlaySystem;
 
 use ruff_python_ast::{name::Name, PySourceType};
@@ -82,6 +84,9 @@ struct HeadState {
     /// Handle onto the *same* overlay content cell the `db` reads through
     /// (clone-shares the inner `Arc<ArcSwap<…>>`). Used by Phase 3 to publish.
     system: OverlaySystem,
+    /// Identity registry: binds DurableIds to last-known entity facts.
+    /// Reconciled after every commit; persisted to .tyo3/identity.db.
+    registry: IdentityRegistry,
 }
 
 /// Anything that can produce the cheap, GIL-releasable read clone.
@@ -810,7 +815,7 @@ fn compute_hover(
 ///   3. layer user-level configuration on top,
 ///   4. build the db with `fallible` (surfaces config errors),
 ///   5. on any failure, fall back to a default blank project (never panic).
-fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
+fn build_head(root: SystemPathBuf, initial_store: ContentStore, registry: IdentityRegistry) -> HeadState {
     use ruff_python_ast::name::Name;
 
     // The overlay the db reads through. The clone handed to fallible/use_defaults
@@ -856,6 +861,7 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
         root,
         store: initial_store,
         system,
+        registry,
     }
 }
 
@@ -1050,8 +1056,8 @@ fn classify_disk_sync(
     }
 }
 
-/// Publish the captured store generation, apply `events` to the db, and build the
-/// SyncResult. Caller has already mutated `head.store` and bucketed the paths.
+/// Publish the captured store generation, apply `events` to the db, run
+/// reconciliation against the identity registry, and build the SyncResult.
 ///
 /// PRECONDITION: `head.store` is already mutated; this captures+publishes it.
 fn commit_head(
@@ -1066,12 +1072,50 @@ fn commit_head(
     head.system.publish(head.store.capture());
     // 3. ty does all incremental work.
     let result = head.db.apply_changes(events, None);
-    // 4 + 5.
+
+    // 4. Run reconciliation (Gate 2).
+    let revision = head.store.revision();
+
+    let (moved_paths, needs_review_ids, orphaned_ids) = {
+        // Build a read-only view of the new state for entity extraction.
+        let state = TyProjectState {
+            db: head.db.clone(),
+            root: head.root.clone(),
+        };
+
+        // Extract all entities from the new revision.
+        let entities = extract_entities(&state);
+
+        // Reconcile against the identity registry.
+        let recon = reconcile(&mut head.registry, &entities, revision);
+
+        // Translate reconciliation into delta fields.
+        let moved = recon.moved().iter().map(|id| {
+            head.registry.get(id)
+                .map(|a| a.qualified_path.clone())
+                .unwrap_or_default()
+        }).collect::<Vec<String>>();
+        let nrv: Vec<String> = recon.needs_review.iter().map(|id| id.0.clone()).collect();
+        let orp: Vec<String> = recon.retired.iter().map(|id| id.0.clone()).collect();
+
+        // Persist the identity registry atomically.
+        let identity_path = head.root.as_std_path().join(".tyo3").join("identity.db");
+        if let Err(e) = head.registry.save(&identity_path) {
+            log::error!("Failed to persist identity registry: {}", e);
+        }
+
+        (moved, nrv, orp)
+    };
+
+    // 5. Build result.
     dto::SyncResultDto {
         revision: head.store.revision().0,
         created,
         changed,
         deleted,
+        moved: moved_paths,
+        needs_review: needs_review_ids,
+        orphaned: orphaned_ids,
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan,
@@ -1115,11 +1159,27 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
     };
     let result = head.db.apply_changes(std::slice::from_ref(&event), None);
 
+    // Run reconciliation after the event is applied.
+    let mut extra = dto::SyncResultDto::default();
+    {
+        let state = TyProjectState { db: head.db.clone(), root: head.root.clone() };
+        let entities = extract_entities(&state);
+        let recon = reconcile(&mut head.registry, &entities, head.store.revision());
+        extra.moved = recon.moved().iter().map(|id| {
+            head.registry.get(id).map(|a| a.qualified_path.clone()).unwrap_or_default()
+        }).collect();
+        extra.needs_review = recon.needs_review.iter().map(|id| id.0.clone()).collect();
+        extra.orphaned = recon.retired.iter().map(|id| id.0.clone()).collect();
+    }
+
     dto::SyncResultDto {
         revision: head.store.revision().0,
         created,
         changed,
         deleted,
+        moved: extra.moved,
+        needs_review: extra.needs_review,
+        orphaned: extra.orphaned,
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
@@ -1127,6 +1187,33 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
 }
 
 // ── Phase 8: Watcher drain-and-apply core ───────────────────────────────
+
+/// Shared identity reconciliation: extract entities, reconcile against
+/// registry, persist, and return identity delta fields.
+fn run_identity_reconciliation(head: &mut HeadState) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let state = TyProjectState {
+        db: head.db.clone(),
+        root: head.root.clone(),
+    };
+    let entities = extract_entities(&state);
+    let recon = reconcile(&mut head.registry, &entities, head.store.revision());
+
+    let moved = recon.moved().iter().map(|id| {
+        head.registry.get(id)
+            .map(|a| a.qualified_path.clone())
+            .unwrap_or_default()
+    }).collect();
+    let needs_review = recon.needs_review.iter().map(|id| id.0.clone()).collect();
+    let orphaned = recon.retired.iter().map(|id| id.0.clone()).collect();
+
+    // Persist.
+    let identity_path = head.root.as_std_path().join(".tyo3").join("identity.db");
+    if let Err(e) = head.registry.save(&identity_path) {
+        log::error!("Failed to persist identity registry: {}", e);
+    }
+
+    (moved, needs_review, orphaned)
+}
 
 /// Fold a batch of watcher-produced ChangeEvents into HEAD as ONE revision.
 ///
@@ -1152,11 +1239,18 @@ fn apply_watch_events(
         head.system.publish(head.store.capture());
         let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
         let revision = head.store.bump_revision().0;
+
+        // Run reconciliation.
+        let (moved, needs_review, orphaned) = run_identity_reconciliation(head);
+
         return Some(dto::SyncResultDto {
             revision,
             created: vec![],
             changed: vec![],
             deleted: vec![],
+            moved,
+            needs_review,
+            orphaned,
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
@@ -1233,11 +1327,17 @@ fn apply_watch_events(
     // 3. Apply the ty-level ChangeEvents for incremental analysis.
     let result = head.db.apply_changes(&kept_events, None);
 
+    // Run reconciliation.
+    let (moved, needs_review, orphaned) = run_identity_reconciliation(head);
+
     Some(dto::SyncResultDto {
         revision,
         created,
         changed,
         deleted,
+        moved,
+        needs_review,
+        orphaned,
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
@@ -1263,7 +1363,14 @@ impl PyTyProject {
         })?;
         let system_root = SystemPathBuf::from(s);
 
-        let head = build_head(system_root, ContentStore::new());
+        // Load identity registry if it exists.
+        let identity_path = absolute.join(".tyo3").join("identity.db");
+        let registry = IdentityRegistry::load(&identity_path).unwrap_or_else(|e| {
+            log::warn!("Failed to load identity registry: {} — starting fresh.", e);
+            IdentityRegistry::default()
+        });
+
+        let head = build_head(system_root, ContentStore::new(), registry);
 
         Ok(PyTyProject {
             inner: Arc::new(Mutex::new(Some(head))),
@@ -1285,13 +1392,12 @@ impl PyTyProject {
         let head = guard.as_mut().unwrap();
 
         let root = head.root.clone();
-        // Preserve overlay content across the rebuild: move the existing store
-        // out and re-seed the new head from it. (Empty in Phase 2; meaningful
-        // once edits land in Phase 3.)
+        // Preserve overlay content AND identity registry across the rebuild.
         let store = std::mem::replace(&mut head.store, ContentStore::new());
+        let registry = std::mem::replace(&mut head.registry, IdentityRegistry::default());
 
         // Rebuild while still holding the lock, then swap atomically.
-        *guard = Some(build_head(root, store));
+        *guard = Some(build_head(root, store, registry));
         drop(guard);
 
         // If a watcher is running, update its watched paths (the head db
@@ -1459,11 +1565,18 @@ impl PyTyProject {
         head.system.publish(head.store.capture());
         let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
         let revision = head.store.bump_revision().0;
+
+        // Run reconciliation.
+        let (moved, needs_review, orphaned) = run_identity_reconciliation(head);
+
         let dto = dto::SyncResultDto {
             revision,
             created: vec![],
             changed: vec![],
             deleted: vec![],
+            moved,
+            needs_review,
+            orphaned,
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
@@ -1660,6 +1773,101 @@ impl PyTyProject {
         Ok(PyHeadView {
             inner: Arc::clone(&self.inner),
         })
+    }
+
+    // ── Identity: id_for, locate (Gate 2 Step 6) ──────────────────────
+
+    /// Resolve the DurableId of the entity at `(path, line, col)`.
+    ///
+    /// Finds the enclosing symbol at the position, builds its qualified_path,
+    /// and looks up the DurableId in the identity registry. Returns None if
+    /// no entity was found at the position or no identity is registered.
+    fn id_for(&self, path: &str, line: u32, col: u32) -> PyResult<Option<String>> {
+        let guard = lock_state(&self.inner, "id_for")?;
+        let head = guard.as_ref().unwrap();
+
+        let state = TyProjectState {
+            db: head.db.clone(),
+            root: head.root.clone(),
+        };
+
+        // Resolve the file.
+        let file = crate::files::resolve_file(
+            &state.db,
+            state.root.as_std_path(),
+            path,
+        ).map_err(|e| PathResolutionError::new_err(e.to_string()))?;
+
+        let file_path = file.path(&state.db).as_str().to_string();
+
+        // Get document symbols.
+        let flat_symbols = ty_ide::document_symbols(&state.db, file);
+        let hierarchical = flat_symbols.to_hierarchical();
+
+        let src = ruff_db::source::source_text(&state.db, file);
+        let source_str = src.as_str();
+        let line_index = ruff_source_file::LineIndex::from_source_text(source_str);
+
+        // Convert position to offset.
+        let offset = crate::coordinates::position_to_offset_with_index(
+            source_str, &line_index, line, col,
+        ).map_err(|e| PositionError::new_err(e.to_string()))?;
+
+        // Find all symbols that contain this offset, pick the innermost.
+        let mut best: Option<(String, u32)> = None; // (qualified_path, range_size)
+
+        // Walk all symbols via iter() and figure out containment + nesting.
+        for (id, info) in hierarchical.iter() {
+            if info.full_range.contains(offset) {
+                // Build qualified_path by walking up the hierarchy.
+                let qp = build_qualified_path(&hierarchical, id, &file_path);
+                let size = info.full_range.len().to_u32();
+                match &best {
+                    None => best = Some((qp, size)),
+                    Some((_, prev_size)) if size < *prev_size => {
+                        best = Some((qp, size));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Look up in the registry.
+        match best {
+            Some((qp, _)) => Ok(head.registry.by_path(&qp).map(|id| id.0.clone())),
+            None => Ok(None),
+        }
+    }
+
+    /// Locate the current file+qualified_path for a DurableId.
+    ///
+    /// Returns None if the id is not in the registry (e.g. retired, or
+    /// from another session).
+    fn locate(&self, durable_id: &str) -> PyResult<Option<String>> {
+        let guard = lock_state(&self.inner, "locate")?;
+        let head = guard.as_ref().unwrap();
+        let id = DurableId(durable_id.to_string());
+        Ok(head.registry.get(&id).map(|a| a.qualified_path.clone()))
+    }
+
+    /// List DurableIds currently flagged as NeedsReview.
+    fn needs_review(&self) -> PyResult<Vec<String>> {
+        let guard = lock_state(&self.inner, "needs_review")?;
+        let head = guard.as_ref().unwrap();
+        Ok(head.registry.iter()
+            .filter(|a| a.status == crate::identity::IdentityStatus::NeedsReview)
+            .map(|a| a.id.0.clone())
+            .collect())
+    }
+
+    /// List DurableIds currently flagged as Orphaned.
+    fn orphaned(&self) -> PyResult<Vec<String>> {
+        let guard = lock_state(&self.inner, "orphaned")?;
+        let head = guard.as_ref().unwrap();
+        Ok(head.registry.iter()
+            .filter(|a| a.status == crate::identity::IdentityStatus::Orphaned)
+            .map(|a| a.id.0.clone())
+            .collect())
     }
 }
 
@@ -2450,6 +2658,51 @@ impl PyHeadView {
 
 // ── Phase 2 tests ────────────────────────────────────────────────────────
 
+/// Build a qualified_path for a SymbolId by walking up the hierarchy.
+fn build_qualified_path(
+    hierarchical: &ty_ide::HierarchicalSymbols,
+    target_id: ty_ide::SymbolId,
+    file_path: &str,
+) -> String {
+    // Walk the hierarchy upward: collect name segments.
+    let mut segments: Vec<String> = Vec::new();
+
+    // Get the symbol info for the target.
+    for (id, info) in hierarchical.iter() {
+        if id == target_id {
+            segments.push(info.name.clone().into_owned());
+            let mut current_id = id;
+
+            // Walk up: for each symbol, check if any id has it as a child.
+            // This is O(n²) but fine for a single query.
+            loop {
+                let mut found_parent = false;
+                for (pid, pinfo) in hierarchical.iter() {
+                    for (cid, _) in hierarchical.children(pid) {
+                        if cid == current_id {
+                            segments.push(pinfo.name.clone().into_owned());
+                            current_id = pid;
+                            found_parent = true;
+                            break;
+                        }
+                    }
+                    if found_parent {
+                        break;
+                    }
+                }
+                if !found_parent {
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    segments.reverse();
+    let qualified = segments.join("::");
+    format!("{}::{}", file_path, qualified)
+}
+
 #[cfg(test)]
 mod phase2_tests {
     use super::*;
@@ -2478,7 +2731,7 @@ mod phase2_tests {
     #[test]
     fn build_head_no_config_reads_disk() {
         let (_dir, root) = project(None, "VALUE = 42\n");
-        let head = build_head(root.clone(), ContentStore::new());
+        let head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
         let file = system_path_to_file(&head.db, &a).unwrap();
         assert!(source_text(&head.db, file).as_str().contains("VALUE = 42"));
@@ -2498,12 +2751,12 @@ mod phase2_tests {
 
         // Default (no config): system Python → 3.13 → no syntax error.
         let (_d1, root_default) = project(None, pep695);
-        let head_default = build_head(root_default.clone(), ContentStore::new());
+        let head_default = build_head(root_default.clone(), ContentStore::new(), IdentityRegistry::default());
         let diags_default = head_default.db.check();
 
         // Config forces Python 3.8 → syntax error on PEP 695 generics.
         let (_d2, root_38) = project(Some(toml_38), pep695);
-        let head_38 = build_head(root_38.clone(), ContentStore::new());
+        let head_38 = build_head(root_38.clone(), ContentStore::new(), IdentityRegistry::default());
         let diags_38 = head_38.db.check();
 
         assert!(
@@ -2519,7 +2772,7 @@ mod phase2_tests {
     #[test]
     fn malformed_config_falls_back_to_defaults() {
         let (_dir, root) = project(Some("this is not = valid toml ]["), "X = 1\n");
-        let head = build_head(root.clone(), ContentStore::new()); // must not panic
+        let head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default()); // must not panic
         // The db is usable despite the broken config.
         let a = root.join("a.py");
         let file = system_path_to_file(&head.db, &a).unwrap();
@@ -2550,7 +2803,7 @@ mod phase3_tests {
     #[test]
     fn edit_overlays_content_without_disk_write() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // baseline reads disk
@@ -2577,7 +2830,7 @@ mod phase3_tests {
     #[test]
     fn revision_advances() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let r0 = head.store.revision().0;
         head.store.insert_text(root.join("a.py"), "X = 2\n");
         assert!(head.store.revision().0 > r0);
@@ -2588,7 +2841,7 @@ mod phase3_tests {
     #[test]
     fn edit_creates_new_file() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let b = root.join("b.py");
         let ev = classify_overlay_edit(&head.system, &head.db, &b);
         assert!(matches!(ev, ChangeEvent::Created { .. }));
@@ -2604,7 +2857,7 @@ mod phase3_tests {
     #[test]
     fn edit_virtual_is_disk_free() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let vpath = SystemVirtualPathBuf::from("untitled:1".to_string());
         head.store.insert_virtual(vpath.clone(), "VV = 9\n");
         head.system.publish(head.store.capture());
@@ -2618,7 +2871,7 @@ mod phase3_tests {
     #[test]
     fn sync_path_reingests_disk() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
         // overlay it, then change disk underneath, then sync_path should win = disk
         head.store.insert_text(a.clone(), "OVERLAY = 1\n");
@@ -2641,7 +2894,7 @@ mod phase3_tests {
     #[test]
     fn edit_many_is_one_revision() {
         let (_d, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
         let b = root.join("b.py");
 
@@ -2671,7 +2924,7 @@ mod phase3_tests {
     #[test]
     fn content_observable_immediately_after_write() {
         let (_d, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         head.store.insert_text(a.clone(), "NEW_CONTENT = 42\n");
@@ -2724,7 +2977,7 @@ mod phase4_tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(".keep"), "").unwrap();
         let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
-        let head = build_head(root.clone(), ContentStore::new());
+        let head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let snap = build_frozen(root, head.store.capture(), head.store.revision());
 
         assert!(compute_files(&snap).is_empty());
@@ -2739,7 +2992,7 @@ mod phase4_tests {
     #[test]
     fn snapshot_is_isolated_from_later_head_edits() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the generation with the disk content at r0.
@@ -2768,7 +3021,7 @@ mod phase4_tests {
     #[test]
     fn pre_populated_content_survives_disk_mutation() {
         let (_dir, root) = project("DISK = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the disk content into the generation.
@@ -2787,7 +3040,7 @@ mod phase4_tests {
     #[test]
     fn snapshot_pins_overlay_buffer() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
         head.store.insert_text(a.clone(), "OVERLAY = 1\n");
         head.system.publish(head.store.capture());
@@ -2803,7 +3056,7 @@ mod phase4_tests {
     #[test]
     fn time_travel_to_retained_revision() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate r0's content.
@@ -2824,7 +3077,7 @@ mod phase4_tests {
     #[test]
     fn two_snapshots_same_revision_identical_after_disk_mutation() {
         let (_dir, root) = project("SHARED = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate and build first snapshot at r0.
@@ -2906,7 +3159,7 @@ mod phase5_concurrency_tests {
     #[test]
     fn held_snapshots_do_not_block_writer() {
         let (_dir, root) = project("x: int = 0\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the content so snapshots can read it (Design A).
@@ -2961,7 +3214,7 @@ mod phase5_concurrency_tests {
     #[test]
     fn snapshot_reads_never_cancel_while_writer_hammers_head() {
         let (_dir, root) = project("x: int = 0\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the content for snapshot reads (Design A).
@@ -3061,7 +3314,7 @@ mod phase5_concurrency_tests {
     #[test]
     fn concurrent_snapshot_reads_are_deterministic() {
         let (_dir, root) = project("CAPTURED = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the content (Design A).
@@ -3130,7 +3383,7 @@ mod step7_ingest_tests {
     #[test]
     fn sync_path_records_content_for_snapshot_stability() {
         let (_dir, root) = project(&[("a.py", "FIRST = 1\n")]);
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Ingest the disk file via sync_path (records content in generation).
@@ -3163,7 +3416,7 @@ mod step7_ingest_tests {
     #[test]
     fn watcher_ingest_pins_content() {
         let (_dir, root) = project(&[("a.py", "WATCHER_FIRST = 1\n")]);
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Simulate a watcher event: Changed on a.py, disk is read, content
@@ -3193,7 +3446,7 @@ mod step7_ingest_tests {
     #[test]
     fn deleted_file_is_absent_in_snapshots() {
         let (_dir, root) = project(&[("a.py", "X = 1\n")]);
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Ingest a Delete for a.py (file was deleted on disk).
@@ -3234,7 +3487,7 @@ mod phase8_watch_tests {
     #[test]
     fn empty_batch_is_noop() {
         let (_d, root) = project(&[("a.py", "x = 1\n")]);
-        let mut head = build_head(root, ContentStore::new());
+        let mut head = build_head(root, ContentStore::new(), IdentityRegistry::default());
         assert!(apply_watch_events(&mut head, vec![]).is_none());
     }
 
@@ -3246,7 +3499,7 @@ mod phase8_watch_tests {
         let a = root.join("a.py");
 
         // Watcher-driven head.
-        let mut head_w = build_head(root.clone(), ContentStore::new());
+        let mut head_w = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let _ = head_w.db.apply_changes(&[ChangeEvent::Rescan], None); // warm discovery
         std::fs::write(a.as_std_path(), b"x: str = 'two'\n").unwrap();
         let via_watch =
@@ -3265,7 +3518,7 @@ mod phase8_watch_tests {
     fn overlaid_path_is_not_clobbered_by_disk_event() {
         let (_d, root) = project(&[("a.py", "DISK = 1\n")]);
         let a = root.join("a.py");
-        let mut head = build_head(root, ContentStore::new());
+        let mut head = build_head(root, ContentStore::new(), IdentityRegistry::default());
 
         // Agent overlay buffer (unsaved).
         head.store.insert_text(a.clone(), "BUFFER = 2\n".to_string());
@@ -3285,7 +3538,7 @@ mod phase8_watch_tests {
     #[test]
     fn rescan_event_short_circuits() {
         let (_d, root) = project(&[("a.py", "x = 1\n")]);
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
         let r = apply_watch_events(
             &mut head,
@@ -3300,7 +3553,7 @@ mod phase8_watch_tests {
     fn burst_folds_into_one_revision() {
         let (_d, root) = project(&[("a.py", "x = 1\n")]);
         let a = root.join("a.py");
-        let mut head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let before = head.store.revision().0;
         std::fs::write(a.as_std_path(), b"x = 2\n").unwrap();
         let r = apply_watch_events(

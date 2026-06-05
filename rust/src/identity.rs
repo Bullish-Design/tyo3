@@ -299,6 +299,11 @@ impl IdentityRegistry {
     /// Save the registry atomically to `path` (§11.3.3).
     /// Writes to `path.tmp`, fsyncs, renames over `path`.
     pub fn save(&self, path: &Path) -> Result<(), io::Error> {
+        // Ensure the parent directory exists.
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
         let json = self.to_json_value();
         let text = serde_json::to_string_pretty(&json)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

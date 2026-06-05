@@ -241,3 +241,4 @@ rust/target/
 .pre-commit-config.yaml
 
 .env.*
+.tyo3/

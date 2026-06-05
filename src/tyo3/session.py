@@ -872,6 +872,54 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in reload(): {e}") from e
         self._head_graph = None
 
+    # ── Identity (Gate 2) ────────────────────────────────────────────
+
+    def id_for(self, path: str, line: int, col: int) -> Optional[str]:
+        """Resolve the DurableId of the entity at (path, line, col).
+
+        Returns None if no entity was found or no identity is registered.
+        """
+        self._check_open()
+        try:
+            return self._inner.id_for(path, line, col)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in id_for(): {e}") from e
+
+    def locate(self, durable_id: str) -> Optional[str]:
+        """Locate the current file::qualified_path for a DurableId.
+
+        Returns None if the id is not in the registry.
+        """
+        self._check_open()
+        try:
+            return self._inner.locate(durable_id)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in locate(): {e}") from e
+
+    def needs_review(self) -> list[str]:
+        """List durable ids currently flagged as NeedsReview."""
+        self._check_open()
+        try:
+            return self._inner.needs_review()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in needs_review(): {e}") from e
+
+    def orphaned(self) -> list[str]:
+        """List durable ids currently flagged as Orphaned."""
+        self._check_open()
+        try:
+            return self._inner.orphaned()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in orphaned(): {e}") from e
+
     def close(self) -> None:
         """Close the project and free Rust-side resources.
 
