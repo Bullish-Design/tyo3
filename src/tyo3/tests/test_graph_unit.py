@@ -13,12 +13,14 @@ from tyo3.models.symbols import SymbolKind
 
 class TestSymbolIdentity:
     def test_make_module_durable_id(self) -> None:
-        sid = make_module_durable_id("src/models.py", "User")
-        assert sid == "src/models.py::User"
+        """make_module_durable_id creates a stable synthetic id from a file path."""
+        did = make_module_durable_id("src/models.py")
+        assert did == "<module>src/models.py"
 
     def test_make_module_durable_id_nested(self) -> None:
-        sid = make_module_durable_id("src/models.py", "User.save")
-        assert sid == "src/models.py::User.save"
+        """Module ids are file-level only, not per-symbol."""
+        did = make_module_durable_id("src/pkg/__init__.py")
+        assert did == "<module>src/pkg/__init__.py"
 
 
 class TestEdgeData:
@@ -43,17 +45,17 @@ class TestSymbolNode:
 
     def test_optional_fields_default(self) -> None:
         node = SymbolNode(
-            durable_id="test::Foo",
+            durable_id="01KTCTESTTESTTESTTESTTES01",
             name="Foo",
             qualified_name="Foo",
             kind=SymbolKind.CLASS,
             file="test.py",
             range={"start": {"line": 1, "column": 1}, "end": {"line": 10, "column": 1}},
         )
-        assert node.documentation is None
-        assert node.signature is None
+        assert node.content_hash is None
         assert node.external is False
         assert node.package is None
+        assert node.selection_range is None
 
 
 class TestReferenceRoleEnum:

@@ -64,6 +64,7 @@ def shared_graph(fixture_name: str):
         from tyo3.session import TyO3Session
 
         session = TyO3Session(_fixture_path(fixture_name))
+        session.sync_all()  # populate identity registry for id_for()
         _shared_session_cache[fixture_name] = session
         _shared_graph_cache[fixture_name] = CodeGraph.build(session)
     return _shared_graph_cache[fixture_name]

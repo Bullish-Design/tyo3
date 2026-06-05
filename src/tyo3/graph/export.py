@@ -51,10 +51,8 @@ def to_dot(graph: Any, *, max_nodes: int | None = None) -> str:
 def _dot_label(node: SymbolNode) -> str:
     """Build a human-readable DOT label for a symbol node."""
     suffix = ""
-    if node.signature:
-        # Newlines in labels use \\n per DOT spec; RustworkX's to_dot()
-        # handles escaping of special characters (quotes, braces, etc.).
-        suffix = f"\\n{node.signature}"
+    if node.qualified_name and node.qualified_name != node.name:
+        suffix = f"\\n{node.qualified_name}"
     prefix = f"[{node.package}] " if node.external and node.package else ""
     return f"{prefix}{node.name}{suffix}"
 

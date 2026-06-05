@@ -79,11 +79,14 @@ class TestQualifiedNameResolution:
         main_path = "main.py"
         found = graph._find_symbol_in_file(main_path, "MyClass")
         assert found is not None, "_find_symbol_in_file should find 'MyClass' by short name"
-        assert "MyClass" in found
+        # The found value is a DurableId (ULID) — verify it resolves to a node
+        node = graph.symbol(found)
+        assert node is not None and node.name == "MyClass"
 
         found_method = graph._find_symbol_in_file(main_path, "get_val")
         assert found_method is not None, "_find_symbol_in_file should find 'get_val' by short name"
-        assert "get_val" in found_method
+        node_m = graph.symbol(found_method)
+        assert node_m is not None and node_m.name == "get_val"
 
     def test_references_to_function_connect_correctly(self) -> None:
         graph = get_graph("simple_package")
@@ -146,6 +149,7 @@ class TestBuildReports:
         mock_session = MagicMock()
         mock_session.files.return_value = ["/fake/a.py"]
         mock_session.document_symbols.return_value = []
+        mock_session.id_for.return_value = "01KTCTESTTESTTESTTESTTES01"
         mock_session.file_occurrences.side_effect = RuntimeError("simulated ref failure")
 
         graph, report = CodeGraph.build_with_report(mock_session)
@@ -181,6 +185,7 @@ class TestBuildReports:
         mock_session.files.return_value = ["/fake/a.py"]
         mock_session.document_symbols.return_value = [mock_class]
         mock_session.file_occurrences.return_value = []
+        mock_session.id_for.return_value = "01KTCTESTTESTTESTTESTTES01"
         # Inheritance resolution now uses the lean class_supertypes() path.
         mock_session.class_supertypes.side_effect = RuntimeError("simulated inheritance failure")
 
@@ -196,6 +201,7 @@ class TestBuildReports:
         mock_session.files.return_value = ["/fake/a.py"]
         mock_session.document_symbols.return_value = []
         mock_session.file_occurrences.return_value = []
+        mock_session.id_for.return_value = "01KTCTESTTESTTESTTESTTES01"
         mock_session.check.side_effect = RuntimeError("simulated check failure")
 
         graph, report = CodeGraph.build_with_report(mock_session)
@@ -231,6 +237,7 @@ class TestBuildReports:
         mock_session.files.return_value = ["/fake/a.py"]
         mock_session.document_symbols.return_value = []
         mock_session.file_occurrences.return_value = []
+        mock_session.id_for.return_value = "01KTCTESTTESTTESTTESTTES01"
 
         graph, report = CodeGraph.build_with_report(mock_session)
 
