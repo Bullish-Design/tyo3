@@ -1930,3 +1930,261 @@ mod phase4_tests {
         assert!(read(&snap0, &a).contains("X = 1")); // pinned to r0's (disk) content
     }
 }
+
+// ── Phase 5 tests: Concurrency proof ──────────────────────────────────────
+//
+// Prove the core architectural invariant: many reader snapshots held open
+// do NOT block the writer (independent Zalsa per snapshot), snapshot reads
+// never surface salsa::Cancelled, and frozen read-once disk capture is
+// race-safe under concurrent reads.
+
+#[cfg(test)]
+mod phase5_concurrency_tests {
+    use super::*;
+    use ruff_db::source::source_text;
+    use std::io::Write;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc, Barrier};
+    use std::time::{Duration, Instant};
+
+    fn stress_count(name: &str, default: usize) -> usize {
+        std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    }
+
+    fn project(a_py: &str) -> (tempfile::TempDir, SystemPathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("a.py")).unwrap();
+        f.write_all(a_py.as_bytes()).unwrap();
+        let root =
+            SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
+        (dir, root)
+    }
+
+    fn read_source(state: &TyProjectState, path: &SystemPathBuf) -> String {
+        let file = ruff_db::files::system_path_to_file(&state.db, path).unwrap();
+        source_text(&state.db, file).as_str().to_string()
+    }
+
+    /// Apply an overlay edit using the same ordering as the production
+    /// write path: classify → mutate store → publish → apply_changes.
+    fn apply_overlay_edit(head: &mut HeadState, path: &SystemPathBuf, text: String) {
+        let event = classify_overlay_edit(&head.system, &head.db, path);
+        head.store.insert_text(path.clone(), text);
+        head.system.publish(head.store.capture());
+        head.db
+            .apply_changes(std::slice::from_ref(&event), None);
+    }
+
+    // ── 5.1 Held snapshots do not block the writer ──────────────────────
+
+    /// Direct proof of architecture §0: many frozen snapshots held open
+    /// do NOT block `apply_changes`. If snapshot() accidentally becomes
+    /// `head.db.clone()`, this test times out (the writer's `cancel_others`
+    /// blocks waiting for the shared clone count to drop).
+    #[test]
+    fn held_snapshots_do_not_block_writer() {
+        let (_dir, root) = project("x: int = 0\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        let snapshot_count = stress_count("TYO3_MVCC_STRESS_SNAPSHOTS", 32);
+        let edit_count = stress_count("TYO3_MVCC_STRESS_EDITS", 100);
+
+        let snapshots: Vec<TyProjectState> = (0..snapshot_count)
+            .map(|_| {
+                build_frozen(
+                    root.clone(),
+                    head.store.capture(),
+                    head.store.revision(),
+                )
+            })
+            .collect();
+
+        // Force each snapshot to do real work before the writer starts.
+        // This catches both "held but idle clone" and "active snapshot db" bugs.
+        for snap in &snapshots {
+            assert!(read_source(snap, &a).contains("x: int = 0"));
+        }
+
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            for i in 1..=edit_count {
+                apply_overlay_edit(&mut head, &a, format!("x: int = {i}\n"));
+            }
+            let _ = tx.send((head.store.revision().0, start.elapsed()));
+        });
+
+        let (rev, elapsed) = rx.recv_timeout(Duration::from_secs(5)).expect(
+            "writer did not finish while snapshots were held open; \
+             snapshot() likely shares the HEAD Zalsa or holds the head lock too long",
+        );
+
+        assert!(rev >= edit_count as u64);
+        eprintln!(
+            "held_snapshots_do_not_block_writer: snapshots={snapshot_count}, \
+             edits={edit_count}, elapsed={elapsed:?}"
+        );
+
+        // Keep the snapshots alive until after the writer has completed.
+        assert_eq!(snapshots.len(), snapshot_count);
+    }
+
+    // ── 5.2 Snapshot readers never cancel during hot writes ─────────────
+
+    /// Active snapshot queries run concurrently with writer mutations.
+    /// Any panic or error from a snapshot read is a failure. If a snapshot
+    /// somehow shares a mutable Zalsa, readers may see `salsa::Cancelled`
+    /// under concurrent writes.
+    #[test]
+    fn snapshot_reads_never_cancel_while_writer_hammers_head() {
+        let (_dir, root) = project("x: int = 0\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        let reader_count = stress_count("TYO3_MVCC_STRESS_READERS", 8);
+        let edit_count = stress_count("TYO3_MVCC_STRESS_EDITS", 100);
+
+        let snapshots: Vec<TyProjectState> = (0..reader_count)
+            .map(|_| {
+                build_frozen(
+                    root.clone(),
+                    head.store.capture(),
+                    head.store.revision(),
+                )
+            })
+            .collect();
+
+        let barrier = Arc::new(Barrier::new(reader_count + 1));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (err_tx, err_rx) = mpsc::channel::<String>();
+        let (iter_tx, iter_rx) = mpsc::channel::<usize>();
+
+        for (idx, snap) in snapshots.into_iter().enumerate() {
+            let barrier = Arc::clone(&barrier);
+            let stop = Arc::clone(&stop);
+            let err_tx = err_tx.clone();
+            let iter_tx = iter_tx.clone();
+            let a = a.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                let mut iterations = 0usize;
+                while !stop.load(Ordering::Relaxed) {
+                    let result = catch_unwind(AssertUnwindSafe(|| {
+                        let text = read_source(&snap, &a);
+                        assert!(
+                            text.contains("x: int = 0"),
+                            "snapshot reader {idx} observed unpinned content: {text:?}"
+                        );
+                        // Exercise semantic queries too; source_text alone
+                        // does not cover as much salsa state.
+                        let _ = snap.db.check();
+                    }));
+
+                    if result.is_err() {
+                        let _ = err_tx.send(format!(
+                            "snapshot reader {idx} panicked; possible cancellation"
+                        ));
+                        break;
+                    }
+                    iterations += 1;
+                }
+                let _ = iter_tx.send(iterations);
+            });
+        }
+        drop(err_tx);
+        drop(iter_tx);
+
+        let (done_tx, done_rx) = mpsc::channel();
+        barrier.wait();
+        std::thread::spawn(move || {
+            for i in 1..=edit_count {
+                let text = if i % 2 == 0 {
+                    format!("x: int = {i}\n")
+                } else {
+                    "x: int = 'bad'\n".to_string()
+                };
+                apply_overlay_edit(&mut head, &a, text);
+            }
+            let _ = done_tx.send(head.store.revision().0);
+        });
+
+        let final_rev = done_rx.recv_timeout(Duration::from_secs(10)).expect(
+            "writer did not finish during active snapshot reads",
+        );
+        stop.store(true, Ordering::Relaxed);
+
+        let mut total_iterations = 0usize;
+        for _ in 0..reader_count {
+            total_iterations += iter_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("snapshot reader did not stop after writer completed");
+        }
+
+        let errors: Vec<String> = err_rx.try_iter().collect();
+        assert!(
+            errors.is_empty(),
+            "snapshot read errors: {errors:?}"
+        );
+
+        assert!(final_rev >= edit_count as u64);
+        assert!(
+            total_iterations > 0,
+            "reader threads did not perform any snapshot reads"
+        );
+    }
+
+    // ── 5.3 Concurrent frozen disk capture is race-safe ─────────────────
+
+    /// Phase 4's `capture_disk_file` uses `ArcSwap::rcu` and a shared
+    /// `capture_version`. This test makes many clones of one snapshot read
+    /// the same uncaptured disk-backed file at once. Every reader must get
+    /// the same content and no reader may panic.
+    #[test]
+    fn frozen_read_once_capture_is_race_safe() {
+        let (_dir, root) = project("CAPTURED = 1\n");
+        let head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+        let snap = build_frozen(
+            root.clone(),
+            head.store.capture(),
+            head.store.revision(),
+        );
+
+        let reader_count = stress_count("TYO3_MVCC_STRESS_READERS", 16);
+        let barrier = Arc::new(Barrier::new(reader_count));
+        let (tx, rx) = mpsc::channel();
+
+        for _ in 0..reader_count {
+            let snap_clone =
+                TyProjectState { db: snap.db.clone(), root: snap.root.clone() };
+            let barrier = Arc::clone(&barrier);
+            let tx = tx.clone();
+            let a = a.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                let result =
+                    catch_unwind(AssertUnwindSafe(|| read_source(&snap_clone, &a)));
+                let _ = tx.send(
+                    result.map_err(|_| "panic during frozen capture".to_string()),
+                );
+            });
+        }
+        drop(tx);
+
+        let mut texts = Vec::new();
+        for _ in 0..reader_count {
+            let result = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("frozen capture reader did not finish");
+            texts.push(result.expect("frozen capture reader panicked"));
+        }
+
+        assert!(texts.iter().all(|t| t.contains("CAPTURED = 1")));
+        assert!(
+            texts.windows(2).all(|w| w[0] == w[1]),
+            "all concurrent first reads should observe identical captured content"
+        );
+    }
+}
