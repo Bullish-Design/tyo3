@@ -40,6 +40,7 @@ from tyo3.models.navigation import (
     QuickFix,
     Reference,
     TypeHierarchy,
+    TypeHierarchyItem,
     WorkspaceEdit,
 )
 from tyo3.models.symbols import Symbol
@@ -560,6 +561,34 @@ class _ReadOps:
             return None
         return TypeHierarchy.model_validate(native_result)
 
+    # ── Class Supertypes ─────────────────────────────────────────
+
+    def class_supertypes(
+        self, path: str | StdPath, line: int, column: int
+    ) -> list[TypeHierarchyItem]:
+        """Return the direct base classes of the class at *(line, column)*.
+
+        Lean counterpart to :meth:`type_hierarchy` for graph construction:
+        resolves only supertypes and skips the expensive project-wide subtype
+        scan (which walks every module, including typeshed). Returns an empty
+        list when the position is not on a class.
+        """
+        self._check_open()
+        try:
+            native_result = self._native().class_supertypes(str(path), line, column)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except OverflowError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in class_supertypes(): {e}") from e
+
+        return [TypeHierarchyItem.model_validate(o) for o in native_result]
+
 
 # ── TyO3Session ────────────────────────────────────────────────────────────
 
@@ -718,6 +747,80 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_all(): {e}") from e
         return SyncResult.model_validate(native_result)
+
+    # ── File watching (Phase 8) ────────────────────────────────────
+
+    def watch(self) -> None:
+        """Start observing the filesystem for changes under the project's
+        watched paths. Observed changes are debounced by ty and queued; call
+        :meth:`poll_changes` to fold them into HEAD. Idempotent: a second
+        call replaces the watcher."""
+        self._check_open()
+        try:
+            self._inner.watch()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in watch(): {e}") from e
+
+    def unwatch(self) -> None:
+        """Stop observing the filesystem. Pending unpolled events are
+        discarded."""
+        self._check_open()
+        try:
+            self._inner.unwatch()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in unwatch(): {e}") from e
+
+    def flush_watch(self) -> None:
+        """Prompt the watcher to emit any debounced batch now. Still
+        asynchronous; follow with a short poll loop in tests."""
+        self._check_open()
+        try:
+            self._inner.flush_watch()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in flush_watch(): {e}") from e
+
+    def poll_changes(self) -> SyncResult | None:
+        """Drain every change the watcher has observed and fold it into HEAD
+        as one revision. Returns the SyncResult, or None if nothing was
+        pending (or every event was for a path with a live overlay buffer,
+        which the buffer wins).
+
+        Like the explicit write methods, this advances the revision and
+        updates the live HEAD graph (if materialised)."""
+        self._check_open()
+        self._invalidate_head_snap()
+        try:
+            native_result = self._inner.poll_changes()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in poll_changes(): {e}") from e
+
+        if native_result is None:
+            return None
+        result = SyncResult.model_validate(native_result)
+        self._apply_graph_delta(result)
+        return result
+
+    def _inject_changes(self, changes: list[tuple[str, str]]) -> None:
+        """Test seam: enqueue events as if the watcher observed them."""
+        self._check_open()
+        try:
+            self._inner._inject_changes(changes)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in _inject_changes(): {e}") from e
+
+    def _apply_graph_delta(self, result: SyncResult) -> None:
+        """No-op stub — graph delta application wired in Phase 6/7."""
+        pass
 
     # ── Lifecycle ────────────────────────────────────────────────────
 

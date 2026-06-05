@@ -35,6 +35,7 @@ addopts = "-q --cov=tyo3 --cov-report=term-missing --strict-markers -m 'not benc
 testpaths = ["src/tyo3/tests"]
 markers = [
     "benchmark: opt-in performance and CodeGraph benchmarks (not run in default suite)",
+    "watcher: real file-system watcher test (timing-dependent, may fail on watcher-hostile CI)",
 ]
 
 [tool.ty]

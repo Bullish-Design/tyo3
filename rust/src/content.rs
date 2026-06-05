@@ -223,3 +223,12 @@ impl ContentStore {
 pub fn lookup<'a>(generation: &'a Generation, path: &SystemPathBuf) -> Option<&'a Document> {
     generation.system.get(path)
 }
+
+impl ContentStore {
+    /// True if `path` currently has any overlay entry (a live buffer or a
+    /// delete-tombstone) in the head generation. Used by poll_changes to let an
+    /// unsaved overlay buffer win over a racing disk-watcher event.
+    pub fn has_overlay(&self, path: &SystemPathBuf) -> bool {
+        self.generation.system.contains_key(path)
+    }
+}

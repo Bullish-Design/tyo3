@@ -1,5 +1,31 @@
 { pkgs, lib, config, inputs, ... }:
 
+let
+  # Verbose, noisy output for chasing a specific failure: DEBUG cli-logging,
+  # locals in tracebacks, full tracebacks, live stdout/stderr capture. This is
+  # OPT-IN — pass `--detail` to any test script to enable it.
+  pytestFullLogArgs = "--strict-markers -vv --verbosity=2 --tb=long --showlocals --show-capture=all --capture=tee-sys -o log_cli=true --log-cli-level=DEBUG";
+  # Lean default: quiet, short tracebacks. Fast to run and read.
+  pytestLeanArgs = "--strict-markers -q --tb=short";
+  pytestDefaultMarkerArgs = "-m \"not benchmark\"";
+
+  # Shared prelude for test scripts. Selects lean (default) or full output flags
+  # into $PYTEST_LOG_ARGS, and strips `--detail` from "$@" so the remaining args
+  # still pass through to pytest. Usage in a script:
+  #   ${detailPrelude}
+  #   ... python -m pytest $PYTEST_LOG_ARGS <fixed args> "$@" ...
+  detailPrelude = ''
+    PYTEST_LOG_ARGS="${pytestLeanArgs}"
+    _detail_filtered=()
+    for _arg in "$@"; do
+      case "$_arg" in
+        --detail) PYTEST_LOG_ARGS="${pytestFullLogArgs}" ;;
+        *) _detail_filtered+=("$_arg") ;;
+      esac
+    done
+    set -- "''${_detail_filtered[@]}"
+  '';
+in
 {
   env.GREET = "devenv";
 
@@ -58,51 +84,58 @@
   # ── Test scripts ─────────────────────────────────────────────
 
   scripts.tests.exec = ''
+    ${detailPrelude}
     echo "═══ Running all tests ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest src/tyo3/tests/ -v --tb=short --cov=tyo3 --cov-report=term-missing 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing "$@" 2>&1
   '';
 
   scripts.test-quick.exec = ''
+    ${detailPrelude}
     echo "═══ Running quick tests (no native extension needed) ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest src/tyo3/tests/ -q \
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ \
       --ignore=src/tyo3/tests/test_rust_integration.py \
       --ignore=src/tyo3/tests/test_rust_snapshots.py \
       --ignore=src/tyo3/tests/test_coordinate_conversion.py \
       --ignore=src/tyo3/tests/test_property_based.py \
-      --ignore=src/tyo3/tests/test_rust_performance.py 2>&1
+      --ignore=src/tyo3/tests/test_rust_performance.py "$@" 2>&1
   '';
 
   scripts.test-rust.exec = ''
+    ${detailPrelude}
     echo "═══ Running Rust backend tests ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest src/tyo3/tests/test_rust_integration.py src/tyo3/tests/test_rust_snapshots.py src/tyo3/tests/test_coordinate_conversion.py -v --tb=short 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/test_rust_integration.py src/tyo3/tests/test_rust_snapshots.py src/tyo3/tests/test_coordinate_conversion.py "$@" 2>&1
   '';
 
   scripts.test-property.exec = ''
+    ${detailPrelude}
     echo "═══ Running property-based tests (Hypothesis) ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest src/tyo3/tests/test_property_based.py -v --tb=short 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/test_property_based.py "$@" 2>&1
   '';
 
   scripts.test-perf.exec = ''
+    ${detailPrelude}
     echo "═══ Running performance benchmarks ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest src/tyo3/tests/test_rust_performance.py -v -s --tb=short 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/test_rust_performance.py "$@" 2>&1
   '';
 
   scripts.test-coverage.exec = ''
+    ${detailPrelude}
     echo "═══ Running all tests with coverage report ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing --cov-report=html 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing --cov-report=html "$@" 2>&1
     echo "═══ HTML coverage report: $DEVENV_ROOT/htmlcov/index.html ═══"
   '';
 
   scripts.test-ci.exec = ''
+    ${detailPrelude}
     echo "═══ Running CI-style test suite ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest src/tyo3/tests/ -x -q --tb=short --cov=tyo3 --cov-report=term-missing 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ -x --cov=tyo3 --cov-report=term-missing "$@" 2>&1
   '';
 
   # ── Fast inner-loop scripts (for the async/snapshot refactor) ───────
@@ -134,9 +167,11 @@
   '';
 
   # Pass-through pytest: `devenv shell -- pytest src/tyo3/tests/test_concurrency.py -v`
+  # Lean by default; add `--detail` for the verbose debug flags.
   scripts.pytest.exec = ''
+    ${detailPrelude}
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest "$@" 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS "$@" 2>&1
   '';
 
   # Run an ad-hoc script with the package importable:
@@ -212,6 +247,9 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
     echo "    test-ci            — CI-style (fail-fast) test run"
     echo "    check-so           — verify native extension works"
     echo "    clean              — remove all build artifacts"
+    echo ""
+    echo "  Tip: append --detail to any test script for verbose debug output"
+    echo "       (DEBUG logs, locals, full tracebacks). Lean output is the default."
   '';
 
   # ── Shell entry / test ───────────────────────────────────
@@ -225,6 +263,6 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
     echo "Running CI-style tests..."
     cd "$DEVENV_ROOT"
     maturin develop 2>&1
-    PYTHONPATH=src python -m pytest src/tyo3/tests/ -x -q --tb=short 2>&1
+    PYTHONPATH=src python -m pytest ${pytestLeanArgs} ${pytestDefaultMarkerArgs} src/tyo3/tests/ -x 2>&1
   '';
 }

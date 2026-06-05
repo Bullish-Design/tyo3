@@ -834,7 +834,10 @@ class CodeGraph:
 
             start = symbol.selection_range.start if symbol.selection_range else symbol.location.range.start
             try:
-                hierarchy = session.type_hierarchy(native_file, start.line, start.column)
+                # Only supertypes are needed for INHERITS edges. class_supertypes
+                # skips the project-wide subtype scan that type_hierarchy performs
+                # (and that this build discarded), which dominated build time.
+                supertypes = session.class_supertypes(native_file, start.line, start.column)
             except Exception as e:
                 if report is not None:
                     report.failures.append(
@@ -847,13 +850,10 @@ class CodeGraph:
                     )
                 continue
 
-            if hierarchy is None:
-                continue
-
             sid = symbol_id_from_symbol(file_str, symbol)
 
             # Add INHERITS edges to supertypes
-            for supertype in hierarchy.supertypes:
+            for supertype in supertypes:
                 super_file_raw = str(supertype.path)
                 super_file = (
                     _normalize_result_path(root, super_file_raw, project_files)

@@ -12,7 +12,7 @@ from pathlib import Path as StdPath
 
 from tyo3.graph import CodeGraph
 from tyo3.session import TyO3Session
-from tyo3.tests.conftest import needs_native
+from tyo3.tests.conftest import get_graph, needs_native
 
 FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
@@ -20,12 +20,13 @@ FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 @needs_native
 def test_graph_ids_are_path_independent(tmp_path: StdPath) -> None:
     """Same fixture in two absolute directories produces identical IDs."""
-    # Build from the original fixture location
+    # Build from the original fixture location. The shared session-scoped graph
+    # is read-only here, and reusing it skips a cold type-inference build.
+    graph_original = get_graph("graph_test")
     original_fixture = FIXTURES_DIR / "graph_test"
-    with TyO3Session(original_fixture) as session:
-        graph_original = CodeGraph.build(session)
 
-    # Copy to a temporary directory and build again
+    # Copy to a temporary directory and build again. This build must be fresh:
+    # the whole point is a *different* absolute root, so it cannot share the cache.
     temp_fixture = tmp_path / "graph_test"
     shutil.copytree(original_fixture, temp_fixture)
     with TyO3Session(temp_fixture) as session:
@@ -54,9 +55,7 @@ def test_graph_ids_are_path_independent(tmp_path: StdPath) -> None:
 @needs_native
 def test_graph_ids_do_not_contain_absolute_paths(tmp_path: StdPath) -> None:
     """First-party symbol IDs must not contain absolute paths."""
-    fixture = FIXTURES_DIR / "graph_test"
-    with TyO3Session(fixture) as session:
-        graph = CodeGraph.build(session)
+    graph = get_graph("graph_test")
 
     for idx in graph.graph.node_indices():
         node = graph.graph[idx]
@@ -72,9 +71,7 @@ def test_external_symbols_remain_explicitly_external(
     tmp_path: StdPath,
 ) -> None:
     """External symbols must use package-name prefix, not absolute paths."""
-    fixture = FIXTURES_DIR / "graph_test"
-    with TyO3Session(fixture) as session:
-        graph = CodeGraph.build(session)
+    graph = get_graph("graph_test")
 
     external_nodes = graph.external_symbols()
     for node in external_nodes:

@@ -181,7 +181,8 @@ class TestBuildReports:
         mock_session.files.return_value = ["/fake/a.py"]
         mock_session.document_symbols.return_value = [mock_class]
         mock_session.file_occurrences.return_value = []
-        mock_session.type_hierarchy.side_effect = RuntimeError("simulated inheritance failure")
+        # Inheritance resolution now uses the lean class_supertypes() path.
+        mock_session.class_supertypes.side_effect = RuntimeError("simulated inheritance failure")
 
         graph, report = CodeGraph.build_with_report(mock_session)
 

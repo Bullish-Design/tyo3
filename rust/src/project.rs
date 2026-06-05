@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -14,7 +14,7 @@ use ruff_db::system::{SystemPath, SystemPathBuf, SystemVirtualPathBuf};
 use ruff_db::Db as _; // bring files() etc. into scope
 use ruff_source_file::LineIndex;
 
-use ty_project::watch::{ChangeEvent, ChangedKind, CreatedKind, DeletedKind, ExistingPathKind};
+use ty_project::watch::{ChangeEvent, ChangedKind, CreatedKind, DeletedKind, ExistingPathKind, ProjectWatcher, directory_watcher};
 use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
@@ -111,9 +111,23 @@ impl ReadCloneSource for HeadState {
 
 /// Python-facing wrapper.  The inner `Option` is `None` after `close()`;
 /// every operation checks this first and raises if the project is closed.
+///
+/// `inner` is `Arc<Mutex<…>>` so `PyHeadView` (Phase 9) can share a live
+/// reference to the head state.
 #[pyclass(name = "TyProject", module = "tyo3._native_impl", frozen)]
 pub struct PyTyProject {
-    inner: Mutex<Option<HeadState>>,
+    inner: Arc<Mutex<Option<HeadState>>>,
+
+    /// Events the watcher's background thread has observed but not yet folded
+    /// into HEAD. The handler closure (background thread) appends; poll_changes
+    /// (the single writer) drains. A SEPARATE mutex from `inner`, never
+    /// co-acquired with it, so the watcher thread never contends with writes.
+    pending: Arc<Mutex<Vec<ChangeEvent>>>,
+
+    /// The running ty file watcher, if `watch()` was called. `Some` while
+    /// watching; `None` before `watch()` or after `unwatch()`/`close()`.
+    /// Owns the notify + debouncer threads; dropping it (or `stop()`) joins them.
+    watcher: Mutex<Option<ProjectWatcher>>,
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────
@@ -452,6 +466,42 @@ fn compute_type_hierarchy(
         supertypes: supertypes_dto,
         subtypes: subtypes_dto,
     }))
+}
+
+/// Resolve only the direct supertypes (base classes) of the class at a position.
+///
+/// This is the lean half of `compute_type_hierarchy`: it runs
+/// `prepare_type_hierarchy` + `type_hierarchy_supertypes` and deliberately
+/// SKIPS `type_hierarchy_subtypes`. Subtype resolution scans every module in
+/// the workspace (including typeshed/stdlib) to find inheritors and is, per
+/// ty's own docs, "quite expensive in large projects" — yet CodeGraph build
+/// only ever reads supertypes (for INHERITS edges). Skipping it removes that
+/// global scan from the hot build path.
+///
+/// Returns an empty vec when the position is not on a class.
+fn compute_supertypes(
+    state: &TyProjectState,
+    path: &str,
+    line: u32,
+    column: u32,
+) -> Result<Vec<dto::TypeHierarchyItemDto>, AnalysisError> {
+    let (file, source_str) = resolve_file_and_source(state, path)?;
+    let line_index = LineIndex::from_source_text(&source_str);
+    let offset = coordinates::position_to_offset_with_index(
+        &source_str, &line_index, line, column,
+    )
+    .map_err(AnalysisError::Position)?;
+
+    // Confirm the cursor is on a class and normalize to its name position.
+    let item = match ty_ide::prepare_type_hierarchy(&state.db, file, offset) {
+        Some(item) => item,
+        None => return Ok(Vec::new()),
+    };
+
+    let supertypes = ty_ide::type_hierarchy_supertypes(
+        &state.db, item.file, item.selection_range.start(),
+    );
+    Ok(convert::hierarchy::convert_hierarchy_items(&state.db, &supertypes))
 }
 
 /// Get inlay hints for a file (whole-file).
@@ -982,6 +1032,88 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
     }
 }
 
+// ── Phase 8: Watcher drain-and-apply core ───────────────────────────────
+
+/// Fold a batch of watcher-produced ChangeEvents into HEAD as ONE revision.
+///
+/// Returns `None` if, after filtering, there is nothing to apply (so the caller
+/// returns None to Python without bumping the revision). Otherwise publishes,
+/// applies, bumps the revision, and returns the SyncResult.
+///
+/// Rules:
+///  * A `Rescan` anywhere in the batch ⇒ rescan wholesale (like sync_all).
+///  * Events for a path with a live overlay buffer are DROPPED (the buffer wins).
+///  * Virtual events are skipped (the watcher never emits them for real dirs).
+///  * The remaining events are applied in one `apply_changes` call.
+fn apply_watch_events(
+    head: &mut HeadState,
+    events: Vec<ChangeEvent>,
+) -> Option<dto::SyncResultDto> {
+    if events.is_empty() {
+        return None;
+    }
+
+    // Rescan short-circuit: if ty lost sync, redo everything.
+    if events.iter().any(|e| e.is_rescan()) {
+        head.system.publish(head.store.capture());
+        let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
+        let revision = head.store.bump_revision().0;
+        return Some(dto::SyncResultDto {
+            revision,
+            created: vec![],
+            changed: vec![],
+            deleted: vec![],
+            project_changed: result.project_changed(),
+            custom_stdlib_changed: result.custom_stdlib_changed(),
+            rescan: true,
+        });
+    }
+
+    // Filter: keep only real-path events whose path is NOT overlaid.
+    let mut kept: Vec<ChangeEvent> = Vec::with_capacity(events.len());
+    let (mut created, mut changed, mut deleted) = (Vec::new(), Vec::new(), Vec::new());
+    for event in events {
+        let Some(path) = event.system_path() else {
+            // Virtual or path-less event — not from a directory watcher; skip.
+            continue;
+        };
+        let path = path.to_path_buf();
+        if head.store.has_overlay(&path) {
+            // Unsaved buffer wins; ignore the disk event.
+            continue;
+        }
+        let path_str = path.as_str().to_string();
+        match &event {
+            ChangeEvent::Created { .. } => created.push(path_str),
+            ChangeEvent::Deleted { .. } => deleted.push(path_str),
+            ChangeEvent::Changed { .. } => changed.push(path_str),
+            _ => continue, // Opened / virtual variants: ignore
+        }
+        kept.push(event);
+    }
+
+    if kept.is_empty() {
+        return None;
+    }
+
+    // Publish the (content-unchanged) generation so the revision counter
+    // advances, then let ty do the incremental work. HEAD reads disk directly,
+    // so no store mutation is needed for non-overlaid disk changes.
+    head.system.publish(head.store.capture());
+    let result = head.db.apply_changes(&kept, None);
+    let revision = head.store.bump_revision().0;
+
+    Some(dto::SyncResultDto {
+        revision,
+        created,
+        changed,
+        deleted,
+        project_changed: result.project_changed(),
+        custom_stdlib_changed: result.custom_stdlib_changed(),
+        rescan: false,
+    })
+}
+
 // ── PyO3 Methods ─────────────────────────────────────────────────────────
 
 #[pymethods]
@@ -1004,7 +1136,9 @@ impl PyTyProject {
         let head = build_head(system_root, ContentStore::new());
 
         Ok(PyTyProject {
-            inner: Mutex::new(Some(head)),
+            inner: Arc::new(Mutex::new(Some(head))),
+            pending: Arc::new(Mutex::new(Vec::new())),
+            watcher: Mutex::new(None),
         })
     }
 
@@ -1028,6 +1162,18 @@ impl PyTyProject {
 
         // Rebuild while still holding the lock, then swap atomically.
         *guard = Some(build_head(root, store));
+        drop(guard);
+
+        // If a watcher is running, update its watched paths (the head db
+        // changed). If update() errors, we leave the old watch set — fine for
+        // a same-root reload where paths are identical.
+        let mut w = self.watcher.lock().map_err(|e| {
+            PyRuntimeError::new_err(format!("watcher lock poisoned: {e}"))
+        })?;
+        if let Some(ref mut pw) = *w {
+            let inner_guard = lock_state(&self.inner, "reload")?;
+            pw.update(&inner_guard.as_ref().unwrap().db);
+        }
         Ok(())
     }
 
@@ -1036,8 +1182,17 @@ impl PyTyProject {
     /// Close the project and free all resources.
     /// Idempotent — closing an already-closed project is a no-op.
     fn close(&self) -> PyResult<()> {
-        let mut guard = self.inner.lock().map_err(|e| {
-            PyRuntimeError::new_err(format!("Lock poisoned: {}", e))
+        // Stop the watcher first so its threads don't outlive the project.
+        let mut w = self.watcher.lock().map_err(|e| {
+            PyRuntimeError::new_err(format!("watcher lock poisoned: {e}"))
+        })?;
+        if let Some(pw) = w.take() {
+            pw.stop();
+        }
+        drop(w);
+
+        let mut guard = self.inner.lock().map_err(|_e| {
+            PyRuntimeError::new_err(format!("Lock poisoned"))
         })?;
 
         // Setting None on an already-None guard is harmless.
@@ -1173,6 +1328,137 @@ impl PyTyProject {
         };
         drop(guard);
         pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── File watching (Phase 8) ────────────────────────────────────────
+
+    /// Start observing the filesystem. Registers ty's ProjectWatcher over the
+    /// head db's watched paths (project root + module search paths + config).
+    /// Observed changes are debounced by ty and queued; call `poll_changes()`
+    /// to fold them into HEAD. Idempotent: calling watch() again replaces the
+    /// watcher.
+    fn watch(&self) -> PyResult<()> {
+        // Build the handler first — it only needs the queue, not the head.
+        let pending = Arc::clone(&self.pending);
+        let handler = move |changes: Vec<ChangeEvent>| {
+            if let Ok(mut q) = pending.lock() {
+                q.extend(changes);
+            }
+            // A poisoned queue mutex means a prior drain panicked; dropping the
+            // batch is acceptable (the next Rescan/sync_all re-syncs). Never
+            // panic on the watcher thread.
+        };
+
+        let raw_watcher = directory_watcher(handler)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to start file watcher: {e}")))?;
+
+        // ProjectWatcher::new needs &db to derive the watched paths.
+        let project_watcher = {
+            let guard = lock_state(&self.inner, "watch")?;
+            let head = guard.as_ref().unwrap();
+            ProjectWatcher::new(raw_watcher, &head.db)
+            // guard dropped here
+        };
+
+        let mut w = self
+            .watcher
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("watcher lock poisoned: {e}")))?;
+        // Replace any existing watcher; the old one's threads stop on drop.
+        *w = Some(project_watcher);
+        Ok(())
+    }
+
+    /// Stop observing the filesystem. Pending unpolled events are discarded
+    /// along with the watcher threads. No-op if not watching.
+    fn unwatch(&self) -> PyResult<()> {
+        let mut w = self
+            .watcher
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("watcher lock poisoned: {e}")))?;
+        if let Some(pw) = w.take() {
+            pw.stop();
+        }
+        Ok(())
+    }
+
+    /// Force the debouncer to emit any pending batch now (still asynchronous —
+    /// the handler runs on the watcher thread). Tests call this before
+    /// poll_changes to shorten the wait; production code rarely needs it.
+    fn flush_watch(&self) -> PyResult<()> {
+        let w = self
+            .watcher
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("watcher lock poisoned: {e}")))?;
+        if let Some(pw) = w.as_ref() {
+            pw.flush();
+        }
+        Ok(())
+    }
+
+    /// Drain all events the watcher has observed and fold them into HEAD as one
+    /// revision. Returns a SyncResult dict, or None if nothing was pending (or
+    /// everything was filtered out as overlaid). Single-writer: holds the head
+    /// lock for the apply, exactly like edit()/sync_path().
+    fn poll_changes<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        // 1. Drain the queue (separate lock; released immediately).
+        let events: Vec<ChangeEvent> = {
+            let mut q = self
+                .pending
+                .lock()
+                .map_err(|e| PyRuntimeError::new_err(format!("watch queue poisoned: {e}")))?;
+            std::mem::take(&mut *q)
+        };
+
+        if events.is_empty() {
+            return Ok(None);
+        }
+
+        // 2. Apply under the head lock (the single-writer section).
+        let dto = {
+            let mut guard = lock_state(&self.inner, "poll_changes")?;
+            let head = guard.as_mut().unwrap();
+            apply_watch_events(head, events)
+            // guard dropped here
+        };
+
+        match dto {
+            None => Ok(None),
+            Some(dto) => {
+                let obj = pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                Ok(Some(obj))
+            }
+        }
+    }
+
+    /// Test/diagnostic seam: enqueue events as if the watcher had observed
+    /// them. Lets the Python suite exercise poll_changes deterministically
+    /// (no real FS timing). Paths are resolved like sync_path (relative →
+    /// joined onto root).
+    #[pyo3(signature = (changes))]
+    fn _inject_changes(&self, changes: Vec<(String, String)>) -> PyResult<()> {
+        let guard = lock_state(&self.inner, "_inject_changes")?;
+        let root = guard.as_ref().unwrap().root.clone();
+        drop(guard);
+
+        let mut events = Vec::with_capacity(changes.len());
+        for (kind, path) in changes {
+            let abs = resolve_sync_path(&root, &path);
+            let event = match kind.as_str() {
+                "created" => ChangeEvent::Created { path: abs, kind: CreatedKind::File },
+                "changed" => ChangeEvent::file_content_changed(abs),
+                "deleted" => ChangeEvent::Deleted { path: abs, kind: DeletedKind::Any },
+                "rescan"  => ChangeEvent::Rescan,
+                other => return Err(PyValueError::new_err(format!("unknown change kind {other:?}"))),
+            };
+            events.push(event);
+        }
+        let mut q = self
+            .pending
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("watch queue poisoned: {e}")))?;
+        q.extend(events);
+        Ok(())
     }
 
     /// The current application revision.
@@ -1548,6 +1834,27 @@ impl PySnapshot {
             Some(dto) => pythonize(py, &dto)
                 .map_err(|e| PyRuntimeError::new_err(e.to_string())),
         }
+    }
+
+    /// Direct supertypes (base classes) of the class at a position.
+    ///
+    /// Lean alternative to `type_hierarchy` for callers (notably CodeGraph
+    /// build) that only need base classes for INHERITS edges. Skips the
+    /// expensive project-wide subtype scan. Returns an empty list when the
+    /// position is not on a class.
+    fn class_supertypes<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        line: u32,
+        column: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "class_supertypes")?;
+        let path = path.to_owned();
+        let items = py.detach(move || compute_supertypes(&state, &path, line, column))
+            .map_err(AnalysisError::into_pyerr)?;
+        pythonize(py, &items)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     // ── Document Highlights ─────────────────────────────────
@@ -2186,5 +2493,107 @@ mod phase5_concurrency_tests {
             texts.windows(2).all(|w| w[0] == w[1]),
             "all concurrent first reads should observe identical captured content"
         );
+    }
+}
+
+// ── Phase 8 tests: Watcher drain-and-apply ──────────────────────────────
+
+#[cfg(test)]
+mod phase8_watch_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn project(files: &[(&str, &str)]) -> (tempfile::TempDir, SystemPathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in files {
+            let mut f = std::fs::File::create(dir.path().join(name)).unwrap();
+            f.write_all(body.as_bytes()).unwrap();
+        }
+        let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
+        (dir, root)
+    }
+
+    #[test]
+    fn empty_batch_is_noop() {
+        let (_d, root) = project(&[("a.py", "x = 1\n")]);
+        let mut head = build_head(root, ContentStore::new());
+        assert!(apply_watch_events(&mut head, vec![]).is_none());
+    }
+
+    #[test]
+    fn changed_event_matches_explicit_sync_path() {
+        // The load-bearing parity: a watcher Changed event yields the same delta
+        // shape as an explicit sync_path for the same on-disk change.
+        let (_d, root) = project(&[("a.py", "x: int = 1\n")]);
+        let a = root.join("a.py");
+
+        // Watcher-driven head.
+        let mut head_w = build_head(root.clone(), ContentStore::new());
+        let _ = head_w.db.apply_changes(&[ChangeEvent::Rescan], None); // warm discovery
+        std::fs::write(a.as_std_path(), b"x: str = 'two'\n").unwrap();
+        let via_watch =
+            apply_watch_events(&mut head_w, vec![ChangeEvent::file_content_changed(a.clone())])
+                .expect("a changed file must produce a SyncResult");
+
+        assert_eq!(via_watch.changed, vec![a.as_str().to_string()]);
+        assert!(via_watch.created.is_empty() && via_watch.deleted.is_empty());
+        assert!(!via_watch.rescan);
+        // HEAD now reads the new disk content (overlay falls through to disk):
+        let file = ruff_db::files::system_path_to_file(&head_w.db, &a).unwrap();
+        assert!(source_text(&head_w.db, file).as_str().contains("'two'"));
+    }
+
+    #[test]
+    fn overlaid_path_is_not_clobbered_by_disk_event() {
+        let (_d, root) = project(&[("a.py", "DISK = 1\n")]);
+        let a = root.join("a.py");
+        let mut head = build_head(root, ContentStore::new());
+
+        // Agent overlay buffer (unsaved).
+        head.store.insert_text(a.clone(), "BUFFER = 2\n".to_string());
+        head.system.publish(head.store.capture());
+        head.db.apply_changes(&[ChangeEvent::file_content_changed(a.clone())], None);
+
+        // A disk change underneath the buffer arrives via the watcher.
+        std::fs::write(a.as_std_path(), b"DISK = 999\n").unwrap();
+        let result = apply_watch_events(&mut head, vec![ChangeEvent::file_content_changed(a.clone())]);
+
+        // Dropped: nothing applied, buffer still wins.
+        assert!(result.is_none(), "overlaid path must not be clobbered by a disk event");
+        let file = ruff_db::files::system_path_to_file(&head.db, &a).unwrap();
+        assert!(source_text(&head.db, file).as_str().contains("BUFFER = 2"));
+    }
+
+    #[test]
+    fn rescan_event_short_circuits() {
+        let (_d, root) = project(&[("a.py", "x = 1\n")]);
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+        let r = apply_watch_events(
+            &mut head,
+            vec![ChangeEvent::file_content_changed(a), ChangeEvent::Rescan],
+        )
+        .expect("rescan yields a result");
+        assert!(r.rescan);
+        assert!(r.created.is_empty() && r.changed.is_empty() && r.deleted.is_empty());
+    }
+
+    #[test]
+    fn burst_folds_into_one_revision() {
+        let (_d, root) = project(&[("a.py", "x = 1\n")]);
+        let a = root.join("a.py");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let before = head.store.revision().0;
+        std::fs::write(a.as_std_path(), b"x = 2\n").unwrap();
+        let r = apply_watch_events(
+            &mut head,
+            vec![
+                ChangeEvent::file_content_changed(a.clone()),
+                ChangeEvent::file_content_changed(a.clone()),
+                ChangeEvent::file_content_changed(a.clone()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(r.revision, before + 1, "a burst folds into exactly one revision");
     }
 }
