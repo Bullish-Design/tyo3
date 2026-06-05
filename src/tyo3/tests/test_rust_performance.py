@@ -451,7 +451,7 @@ class TestCodeGraphBenchmark:
             t_start = time.perf_counter()
             node_indices = list(graph.graph.node_indices())
             for idx in node_indices[:20]:  # Cap at 20 symbols to keep fast
-                symbol_id = graph.graph[idx].symbol_id
+                symbol_id = graph.graph[idx].durable_id
                 deps = graph.transitive_dependencies(symbol_id)
                 assert isinstance(deps, set)
             t_query = time.perf_counter() - t_start

@@ -14,7 +14,7 @@ class TestImportCycles:
     def _make_module_node(self, graph: CodeGraph, file: str, name: str) -> str:
         sid = f"{file}::<module>"
         node = SymbolNode(
-            symbol_id=sid,
+            durable_id=sid,
             name=name,
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
@@ -33,13 +33,13 @@ class TestImportCycles:
     def _make_data_node(
         self,
         graph: CodeGraph,
-        symbol_id: str,
+        durable_id: str,
         file: str,
     ) -> None:
         node = SymbolNode(
-            symbol_id=symbol_id,
-            name=symbol_id.split("::")[-1],
-            qualified_name=symbol_id.split("::")[-1],
+            durable_id=durable_id,
+            name=durable_id.split("::")[-1],
+            qualified_name=durable_id.split("::")[-1],
             kind=SymbolKind.FUNCTION,
             file=file,
             range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
@@ -132,7 +132,7 @@ class TestImportCycleGroups:
     def _make_module_node(self, graph: CodeGraph, file: str, name: str) -> str:
         sid = f"{file}::<module>"
         node = SymbolNode(
-            symbol_id=sid,
+            durable_id=sid,
             name=name,
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
@@ -220,7 +220,7 @@ class TestImportCycleGroups:
         graph = CodeGraph()
 
         mod_a = SymbolNode(
-            symbol_id="a.py::<module>",
+            durable_id="a.py::<module>",
             name="a",
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
@@ -228,7 +228,7 @@ class TestImportCycleGroups:
             range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         mod_b = SymbolNode(
-            symbol_id="b.py::<module>",
+            durable_id="b.py::<module>",
             name="b",
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
@@ -236,7 +236,7 @@ class TestImportCycleGroups:
             range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         func_a = SymbolNode(
-            symbol_id="a.py::f",
+            durable_id="a.py::f",
             name="f",
             qualified_name="f",
             kind=SymbolKind.FUNCTION,
@@ -244,7 +244,7 @@ class TestImportCycleGroups:
             range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         func_b = SymbolNode(
-            symbol_id="b.py::g",
+            durable_id="b.py::g",
             name="g",
             qualified_name="g",
             kind=SymbolKind.FUNCTION,

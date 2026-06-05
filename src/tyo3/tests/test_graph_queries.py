@@ -15,9 +15,9 @@ class TestGraphQueries:
         graph = get_graph("classes")
         classes = graph.symbols_of_kind(SymbolKind.CLASS)
         assert len(classes) > 0
-        found = graph.symbol(classes[0].symbol_id)
+        found = graph.symbol(classes[0].durable_id)
         assert found is not None
-        assert found.symbol_id == classes[0].symbol_id
+        assert found.durable_id == classes[0].durable_id
 
     def test_symbols_in_file(self) -> None:
         graph = get_graph("classes")
@@ -28,14 +28,14 @@ class TestGraphQueries:
         graph = get_graph("classes")
         modules = graph.symbols_of_kind(SymbolKind.MODULE)
         if modules:
-            kids = graph.children(modules[0].symbol_id)
+            kids = graph.children(modules[0].durable_id)
             assert len(kids) > 0
 
     def test_transitive_dependencies_returns_set(self) -> None:
         graph = get_graph("imports")
         for idx in graph.graph.node_indices():
             node: SymbolNode = graph.graph[idx]
-            deps = graph.transitive_dependencies(node.symbol_id)
+            deps = graph.transitive_dependencies(node.durable_id)
             assert isinstance(deps, set)
             break
 
@@ -57,7 +57,7 @@ class TestGraphQueries:
         local_classes = [c for c in all_classes if not c.external]
         assert len(local_classes) >= 2, f"Expected at least Base + User class, got {len(local_classes)}"
         for cls in local_classes:
-            parent = graph.parent(cls.symbol_id)
+            parent = graph.parent(cls.durable_id)
             assert parent is not None, f"Class {cls.name} has no parent"
 
 
@@ -67,7 +67,7 @@ class TestParallelEdges:
     def test_references_to_returns_all_parallel_edges(self) -> None:
         graph = CodeGraph()
         a = SymbolNode(
-            symbol_id="a.py::caller",
+            durable_id="a.py::caller",
             name="caller",
             qualified_name="caller",
             kind=SymbolKind.FUNCTION,
@@ -75,7 +75,7 @@ class TestParallelEdges:
             range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 10, "column": 1}}),
         )
         b = SymbolNode(
-            symbol_id="b.py::target",
+            durable_id="b.py::target",
             name="target",
             qualified_name="target",
             kind=SymbolKind.FUNCTION,
@@ -103,7 +103,7 @@ class TestParallelEdges:
     def test_children_dedup_with_parallel_containment_edges(self) -> None:
         graph = CodeGraph()
         mod = SymbolNode(
-            symbol_id="m.py::<module>",
+            durable_id="m.py::<module>",
             name="m",
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
@@ -111,7 +111,7 @@ class TestParallelEdges:
             range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         func = SymbolNode(
-            symbol_id="m.py::foo",
+            durable_id="m.py::foo",
             name="foo",
             qualified_name="foo",
             kind=SymbolKind.FUNCTION,

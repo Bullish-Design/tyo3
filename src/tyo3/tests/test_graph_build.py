@@ -35,16 +35,16 @@ class TestGraphConstruction:
         graph = get_graph("classes")
         modules = graph.symbols_of_kind(SymbolKind.MODULE)
         assert len(modules) > 0
-        modules_with_kids = [m for m in modules if len(graph.children(m.symbol_id)) > 0]
+        modules_with_kids = [m for m in modules if len(graph.children(m.durable_id)) > 0]
         assert len(modules_with_kids) > 0, "At least one module should have children"
 
     def test_parent_finds_module(self) -> None:
         graph = get_graph("classes")
         modules = graph.symbols_of_kind(SymbolKind.MODULE)
         for m in modules:
-            kids = graph.children(m.symbol_id)
+            kids = graph.children(m.durable_id)
             if kids:
-                parent = graph.parent(kids[0].symbol_id)
+                parent = graph.parent(kids[0].durable_id)
                 assert parent is not None
                 assert parent.kind == SymbolKind.MODULE
                 break
@@ -91,7 +91,7 @@ class TestQualifiedNameResolution:
         assert len(greet_nodes) >= 1, "greet function should exist"
         greet_node = greet_nodes[0]
 
-        refs = graph.references_to(greet_node.symbol_id)
+        refs = graph.references_to(greet_node.durable_id)
         assert len(refs) > 0, f"greet() should have at least one reference, got {len(refs)}"
         for r in refs:
             from tyo3.graph import EdgeKind as _EK

@@ -12,7 +12,7 @@ class TestHubSymbols:
     def _make_node(self, graph: CodeGraph, name: str, file: str = "test.py") -> str:
         sid = f"{file}::{name}"
         node = SymbolNode(
-            symbol_id=sid,
+            durable_id=sid,
             name=name,
             qualified_name=name,
             kind=SymbolKind.FUNCTION,
@@ -66,7 +66,7 @@ class TestSubgraphForFile:
     def _make_module_node(self, graph: CodeGraph, file: str, name: str) -> str:
         sid = f"{file}::<module>"
         node = SymbolNode(
-            symbol_id=sid,
+            durable_id=sid,
             name=name,
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
@@ -79,7 +79,7 @@ class TestSubgraphForFile:
     def _make_func_node(self, graph: CodeGraph, name: str, file: str) -> str:
         sid = f"{file}::{name}"
         node = SymbolNode(
-            symbol_id=sid,
+            durable_id=sid,
             name=name,
             qualified_name=name,
             kind=SymbolKind.FUNCTION,
@@ -106,7 +106,7 @@ class TestSubgraphForFile:
 
         sub = graph.subgraph_for_file("a.py")
         assert sub.num_nodes() >= 2
-        sub_sids = {sub[i].symbol_id for i in sub.node_indices()}
+        sub_sids = {sub[i].durable_id for i in sub.node_indices()}
         assert mod_a in sub_sids
         assert func_a in sub_sids
         assert func_b in sub_sids
@@ -137,7 +137,7 @@ class TestGraphProperties:
     ) -> str:
         sid = f"{file}::{name}"
         node = SymbolNode(
-            symbol_id=sid,
+            durable_id=sid,
             name=name,
             qualified_name=name,
             kind=kind,
@@ -359,12 +359,12 @@ class TestGraphPropertiesIntegration:
         for idx in graph.graph.node_indices():
             node = graph.graph[idx]
             if node.kind == SymbolKind.MODULE and not node.external:
-                mod_sid = node.symbol_id
+                mod_sid = node.durable_id
                 # Find its children
                 children = graph.children(mod_sid)
                 if children:
                     # Module should be reachable to its children via containment edges
-                    child_sid = children[0].symbol_id
+                    child_sid = children[0].durable_id
                     reachable = graph.is_reachable(mod_sid, child_sid)
                     # Module DEFINES its children, so this is a direct edge
                     assert reachable is True

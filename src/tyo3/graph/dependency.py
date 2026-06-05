@@ -40,9 +40,9 @@ class DependencyGraph:
 
     # ── Queries ───────────────────────────────────────────
 
-    def lookup(self, symbol_id: str) -> SymbolNode | None:
+    def lookup(self, durable_id: str) -> SymbolNode | None:
         """Find a symbol in this dependency graph."""
-        idx = self._id_to_index.get(symbol_id)
+        idx = self._id_to_index.get(durable_id)
         if idx is None:
             return None
         return self.graph[idx]
@@ -75,8 +75,8 @@ class DependencyGraph:
             src, tgt = self.graph.get_edge_endpoints_by_index(edge_idx)
             raw = self.graph.get_edge_data_by_index(edge_idx)
             edge_dict: dict[str, Any] = {
-                "src_id": self.graph[src].symbol_id,
-                "tgt_id": self.graph[tgt].symbol_id,
+                "src_id": self.graph[src].durable_id,
+                "tgt_id": self.graph[tgt].durable_id,
             }
             if raw is not None:
                 edge_data_dict: dict[str, str] = {"kind": raw.kind.value}
@@ -115,7 +115,7 @@ class DependencyGraph:
             for node_data in data["nodes"]:
                 node = SymbolNode.model_validate(node_data["data"])
                 idx = graph.add_node(node)
-                id_to_index[node.symbol_id] = idx
+                id_to_index[node.durable_id] = idx
 
             for edge_data in data.get("edges", []):
                 # New format: symbol_id-based

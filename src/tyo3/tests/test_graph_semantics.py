@@ -34,12 +34,12 @@ def test_reference_from_create_user_targets_user_class() -> None:
     )
 
     targets = {
-        target.symbol_id
-        for target, edge in graph.references_from(create_user.symbol_id)
+        target.durable_id
+        for target, edge in graph.references_from(create_user.durable_id)
         if edge.kind == EdgeKind.REFERENCES
     }
 
-    assert user.symbol_id in targets, f"create_user should reference User, got references: {targets}"
+    assert user.durable_id in targets, f"create_user should reference User, got references: {targets}"
 
 
 @needs_native
@@ -50,13 +50,13 @@ def test_reference_does_not_attach_to_app_module() -> None:
     app_modules = [node for node in graph.symbols_of_kind(SymbolKind.MODULE) if node.file.endswith("app.py")]
     assert len(app_modules) == 1
 
-    app_module_refs = graph.references_from(app_modules[0].symbol_id)
+    app_module_refs = graph.references_from(app_modules[0].durable_id)
     local_model_targets = [
         target for target, _edge in app_module_refs if target.file.endswith("models.py") and not target.external
     ]
     assert local_model_targets == [], (
         f"app.py::<module> should not have local references to models.py, "
-        f"got: {[t.symbol_id for t in local_model_targets]}"
+        f"got: {[t.durable_id for t in local_model_targets]}"
     )
 
 
@@ -79,19 +79,19 @@ def test_user_save_overrides_base_save() -> None:
         if node.file.endswith("models.py") and node.name == "save" and not node.external
     ]
     assert len(save_methods) >= 2, (
-        f"Expected at least 2 save methods in models.py, got {[n.symbol_id for n in save_methods]}"
+        f"Expected at least 2 save methods in models.py, got {[n.durable_id for n in save_methods]}"
     )
 
     base_saves = [n for n in save_methods if n.qualified_name == "Base.save"]
     user_saves = [n for n in save_methods if n.qualified_name == "User.save"]
-    assert len(base_saves) == 1, f"Expected 1 Base.save, got {[n.symbol_id for n in base_saves]}"
-    assert len(user_saves) == 1, f"Expected 1 User.save, got {[n.symbol_id for n in user_saves]}"
+    assert len(base_saves) == 1, f"Expected 1 Base.save, got {[n.durable_id for n in base_saves]}"
+    assert len(user_saves) == 1, f"Expected 1 User.save, got {[n.durable_id for n in user_saves]}"
     base_save = base_saves[0]
     user_save = user_saves[0]
 
     override_edges = edges_of_kind(graph, EdgeKind.OVERRIDES)
-    assert (user_save.symbol_id, base_save.symbol_id) in override_edges, (
-        f"Expected OVERRIDES edge from {user_save.symbol_id} to {base_save.symbol_id}, "
+    assert (user_save.durable_id, base_save.durable_id) in override_edges, (
+        f"Expected OVERRIDES edge from {user_save.durable_id} to {base_save.durable_id}, "
         f"got OVERRIDES edges: {override_edges}"
     )
 
@@ -112,7 +112,7 @@ def test_dependencies_do_not_include_defined_children() -> None:
     """
     graph = CodeGraph()
     module = SymbolNode(
-        symbol_id="a.py::<module>",
+        durable_id="a.py::<module>",
         name="a",
         qualified_name="<module>",
         kind=SymbolKind.MODULE,
@@ -120,7 +120,7 @@ def test_dependencies_do_not_include_defined_children() -> None:
         range=_range(),
     )
     function = SymbolNode(
-        symbol_id="a.py::f",
+        durable_id="a.py::f",
         name="f",
         qualified_name="f",
         kind=SymbolKind.FUNCTION,
@@ -130,15 +130,15 @@ def test_dependencies_do_not_include_defined_children() -> None:
     graph._add_node(module)
     graph._add_node(function)
     graph._add_edge(
-        module.symbol_id,
-        function.symbol_id,
+        module.durable_id,
+        function.durable_id,
         EdgeData(kind=EdgeKind.DEFINES),
         "a.py",
     )
 
-    assert graph.children(module.symbol_id) == [function]
-    assert graph.dependencies(module.symbol_id) == set(), (
-        f"dependencies() must exclude DEFINES edges; got {graph.dependencies(module.symbol_id)}"
+    assert graph.children(module.durable_id) == [function]
+    assert graph.dependencies(module.durable_id) == set(), (
+        f"dependencies() must exclude DEFINES edges; got {graph.dependencies(module.durable_id)}"
     )
 
 
@@ -146,7 +146,7 @@ def test_dependencies_include_references() -> None:
     """``dependencies()`` must include semantic REFERENCES edges."""
     graph = CodeGraph()
     f = SymbolNode(
-        symbol_id="a.py::f",
+        durable_id="a.py::f",
         name="f",
         qualified_name="f",
         kind=SymbolKind.FUNCTION,
@@ -154,7 +154,7 @@ def test_dependencies_include_references() -> None:
         range=_range(),
     )
     g = SymbolNode(
-        symbol_id="a.py::g",
+        durable_id="a.py::g",
         name="g",
         qualified_name="g",
         kind=SymbolKind.FUNCTION,
@@ -164,15 +164,15 @@ def test_dependencies_include_references() -> None:
     graph._add_node(f)
     graph._add_node(g)
     graph._add_edge(
-        f.symbol_id,
-        g.symbol_id,
+        f.durable_id,
+        g.durable_id,
         EdgeData(kind=EdgeKind.REFERENCES),
         "a.py",
     )
 
-    assert graph.dependencies(f.symbol_id) == {g.symbol_id}, (
-        f"dependencies(f) should include REFERENCES target g, got {graph.dependencies(f.symbol_id)}"
+    assert graph.dependencies(f.durable_id) == {g.durable_id}, (
+        f"dependencies(f) should include REFERENCES target g, got {graph.dependencies(f.durable_id)}"
     )
-    assert graph.dependents(g.symbol_id) == {f.symbol_id}, (
-        f"dependents(g) should include REFERENCE source f, got {graph.dependents(g.symbol_id)}"
+    assert graph.dependents(g.durable_id) == {f.durable_id}, (
+        f"dependents(g) should include REFERENCE source f, got {graph.dependents(g.durable_id)}"
     )

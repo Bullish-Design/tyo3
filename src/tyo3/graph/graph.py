@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import rustworkx as rx
 
 from tyo3.graph.dependency import DependencyGraph
-from tyo3.graph.identity import file_from_symbol_id, symbol_id_from_symbol
+from tyo3.graph.identity import derive_durable_id, file_from_durable_id, make_module_durable_id
 from tyo3.graph.models import (
     EdgeData,
     EdgeDiff,
@@ -67,7 +67,7 @@ def _range_size(t: tuple[int, int, int, int, str]) -> tuple[int, int]:
     span is 0, which is the one case where comparing columns is
     meaningful.
     """
-    start_line, _start_col, end_line, end_col, _sid = t
+    start_line, _start_col, end_line, end_col, _did = t
     return (end_line - start_line, end_col)
 
 
@@ -109,12 +109,17 @@ class CodeGraph:
         self._root: Path | None = None
 
         # Pre-materialized range cache for _find_enclosing_symbol (B1)
-        #   file_str -> list of (start_line, start_col, end_line, end_col, symbol_id)
+        #   file_str -> list of (start_line, start_col, end_line, end_col, durable_id)
         #   sorted by range size ascending (smallest first)
         self._file_node_ranges: dict[str, list[tuple[int, int, int, int, str]]] = {}
 
+        # Secondary index: (file, qualified_name) -> durable_id
+        # Populated during node materialisation and used by _find_symbol_in_file
+        # to resolve engine-returned names (which lack DurableIds) to graph nodes.
+        self._name_to_id: dict[tuple[str, str], str] = {}
+
         # Secondary index for fast name@line lookups (B4)
-        #   (file, name_prefix) -> symbol_id
+        #   (file, name_prefix) -> durable_id
         self._name_prefix_index: dict[tuple[str, str], str] = {}
 
         # Diagnostics (separate from graph)
@@ -188,11 +193,11 @@ class CodeGraph:
 
         # ── Pass 2: materialize all project nodes ─────────────
         for file_str, symbols in symbols_by_file.items():
-            graph._materialize_file_nodes(file_str, symbols)
+            graph._materialize_file_nodes(session, file_str, symbols)
 
         # ── Pass 3: structural edges + range caches ───────────
         for file_str, symbols in symbols_by_file.items():
-            graph._add_containment_edges_for_file(file_str, symbols)
+            graph._add_containment_edges_for_file(session, file_str, symbols)
             graph._build_range_cache_for_file(file_str)
 
         # ── Pass 4: semantic references ───────────────────────
@@ -235,7 +240,7 @@ class CodeGraph:
         cls,
         session: TyO3Session,
     ) -> tuple[CodeGraph, GraphBuildReport]:
-        """Build a graph and return it alongside a build report.
+        """Build a graph and return it alongdide a build report.
 
         Convenience wrapper around :meth:`build` that always returns
         a report, so callers can inspect failures without threading
@@ -274,12 +279,22 @@ class CodeGraph:
                 )
             return None
 
-    def _materialize_file_nodes(self, file_str: str, symbols: list[Symbol]) -> None:
-        """Create module and symbol nodes for one file in the graph."""
+    def _materialize_file_nodes(
+        self,
+        session,
+        file_str: str,
+        symbols: list[Symbol],
+    ) -> None:
+        """Create module and symbol nodes for one file in the graph.
+
+        Two sub-passes: first top-level entities get their DurableId from
+        ``session.id_for()``, then nested entities derive compound ids from
+        the parent's DurableId — stable across moves and renames.
+        """
         self._assert_mutable()
-        module_id = f"{file_str}::<module>"
+        module_id = make_module_durable_id(file_str)
         module_node = SymbolNode(
-            symbol_id=module_id,
+            durable_id=module_id,
             name=PurePosixPath(file_str).stem,
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
@@ -295,43 +310,81 @@ class CodeGraph:
         new_nodes: list[SymbolNode] = []
         if module_id not in self._id_to_index:
             new_nodes.append(module_node)
+            self._name_to_id[(file_str, "<module>")] = module_id
 
+        # ── Sub-pass A: top-level entities (no container_name) ─────
+        # Use session.id_for() to get the real DurableId from Gate 2.
+        local_name_to_did: dict[str, str] = {}
         for symbol in symbols:
-            sid = symbol_id_from_symbol(file_str, symbol)
-            if sid not in self._id_to_index:
+            if symbol.container_name:
+                continue  # nested — deferred to pass B
+            did = derive_durable_id(session, file_str, symbol)
+            if did is None:
+                continue
+            local_name_to_did[symbol.name] = did
+            if did not in self._id_to_index:
+                qn = symbol.qualified_name or symbol.name
                 node = SymbolNode(
-                    symbol_id=sid,
+                    durable_id=did,
                     name=symbol.name,
-                    qualified_name=symbol.qualified_name or symbol.name,
+                    qualified_name=qn,
                     kind=symbol.kind,
                     file=file_str,
                     range=symbol.location.range,
                     selection_range=symbol.selection_range,
                 )
                 new_nodes.append(node)
+                self._name_to_id[(file_str, qn)] = did
+                self._name_to_id[(file_str, symbol.name)] = did
+
+        # ── Sub-pass B: nested entities (methods, inner classes) ───
+        # Compound id: parent_durable_id::qualified_name
+        for symbol in symbols:
+            if not symbol.container_name:
+                continue  # already handled in pass A
+            parent_did = local_name_to_did.get(symbol.container_name)
+            if parent_did is None:
+                # Parent not in this file — try cross-file lookup
+                parent_did = self._find_symbol_in_file(file_str, symbol.container_name)
+            did = derive_durable_id(session, file_str, symbol, parent_durable_id=parent_did)
+            if did is not None and did not in self._id_to_index:
+                qn = symbol.qualified_name or symbol.name
+                node = SymbolNode(
+                    durable_id=did,
+                    name=symbol.name,
+                    qualified_name=qn,
+                    kind=symbol.kind,
+                    file=file_str,
+                    range=symbol.location.range,
+                    selection_range=symbol.selection_range,
+                )
+                new_nodes.append(node)
+                self._name_to_id[(file_str, qn)] = did
+                self._name_to_id[(file_str, symbol.name)] = did
 
         if new_nodes:
             indices = self._graph.add_nodes_from(new_nodes)
             for node, idx in zip(new_nodes, indices, strict=True):
-                self._id_to_index[node.symbol_id] = idx
+                self._id_to_index[node.durable_id] = idx
                 self._file_to_nodes[node.file].append(idx)
-                # Index for fast name@line lookups (B4)
-                if "@" in node.symbol_id:
-                    parts = node.symbol_id.split("::", 1)
-                    if len(parts) == 2:
-                        name_part = parts[1].split("@", 1)[0]
-                        self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
 
-    def _add_containment_edges_for_file(self, file_str: str, symbols: list[Symbol]) -> None:
+    def _add_containment_edges_for_file(
+        self,
+        session,
+        file_str: str,
+        symbols: list[Symbol],
+    ) -> None:
         """Add DEFINES/CONTAINS edges for all symbols in one file."""
-        module_id = f"{file_str}::<module>"
+        module_id = make_module_durable_id(file_str)
         for symbol in symbols:
-            sid = symbol_id_from_symbol(file_str, symbol)
+            did = derive_durable_id(session, file_str, symbol)
+            if did is None:
+                continue
             parent_id = self._resolve_parent_id(file_str, symbol, module_id)
             if parent_id and parent_id in self._id_to_index:
                 edge_kind = EdgeKind.DEFINES if parent_id == module_id else EdgeKind.CONTAINS
                 edge = EdgeData(kind=edge_kind)
-                self._add_edge(parent_id, sid, edge, file_str)
+                self._add_edge(parent_id, did, edge, file_str)
 
     def _build_range_cache_for_file(self, file_str: str) -> None:
         """Pre-materialize the range cache for one file.
@@ -346,7 +399,7 @@ class CodeGraph:
                     node.range.start.column,
                     node.range.end.line,
                     node.range.end.column,
-                    node.symbol_id,
+                    node.durable_id,
                 )
                 for idx in self._file_to_nodes[file_str]
                 for node in [self._graph[idx]]
@@ -419,7 +472,7 @@ class CodeGraph:
         symbol: Symbol,
         module_id: str,
     ) -> str | None:
-        """Determine the parent symbol_id for containment edges.
+        """Determine the parent durable_id for containment edges.
 
         Uses container_name from the Symbol to find the parent.
         Falls back to the module node for top-level symbols.
@@ -432,26 +485,26 @@ class CodeGraph:
         return module_id
 
     def _find_symbol_in_file(self, file_path: str, name: str) -> str | None:
-        """Find a symbol ID for *name* in *file_path*.
+        """Find a durable_id for *name* in *file_path*.
 
-        Tries exact match first, then uses the ``_name_prefix_index``
-        for fast ``name@line`` lookups (B4), then falls back to
-        matching by ``node.name`` within the file.
+        Uses the ``_name_to_id`` map (populated during materialisation) as
+        the primary lookup — this maps both qualified_name and short name to
+        the DurableId. Falls back to node-name scan for pre-existing nodes
+        from earlier builds.
         """
-        exact = f"{file_path}::{name}"
-        if exact in self._id_to_index:
-            return exact
-        # Fast name@line lookup via secondary index (B4)
+        # Primary: name_to_id map (populated during materialisation)
+        cached = self._name_to_id.get((file_path, name))
+        if cached is not None:
+            return cached
+        # Secondary: name_prefix_index (legacy, for @line ids)
         cached = self._name_prefix_index.get((file_path, name))
         if cached is not None:
             return cached
-        # Fallback: search by short name within the file's nodes.
-        # Handles qualified-name mismatches where the SID is
-        # e.g. "models.py::Models" but we only have "User".
+        # Fallback: search by short name within the file's nodes
         for idx in self._file_to_nodes.get(file_path, []):
             node: SymbolNode = self._graph[idx]
-            if node.name == name:
-                return node.symbol_id
+            if node.name == name or node.qualified_name == name:
+                return node.durable_id
         return None
 
     # ── Reference resolution ──────────────────────────────────
@@ -518,35 +571,33 @@ class CodeGraph:
             if restrict_targets is not None and target_file not in restrict_targets:
                 continue
 
+            # Resolve the target to its DurableId via the name→id map.
+            # The Rust engine returns file + name but not the DurableId,
+            # so we look it up in the graph's name→id index.
             target_name = occ.target_name
+            target_qn = occ.target_qualified_name
 
-            # Build the target's symbol_id.
-            # Prefer the qualified name from Rust (e.g. "User.save")
-            # which matches the SID format produced by document_symbols:
-            #   file::qualified_name  →  "models.py::User.save"
-            # Fall back to short name for top-level symbols where
-            # qualified_name is None (same as short name).
-            if occ.target_qualified_name:
-                target_sid = f"{target_file}::{occ.target_qualified_name}"
-            else:
-                target_sid = f"{target_file}::{target_name}"
+            # Primary: lookup by qualified_name, then by short name
+            target_did = None
+            if target_qn:
+                target_did = self._find_symbol_in_file(target_file, target_qn)
+            if target_did is None:
+                target_did = self._find_symbol_in_file(target_file, target_name)
 
             # Ensure the target node exists — create a stub if external
-            if target_sid not in self._id_to_index:
-                # Try flexible lookup by short name within the target file.
-                # Handles qualified-name mismatches (e.g. Rust returns
-                # "User" but the node is stored as
-                # "models.py::models.User").
-                found = self._find_symbol_in_file(target_file, target_name)
-                if found:
-                    target_sid = found
-                else:
-                    target_sid_ensured = self._ensure_target_node_simple(
-                        target_file, target_sid, target_name, project_files
-                    )
-                    if target_sid_ensured is None:
-                        continue
-                    target_sid = target_sid_ensured
+            if target_did is None:
+                if target_file in project_files:
+                    # Project-local but not found — identity mismatch, skip
+                    continue
+                # External: create a stub node
+                target_did = self._ensure_target_node_simple(
+                    target_file,
+                    f"{target_file}::{target_qn or target_name}",
+                    target_name,
+                    project_files,
+                )
+                if target_did is None:
+                    continue
 
             # Determine the enclosing symbol at this occurrence's location
             enclosing_id = self._find_enclosing_symbol(file_str, occ.range)
@@ -554,7 +605,7 @@ class CodeGraph:
                 continue
 
             # Don't create self-references for definition sites
-            if enclosing_id == target_sid:
+            if enclosing_id == target_did:
                 continue
 
             role = occ.role  # Already a ReferenceRole
@@ -565,7 +616,7 @@ class CodeGraph:
                 range=occ.range,
                 role=role,
             )
-            self._add_edge(enclosing_id, target_sid, edge, file_str)
+            self._add_edge(enclosing_id, target_did, edge, file_str)
 
             # Add module-level IMPORTS edge for any cross-file reference.
             # The Rust file_occurrences API reports import role occurrences
@@ -583,8 +634,8 @@ class CodeGraph:
         project_files: set[str],
     ) -> None:
         """Add a module-level IMPORTS edge between two files."""
-        source_module = f"{source_file}::<module>"
-        target_module = f"{target_file}::<module>"
+        source_module = make_module_durable_id(source_file)
+        target_module = make_module_durable_id(target_file)
 
         if source_module not in self._id_to_index:
             return
@@ -596,7 +647,7 @@ class CodeGraph:
             target_module = f"{package}::<module>"
             if target_module not in self._id_to_index:
                 self._add_stub_node(
-                    symbol_id=target_module,
+                    durable_id=target_module,
                     name=package,
                     qualified_name="<module>",
                     kind=SymbolKind.MODULE,
@@ -632,7 +683,7 @@ class CodeGraph:
     def _ensure_target_node_simple(
         self,
         target_file: str,
-        target_sid: str,
+        target_did: str,
         target_name: str,
         project_files: set[str],
     ) -> str | None:
@@ -658,16 +709,16 @@ class CodeGraph:
             return None
 
         package = self._infer_package(target_file)
-        ext_sid = f"{package}::{target_name}" if package else target_sid
-        if ext_sid not in self._id_to_index:
+        ext_did = f"{package}::{target_name}" if package else target_did
+        if ext_did not in self._id_to_index:
             self._add_stub_node(
-                symbol_id=ext_sid,
+                durable_id=ext_did,
                 name=target_name,
                 qualified_name=target_name,
                 kind=SymbolKind.UNKNOWN,
                 package=package or "unknown",
             )
-        return ext_sid
+        return ext_did
 
     def _resolve_references_via_tokens(
         self,
@@ -728,19 +779,27 @@ class CodeGraph:
                 else target_file_raw
             )
 
-            # Build the target's symbol_id
-            if target.symbol and target.symbol.qualified_name:
-                target_sid = f"{target_file}::{target.symbol.qualified_name}"
-            elif target.symbol:
-                target_sid = f"{target_file}::{target.symbol.name}@{target.range.start.line}"
-            else:
-                # No symbol info — skip this reference
-                continue
+            # Resolve target by name lookup into the graph's name→id map
+            target_did = None
+            if target.symbol:
+                if target.symbol.qualified_name:
+                    target_did = self._find_symbol_in_file(target_file, target.symbol.qualified_name)
+                if target_did is None:
+                    target_did = self._find_symbol_in_file(target_file, target.symbol.name)
+
+            if target_did is None:
+                # No symbol info or not found — try legacy format
+                if target.symbol and target.symbol.qualified_name:
+                    target_did = f"{target_file}::{target.symbol.qualified_name}"
+                elif target.symbol:
+                    target_did = f"{target_file}::{target.symbol.name}@{target.range.start.line}"
+                else:
+                    continue
 
             # Ensure the target node exists — create a stub if external
-            if target_sid not in self._id_to_index:
-                target_sid = self._ensure_target_node(target_file, target_sid, target)
-                if target_sid is None:
+            if target_did not in self._id_to_index:
+                target_did = self._ensure_target_node(target_file, target_did, target)
+                if target_did is None:
                     continue
 
             # Determine the enclosing symbol at this token's location
@@ -749,7 +808,7 @@ class CodeGraph:
                 continue
 
             # Don't create self-references for definition sites
-            if enclosing_id == target_sid:
+            if enclosing_id == target_did:
                 continue
 
             # Determine role from token modifiers
@@ -763,40 +822,40 @@ class CodeGraph:
                 range=token.range,
                 role=role,
             )
-            self._add_edge(enclosing_id, target_sid, edge, file_str)
+            self._add_edge(enclosing_id, target_did, edge, file_str)
 
     def _ensure_target_node(
         self,
         target_file: str,
-        target_sid: str,
+        target_did: str,
         target: Any,
     ) -> str | None:
         """Ensure a reference target exists as a node.
 
         If the target is external (not in project files), creates a stub
-        node for it. Returns the effective symbol_id to use for edge
+        node for it. Returns the effective durable_id to use for edge
         creation, or None if the target cannot be represented.
         """
         # Only create stubs for truly external paths
         if target_file not in self._file_to_nodes:
             package = self._infer_package(target_file)
             kind = SymbolKind.UNKNOWN
-            name = target_sid.split("::")[-1]
+            name = target_did.split("::")[-1]
             qn = name
             if hasattr(target, "symbol") and target.symbol:
                 kind = target.symbol.kind
                 name = target.symbol.name
                 qn = target.symbol.qualified_name or name
 
-            ext_sid = f"{package}::{qn}" if package else target_sid
+            ext_did = f"{package}::{qn}" if package else target_did
             self._add_stub_node(
-                symbol_id=ext_sid,
+                durable_id=ext_did,
                 name=name,
                 qualified_name=qn,
                 kind=kind,
                 package=package or "unknown",
             )
-            return ext_sid
+            return ext_did
         # In-project — already exists or identity mismatch
         return None
 
@@ -860,7 +919,7 @@ class CodeGraph:
                     )
                 continue
 
-            sid = symbol_id_from_symbol(file_str, symbol)
+            did = derive_durable_id(session, file_str, symbol)
 
             # Add INHERITS edges to supertypes
             for supertype in supertypes:
@@ -870,20 +929,20 @@ class CodeGraph:
                     if root is not None and project_files is not None
                     else super_file_raw
                 )
-                super_sid = self._find_symbol_in_file(super_file, supertype.name)
+                super_did = self._find_symbol_in_file(super_file, supertype.name)
 
                 # If not found locally, create an external stub node
-                if super_sid is None:
+                if super_did is None:
                     package = self._infer_package(super_file)
                     if package is None and super_file not in self._file_to_nodes:
                         package = "unknown"
                     if package:
-                        ext_sid = f"{package}::{supertype.name}"
+                        ext_did = f"{package}::{supertype.name}"
                         kind = SymbolKind.CLASS
-                        super_sid = ext_sid
-                        if ext_sid not in self._id_to_index:
+                        super_did = ext_did
+                        if ext_did not in self._id_to_index:
                             self._add_stub_node(
-                                symbol_id=ext_sid,
+                                durable_id=ext_did,
                                 name=supertype.name,
                                 qualified_name=(f"{package}.{supertype.name}"),
                                 kind=kind,
@@ -893,7 +952,7 @@ class CodeGraph:
                         continue
 
                 edge = EdgeData(kind=EdgeKind.INHERITS)
-                self._add_edge(sid, super_sid, edge, file_str)
+                self._add_edge(did, super_did, edge, file_str)
 
             # Derive OVERRIDES: collect methods from the child class,
             # then walk the full supertype chain to find overridden
@@ -903,13 +962,13 @@ class CodeGraph:
                 continue
 
             # Collect ancestor methods by walking the INHERITS chain
-            ancestor_methods: dict[str, str] = {}  # name -> symbol_id
-            visited: set[str] = {sid}
-            queue: deque[str] = deque([sid])
+            ancestor_methods: dict[str, str] = {}  # name -> durable_id
+            visited: set[str] = {did}
+            queue: deque[str] = deque([did])
 
             while queue:
-                current_sid = queue.popleft()
-                current_idx = self._id_to_index.get(current_sid)
+                current_did = queue.popleft()
+                current_idx = self._id_to_index.get(current_did)
                 if current_idx is None:
                     continue
 
@@ -917,22 +976,22 @@ class CodeGraph:
                     if edge_data.kind != EdgeKind.INHERITS:
                         continue
 
-                    parent_sid = self._graph[succ_idx].symbol_id
-                    if parent_sid not in visited:
-                        visited.add(parent_sid)
-                        queue.append(parent_sid)
+                    parent_did = self._graph[succ_idx].durable_id
+                    if parent_did not in visited:
+                        visited.add(parent_did)
+                        queue.append(parent_did)
 
                     # Collect this parent's methods
-                    for c in self.children(parent_sid):
+                    for c in self.children(parent_did):
                         if c.kind in _METHOD_KINDS and c.name not in ancestor_methods:
-                            ancestor_methods[c.name] = c.symbol_id
+                            ancestor_methods[c.name] = c.durable_id
 
             for method in child_methods:
                 if method.name in ancestor_methods:
-                    method_sid = symbol_id_from_symbol(file_str, method)
-                    parent_method_sid = ancestor_methods[method.name]
+                    method_did = derive_durable_id(session, file_str, method, parent_durable_id=did)
+                    parent_method_did = ancestor_methods[method.name]
                     edge = EdgeData(kind=EdgeKind.OVERRIDES)
-                    self._add_edge(method_sid, parent_method_sid, edge, file_str)
+                    self._add_edge(method_did, parent_method_did, edge, file_str)
 
     def _find_enclosing_symbol(self, file_str: str, range: Range) -> str | None:
         """Find the innermost symbol in *file_str* that contains *range*.
@@ -941,21 +1000,21 @@ class CodeGraph:
         FFI calls.  The cache is sorted by range size ascending, so the
         first containment match is the smallest enclosing symbol.
 
-        Returns the symbol_id, or the module node if no enclosing symbol
+        Returns the durable_id, or the module node if no enclosing symbol
         is found.
         """
         cached = self._file_node_ranges.get(file_str, [])
-        for start_line, start_col, end_line, end_col, sid in cached:
+        for start_line, start_col, end_line, end_col, did in cached:
             # Check containment: node range must fully contain the target range
             if (start_line, start_col) <= (
                 range.start.line,
                 range.start.column,
             ) and (end_line, end_col) >= (range.end.line, range.end.column):
                 # First match is smallest due to sort order
-                return sid
+                return did
 
         # Fall back to module node
-        module_id = f"{file_str}::<module>"
+        module_id = make_module_durable_id(file_str)
         if module_id in self._id_to_index:
             return module_id
         return None
@@ -965,17 +1024,21 @@ class CodeGraph:
     def _add_node(self, node: SymbolNode) -> int:
         """Add a SymbolNode to the graph and update indexes."""
         self._assert_mutable()
-        if node.symbol_id in self._id_to_index:
-            return self._id_to_index[node.symbol_id]
+        if node.durable_id in self._id_to_index:
+            return self._id_to_index[node.durable_id]
         idx = self._graph.add_node(node)
-        self._id_to_index[node.symbol_id] = idx
+        self._id_to_index[node.durable_id] = idx
         self._file_to_nodes[node.file].append(idx)
+        # Name→id map for cross-reference resolution
+        if node.qualified_name:
+            self._name_to_id[(node.file, node.qualified_name)] = node.durable_id
+        self._name_to_id[(node.file, node.name)] = node.durable_id
         # Index for fast name@line lookups (B4)
-        if "@" in node.symbol_id:
-            parts = node.symbol_id.split("::", 1)
+        if "@" in node.durable_id:
+            parts = node.durable_id.split("::", 1)
             if len(parts) == 2:
                 name_part = parts[1].split("@", 1)[0]
-                self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
+                self._name_prefix_index[(parts[0], name_part)] = node.durable_id
         self._semantic_subgraph_cache.clear()
         return idx
 
@@ -1008,19 +1071,24 @@ class CodeGraph:
         self._file_to_nodes.clear()
         self._file_to_edges.clear()
         self._file_node_ranges.clear()
+        self._name_to_id.clear()
         self._name_prefix_index.clear()
         self._file_importers.clear()
         self._semantic_subgraph_cache.clear()
         for idx in self._graph.node_indices():
             node: SymbolNode = self._graph[idx]
-            self._id_to_index[node.symbol_id] = idx
+            self._id_to_index[node.durable_id] = idx
             self._file_to_nodes[node.file].append(idx)
+            # Rebuild name→id map
+            if node.qualified_name:
+                self._name_to_id[(node.file, node.qualified_name)] = node.durable_id
+            self._name_to_id[(node.file, node.name)] = node.durable_id
             # Rebuild name_prefix_index (B4)
-            if "@" in node.symbol_id:
-                parts = node.symbol_id.split("::", 1)
+            if "@" in node.durable_id:
+                parts = node.durable_id.split("::", 1)
                 if len(parts) == 2:
                     name_part = parts[1].split("@", 1)[0]
-                    self._name_prefix_index[(parts[0], name_part)] = node.symbol_id
+                    self._name_prefix_index[(parts[0], name_part)] = node.durable_id
         for edge_idx in self._graph.edge_indices():
             data = self._graph.get_edge_data_by_index(edge_idx)
             if data is not None and hasattr(data, "file") and data.file is not None:
@@ -1040,7 +1108,7 @@ class CodeGraph:
                         node.range.start.column,
                         node.range.end.line,
                         node.range.end.column,
-                        node.symbol_id,
+                        node.durable_id,
                     )
                     for idx in self._file_to_nodes[file_str]
                     for node in [self._graph[idx]]
@@ -1064,6 +1132,7 @@ class CodeGraph:
         pinned._file_importers = defaultdict(set, {k: set(v) for k, v in self._file_importers.items()})
         pinned._root = self._root
         pinned._file_node_ranges = {k: list(v) for k, v in self._file_node_ranges.items()}
+        pinned._name_to_id = dict(self._name_to_id)
         pinned._name_prefix_index = dict(self._name_prefix_index)
         pinned._diagnostics = {k: list(v) for k, v in self._diagnostics.items()}
         pinned._dependency_cache = dict(self._dependency_cache)
@@ -1089,8 +1158,8 @@ class CodeGraph:
         for edge_idx in self._graph.edge_indices():
             data = self._graph.get_edge_data_by_index(edge_idx)
             src, tgt = self._graph.get_edge_endpoints_by_index(edge_idx)
-            source_id = self._graph[src].symbol_id
-            target_id = self._graph[tgt].symbol_id
+            source_id = self._graph[src].durable_id
+            target_id = self._graph[tgt].durable_id
             base_key = (
                 source_id,
                 target_id,
@@ -1107,15 +1176,15 @@ class CodeGraph:
 
     def diff(self, before: CodeGraph) -> GraphDiff:
         """Return the structural graph delta from *before* to ``self``."""
-        before_nodes = {before._graph[idx].symbol_id: before._graph[idx] for idx in before._graph.node_indices()}
-        after_nodes = {self._graph[idx].symbol_id: self._graph[idx] for idx in self._graph.node_indices()}
+        before_nodes = {before._graph[idx].durable_id: before._graph[idx] for idx in before._graph.node_indices()}
+        after_nodes = {self._graph[idx].durable_id: self._graph[idx] for idx in self._graph.node_indices()}
 
         before_edges = before._edge_map()
         after_edges = self._edge_map()
 
         return GraphDiff(
-            added_nodes=[after_nodes[sid] for sid in sorted(after_nodes.keys() - before_nodes.keys())],
-            removed_nodes=[before_nodes[sid] for sid in sorted(before_nodes.keys() - after_nodes.keys())],
+            added_nodes=[after_nodes[did] for did in sorted(after_nodes.keys() - before_nodes.keys())],
+            removed_nodes=[before_nodes[did] for did in sorted(before_nodes.keys() - after_nodes.keys())],
             added_edges=[after_edges[key] for key in sorted(after_edges.keys() - before_edges.keys(), key=repr)],
             removed_edges=[before_edges[key] for key in sorted(before_edges.keys() - after_edges.keys(), key=repr)],
         )
@@ -1150,10 +1219,10 @@ class CodeGraph:
                 symbols_by_file[graph_path] = symbols
 
         for file_str, symbols in symbols_by_file.items():
-            self._materialize_file_nodes(file_str, symbols)
+            self._materialize_file_nodes(session, file_str, symbols)
 
         for file_str, symbols in symbols_by_file.items():
-            self._add_containment_edges_for_file(file_str, symbols)
+            self._add_containment_edges_for_file(session, file_str, symbols)
             self._build_range_cache_for_file(file_str)
 
         for file_str in symbols_by_file:
@@ -1179,7 +1248,7 @@ class CodeGraph:
 
     def _add_stub_node(
         self,
-        symbol_id: str,
+        durable_id: str,
         name: str,
         qualified_name: str,
         kind: SymbolKind,
@@ -1187,7 +1256,7 @@ class CodeGraph:
     ) -> int:
         """Add a stub node for an external symbol."""
         node = SymbolNode(
-            symbol_id=symbol_id,
+            durable_id=durable_id,
             name=name,
             qualified_name=qualified_name,
             kind=kind,
@@ -1205,7 +1274,7 @@ class CodeGraph:
 
     def _edges_of_kind(
         self,
-        symbol_id: str,
+        durable_id: str,
         kinds: set[EdgeKind],
         *,
         incoming: bool = False,
@@ -1218,9 +1287,9 @@ class CodeGraph:
         ``(source_index, edge_data)`` pairs.
 
         Uses RustworkX's ``in_edges`` / ``out_edges`` which return
-        all parallel edges in a single efficient Rust-side call.
+        all parallel edges in a single efficient Rust-dide call.
         """
-        idx = self._id_to_index.get(symbol_id)
+        idx = self._id_to_index.get(durable_id)
         if idx is None:
             return []
         result: list[tuple[int, EdgeData]] = []
@@ -1263,9 +1332,9 @@ class CodeGraph:
 
     # ── Symbol queries ────────────────────────────────────────
 
-    def symbol(self, symbol_id: str) -> SymbolNode | None:
+    def symbol(self, durable_id: str) -> SymbolNode | None:
         """Look up a symbol by its canonical ID."""
-        idx = self._id_to_index.get(symbol_id)
+        idx = self._id_to_index.get(durable_id)
         return self._graph[idx] if idx is not None else None
 
     def symbols_in_file(self, path: str) -> list[SymbolNode]:
@@ -1283,30 +1352,30 @@ class CodeGraph:
 
     # ── Reference queries ─────────────────────────────────────
 
-    def references_to(self, symbol_id: str) -> list[EdgeData]:
+    def references_to(self, durable_id: str) -> list[EdgeData]:
         """All incoming REFERENCES edges to a symbol."""
-        return [data for _, data in self._edges_of_kind(symbol_id, {EdgeKind.REFERENCES}, incoming=True)]
+        return [data for _, data in self._edges_of_kind(durable_id, {EdgeKind.REFERENCES}, incoming=True)]
 
-    def references_from(self, symbol_id: str) -> list[tuple[SymbolNode, EdgeData]]:
+    def references_from(self, durable_id: str) -> list[tuple[SymbolNode, EdgeData]]:
         """All outgoing REFERENCES edges from a symbol."""
-        return [(self._graph[tgt_idx], data) for tgt_idx, data in self._edges_of_kind(symbol_id, {EdgeKind.REFERENCES})]
+        return [(self._graph[tgt_idx], data) for tgt_idx, data in self._edges_of_kind(durable_id, {EdgeKind.REFERENCES})]
 
     # ── Structural queries ────────────────────────────────────
 
-    def children(self, symbol_id: str) -> list[SymbolNode]:
+    def children(self, durable_id: str) -> list[SymbolNode]:
         """Direct children (outgoing DEFINES/CONTAINS edges)."""
         seen: set[int] = set()
         result: list[SymbolNode] = []
-        for tgt_idx, _ in self._edges_of_kind(symbol_id, {EdgeKind.DEFINES, EdgeKind.CONTAINS}):
+        for tgt_idx, _ in self._edges_of_kind(durable_id, {EdgeKind.DEFINES, EdgeKind.CONTAINS}):
             if tgt_idx not in seen:
                 seen.add(tgt_idx)
                 result.append(self._graph[tgt_idx])
         return result
 
-    def parent(self, symbol_id: str) -> SymbolNode | None:
+    def parent(self, durable_id: str) -> SymbolNode | None:
         """Enclosing symbol (incoming DEFINES/CONTAINS edge)."""
         edges = self._edges_of_kind(
-            symbol_id,
+            durable_id,
             {EdgeKind.DEFINES, EdgeKind.CONTAINS},
             incoming=True,
         )
@@ -1314,10 +1383,16 @@ class CodeGraph:
             return self._graph[edges[0][0]]
         return None
 
-    def module_for(self, symbol_id: str) -> SymbolNode | None:
+    def module_for(self, durable_id: str) -> SymbolNode | None:
         """The MODULE node for this symbol's file."""
-        file = file_from_symbol_id(symbol_id)
-        module_id = f"{file}::<module>"
+        # Look up the node to find its file (more robust than parsing the id)
+        node = self.symbol(durable_id)
+        if node is not None:
+            module_id = make_module_durable_id(node.file)
+            return self.symbol(module_id)
+        # Fallback: try extracting file from the id text
+        file = file_from_durable_id(durable_id)
+        module_id = make_module_durable_id(file)
         return self.symbol(module_id)
 
     # ── Dependency analysis ───────────────────────────────────
@@ -1346,86 +1421,86 @@ class CodeGraph:
 
     def dependencies(
         self,
-        symbol_id: str,
+        durable_id: str,
         *,
         kinds: frozenset[EdgeKind] | None = None,
     ) -> set[str]:
         """All symbols this one directly depends on (semantic edges only)."""
         edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
-        return {self._graph[tgt_idx].symbol_id for tgt_idx, _data in self._edges_of_kind(symbol_id, edge_kinds)}
+        return {self._graph[tgt_idx].durable_id for tgt_idx, _data in self._edges_of_kind(durable_id, edge_kinds)}
 
     def dependents(
         self,
-        symbol_id: str,
+        durable_id: str,
         *,
         kinds: frozenset[EdgeKind] | None = None,
     ) -> set[str]:
         """All symbols that directly depend on this one (semantic edges only)."""
         edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
         return {
-            self._graph[src_idx].symbol_id
-            for src_idx, _data in self._edges_of_kind(symbol_id, edge_kinds, incoming=True)
+            self._graph[src_idx].durable_id
+            for src_idx, _data in self._edges_of_kind(durable_id, edge_kinds, incoming=True)
         }
 
     def transitive_dependencies(
         self,
-        symbol_id: str,
+        durable_id: str,
         *,
         kinds: frozenset[EdgeKind] | None = None,
     ) -> set[str]:
         """All symbols reachable via semantic edges from this one."""
         edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
         filtered = self._semantic_subgraph(edge_kinds)
-        idx = self._id_to_index.get(symbol_id)
+        idx = self._id_to_index.get(durable_id)
         if idx is None:
             return set()
         # filtered uses the same indices as the main graph
         reachable = rx.descendants(filtered, idx)
-        return {self._graph[i].symbol_id for i in reachable}
+        return {self._graph[i].durable_id for i in reachable}
 
     def transitive_dependents(
         self,
-        symbol_id: str,
+        durable_id: str,
         *,
         kinds: frozenset[EdgeKind] | None = None,
     ) -> set[str]:
         """All symbols that transitively depend on this one (semantic edges only)."""
         edge_kinds = DEPENDENCY_EDGE_KINDS if kinds is None else kinds
         filtered = self._semantic_subgraph(edge_kinds)
-        idx = self._id_to_index.get(symbol_id)
+        idx = self._id_to_index.get(durable_id)
         if idx is None:
             return set()
         # filtered uses the same indices as the main graph
         reachable = rx.ancestors(filtered, idx)
-        return {self._graph[i].symbol_id for i in reachable}
+        return {self._graph[i].durable_id for i in reachable}
 
     # ── Graph algorithms ──────────────────────────────────────
 
     def _build_module_graph(self) -> tuple[rx.PyDiGraph, dict[str, int]]:
         """Build a module-level graph from IMPORTS edges.
 
-        Returns ``(module_graph, sid_to_index)`` where *module_graph*
-        nodes are module ``symbol_id`` strings and *sid_to_index*
-        maps ``symbol_id`` → node index in the module graph.
+        Returns ``(module_graph, did_to_index)`` where *module_graph*
+        nodes are module ``durable_id`` strings and *did_to_index*
+        maps ``durable_id`` → node index in the module graph.
         """
         module_indices = [i for i in self._graph.node_indices() if self._graph[i].kind == SymbolKind.MODULE]
         if len(module_indices) < 2:
             return rx.PyDiGraph(), {}
 
         mod_graph = rx.PyDiGraph()
-        sid_to_midx: dict[str, int] = {}
+        did_to_midx: dict[str, int] = {}
         for i in module_indices:
-            sid = self._graph[i].symbol_id
-            midx = mod_graph.add_node(sid)
-            sid_to_midx[sid] = midx
+            did = self._graph[i].durable_id
+            midx = mod_graph.add_node(did)
+            did_to_midx[did] = midx
 
         # Map every node to its module for aggregation
         node_to_module: dict[int, str] = {}
         for mi in module_indices:
-            module_sid = self._graph[mi].symbol_id
-            file = file_from_symbol_id(module_sid)
+            module_did = self._graph[mi].durable_id
+            file = file_from_durable_id(module_did)
             for ni in self._file_to_nodes.get(file, []):
-                node_to_module[ni] = module_sid
+                node_to_module[ni] = module_did
 
         for edge_idx in self._graph.edge_indices():
             data = self._graph.get_edge_data_by_index(edge_idx)
@@ -1435,12 +1510,12 @@ class CodeGraph:
             src_mod = node_to_module.get(src)
             tgt_mod = node_to_module.get(tgt)
             if src_mod and tgt_mod and src_mod != tgt_mod:
-                mi_src = sid_to_midx.get(src_mod)
-                mi_tgt = sid_to_midx.get(tgt_mod)
+                mi_src = did_to_midx.get(src_mod)
+                mi_tgt = did_to_midx.get(tgt_mod)
                 if mi_src is not None and mi_tgt is not None:
                     mod_graph.add_edge(mi_src, mi_tgt, None)
 
-        return mod_graph, sid_to_midx
+        return mod_graph, did_to_midx
 
     def import_cycles(self) -> list[list[str]]:
         """Detect circular import chains in the module dependency graph.
@@ -1449,9 +1524,9 @@ class CodeGraph:
         Two modules are adjacent if one imports the other.
 
         Returns a list of cycles, where each cycle is a list of
-        module symbol_ids in order.
+        module durable_ids in order.
         """
-        mod_graph, _sid_to_midx = self._build_module_graph()
+        mod_graph, _did_to_midx = self._build_module_graph()
         if mod_graph.num_nodes() < 2:
             return []
 
@@ -1464,7 +1539,7 @@ class CodeGraph:
 
         # DFS-based cycle detection
         WHITE, GRAY, BLACK = 0, 1, 2
-        color: dict[str, int] = {sid: WHITE for sid in adj}
+        color: dict[str, int] = {did: WHITE for did in adj}
         cycles: list[list[str]] = []
 
         def dfs(u: str, stack: list[str], stack_set: set[str]) -> None:
@@ -1482,9 +1557,9 @@ class CodeGraph:
             stack_set.discard(u)
             color[u] = BLACK
 
-        for sid in adj:
-            if color[sid] == WHITE:
-                dfs(sid, [], set())
+        for did in adj:
+            if color[did] == WHITE:
+                dfs(did, [], set())
 
         return cycles
 
@@ -1497,7 +1572,7 @@ class CodeGraph:
         that would cause widespread breakage if changed.
 
         Computes betweenness centrality over the full directed
-        graph and returns the top *top_n* (symbol_id, score)
+        graph and returns the top *top_n* (durable_id, score)
         pairs, sorted descending by score.
         """
         try:
@@ -1507,7 +1582,7 @@ class CodeGraph:
         except Exception:
             return []
 
-        scored = [(self._graph[i].symbol_id, score) for i, score in centrality.items() if score > 0.0]
+        scored = [(self._graph[i].durable_id, score) for i, score in centrality.items() if score > 0.0]
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_n]
 
@@ -1519,25 +1594,25 @@ class CodeGraph:
         each group contains all modules that are reachable from each other
         through import edges.
 
-        Returns a list of sets of module symbol_ids (one set per SCC
+        Returns a list of sets of module durable_ids (one set per SCC
         with more than one module).  Singles (files with no cross-file
         deps) are excluded.
         """
-        mod_graph, _sid_to_midx = self._build_module_graph()
+        mod_graph, _did_to_midx = self._build_module_graph()
         if mod_graph.num_nodes() < 2:
             return []
 
         sccs = rx.strongly_connected_components(mod_graph)
         return [{mod_graph[i] for i in scc} for scc in sccs if len(scc) > 1]
 
-    def is_reachable(self, from_sid: str, to_sid: str) -> bool:
+    def is_reachable(self, from_did: str, to_did: str) -> bool:
         """Check if there is a directed path from one symbol to another.
 
         Uses RustworkX's ``has_path`` which performs BFS/DFS to determine
         connectivity.
         """
-        src = self._id_to_index.get(from_sid)
-        tgt = self._id_to_index.get(to_sid)
+        src = self._id_to_index.get(from_did)
+        tgt = self._id_to_index.get(to_did)
         if src is None or tgt is None:
             return False
         return rx.has_path(self._graph, src, tgt, as_undirected=False)
@@ -1561,7 +1636,7 @@ class CodeGraph:
             order = rx.topological_sort(self._graph)
         except rx.DAGHasCycle:
             return []
-        return [self._graph[i].symbol_id for i in order]
+        return [self._graph[i].durable_id for i in order]
 
     def subgraph_for_file(self, file_path: str) -> rx.PyDiGraph:
         """Extract a subgraph containing all symbols defined in a file
@@ -1569,7 +1644,7 @@ class CodeGraph:
 
         Uses ``subgraph_with_nodemap`` (B2) for a single Rust call that
         copies nodes and all edges between included nodes, replacing the
-        O(E_total) edge scan with Rust-side filtering.
+        O(E_total) edge scan with Rust-dide filtering.
 
         Returns a new PyDiGraph that can be queried, exported, or
         visualized independently of the main graph.
@@ -1745,14 +1820,14 @@ class CodeGraph:
             result[pkg].append(node)
         return result
 
-    def resolve_external(self, symbol_id: str) -> SymbolNode | None:
+    def resolve_external(self, durable_id: str) -> SymbolNode | None:
         """Resolve an external symbol by loading its dependency graph.
 
         If the symbol is external and its dependency graph is cached
         on disk, loads it and returns the fully-resolved node.
         Otherwise returns the stub node as-is.
         """
-        node = self.symbol(symbol_id)
+        node = self.symbol(durable_id)
         if node is None or not node.external or not node.package:
             return node
 
@@ -1766,7 +1841,7 @@ class CodeGraph:
         if dep is None:
             return node  # Return the stub
 
-        resolved = dep.lookup(symbol_id)
+        resolved = dep.lookup(durable_id)
         return resolved if resolved is not None else node
 
     # ── Diagnostics ───────────────────────────────────────────
@@ -1775,9 +1850,9 @@ class CodeGraph:
         """All diagnostics for a file."""
         return self._diagnostics.get(path, [])
 
-    def diagnostics_for_symbol(self, symbol_id: str) -> list[Diagnostic]:
+    def diagnostics_for_symbol(self, durable_id: str) -> list[Diagnostic]:
         """Diagnostics whose range overlaps this symbol's definition."""
-        node = self.symbol(symbol_id)
+        node = self.symbol(durable_id)
         if node is None:
             return []
         file_diags = self._diagnostics.get(node.file, [])

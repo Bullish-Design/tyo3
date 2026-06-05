@@ -12,7 +12,7 @@ class TestExport:
     def _make_graph_with_data(self) -> CodeGraph:
         graph = CodeGraph()
         mod = SymbolNode(
-            symbol_id="src/main.py::<module>",
+            durable_id="src/main.py::<module>",
             name="main",
             qualified_name="<module>",
             kind=SymbolKind.MODULE,
@@ -21,7 +21,7 @@ class TestExport:
         )
         graph._add_node(mod)
         func = SymbolNode(
-            symbol_id="src/main.py::greet",
+            durable_id="src/main.py::greet",
             name="greet",
             qualified_name="greet",
             kind=SymbolKind.FUNCTION,
@@ -49,7 +49,7 @@ class TestExport:
         graph = CodeGraph()
         for i in range(5):
             node = SymbolNode(
-                symbol_id=f"test.py::f{i}",
+                durable_id=f"test.py::f{i}",
                 name=f"f{i}",
                 qualified_name=f"f{i}",
                 kind=SymbolKind.FUNCTION,
@@ -80,7 +80,7 @@ class TestExport:
 
         graph = CodeGraph()
         ext_node = SymbolNode(
-            symbol_id="stdlib::json.loads",
+            durable_id="stdlib::json.loads",
             name="loads",
             qualified_name="json.loads",
             kind=SymbolKind.FUNCTION,
@@ -117,7 +117,7 @@ class TestExport:
 
         graph = CodeGraph()
         a = SymbolNode(
-            symbol_id="a.py::foo",
+            durable_id="a.py::foo",
             name="foo",
             qualified_name="foo",
             kind=SymbolKind.FUNCTION,
@@ -125,7 +125,7 @@ class TestExport:
             range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
         )
         b = SymbolNode(
-            symbol_id="b.py::bar",
+            durable_id="b.py::bar",
             name="bar",
             qualified_name="bar",
             kind=SymbolKind.FUNCTION,

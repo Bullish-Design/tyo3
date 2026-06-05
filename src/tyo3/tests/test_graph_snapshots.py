@@ -12,7 +12,7 @@ from tyo3.graph import CodeGraph
 
 def _node_ids(graph: CodeGraph) -> set[str]:
     raw = graph.graph
-    return {raw[i].symbol_id for i in raw.node_indices()}
+    return {raw[i].durable_id for i in raw.node_indices()}
 
 
 def _node_names(graph: CodeGraph) -> set[str]:

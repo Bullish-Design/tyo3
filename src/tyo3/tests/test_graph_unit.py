@@ -6,18 +6,18 @@ import pytest
 from pydantic import ValidationError
 
 from tyo3.graph import EdgeData, EdgeKind, SymbolNode
-from tyo3.graph.identity import make_symbol_id
+from tyo3.graph.identity import make_module_durable_id
 from tyo3.graph.models import ReferenceRole
 from tyo3.models.symbols import SymbolKind
 
 
 class TestSymbolIdentity:
-    def test_make_symbol_id(self) -> None:
-        sid = make_symbol_id("src/models.py", "User")
+    def test_make_module_durable_id(self) -> None:
+        sid = make_module_durable_id("src/models.py", "User")
         assert sid == "src/models.py::User"
 
-    def test_make_symbol_id_nested(self) -> None:
-        sid = make_symbol_id("src/models.py", "User.save")
+    def test_make_module_durable_id_nested(self) -> None:
+        sid = make_module_durable_id("src/models.py", "User.save")
         assert sid == "src/models.py::User.save"
 
 
@@ -31,7 +31,7 @@ class TestEdgeData:
 class TestSymbolNode:
     def test_frozen(self) -> None:
         node = SymbolNode(
-            symbol_id="test::Foo",
+            durable_id="test::Foo",
             name="Foo",
             qualified_name="Foo",
             kind=SymbolKind.CLASS,
@@ -43,7 +43,7 @@ class TestSymbolNode:
 
     def test_optional_fields_default(self) -> None:
         node = SymbolNode(
-            symbol_id="test::Foo",
+            durable_id="test::Foo",
             name="Foo",
             qualified_name="Foo",
             kind=SymbolKind.CLASS,

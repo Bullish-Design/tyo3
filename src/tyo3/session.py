@@ -501,6 +501,32 @@ class _ReadOps:
 
         return [NameOccurrence.model_validate(o) for o in native_result]
 
+    # ── Identity (Gate 2) ────────────────────────────────────────────
+    # Available on TyO3Session; Snapshot may not support these if the
+    # native snapshot handle doesn't expose identity methods.
+
+    def id_for(self, path: str, line: int, col: int):
+        """Resolve the DurableId of the entity at (path, line, col).
+
+        Returns None if no entity was found or not supported.
+        """
+        self._check_open()
+        try:
+            return self._native().id_for(path, line, col)
+        except Exception:
+            return None
+
+    def locate(self, durable_id: str):
+        """Locate the current file::qualified_path for a DurableId.
+
+        Returns None if the id is not in the registry or not supported.
+        """
+        self._check_open()
+        try:
+            return self._native().locate(durable_id)
+        except Exception:
+            return None
+
     # ── Hover ────────────────────────────────────────────────────────
 
     def hover(self, path: str | StdPath, line: int, column: int) -> HoverResult | None:
@@ -855,8 +881,9 @@ class TyO3Session(_ReadOps):
         """Apply a write delta to the materialized HEAD graph, if any."""
         if self._head_graph is None:
             return
-        with self.snapshot(at=result.revision) as snap:
-            self._head_graph.apply_delta(snap, result)
+        # Pass self (TyO3Session) as the source so id_for/locate are available.
+        # After the write, the session's head snapshot is already at result.revision.
+        self._head_graph.apply_delta(self, result)
 
     # ── Lifecycle ────────────────────────────────────────────────────
 

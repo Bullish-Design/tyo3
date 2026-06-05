@@ -16,19 +16,28 @@ from tyo3.models.symbols import SymbolKind
 
 
 class SymbolNode(BaseModel):
-    """A symbol in the code graph. Stored as a RustworkX node payload."""
+    """A symbol in the code graph. Stored as a RustworkX node payload.
+
+    Node identity is the ``durable_id`` (a ULID from the Gate 2 identity
+    system). For top-level entities (classes, functions) this is the DurableId
+    assigned by the session. For nested entities (methods, inner classes) it is
+    a compound id ``parent_durable_id::qualified_name`` that remains stable
+    across parent moves/renames.
+
+    Payloads are small (§6.2.2): id, kind, location, content hash, structural
+    fields only. No vectors or large text.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    symbol_id: str
+    durable_id: str
     name: str
     qualified_name: str
     kind: SymbolKind
     file: str
     range: Range
     selection_range: Range | None = None
-    documentation: str | None = None
-    signature: str | None = None
+    content_hash: str | None = None
     external: bool = False
     package: str | None = None
 

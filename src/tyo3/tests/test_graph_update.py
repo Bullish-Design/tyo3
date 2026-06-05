@@ -66,12 +66,12 @@ class TestRebuild:
         graph = self._fresh_graph()
 
         user = find_one(graph, file="models.py", name="User", kind=SymbolKind.CLASS)
-        refs_before = graph.references_to(user.symbol_id)
+        refs_before = graph.references_to(user.durable_id)
         assert refs_before, f"Expected User to have incoming references before update, got {refs_before}"
 
         models_path = next(str(path) for path in session.files() if str(path).endswith("models.py"))
         graph.rebuild(session, models_path)
 
         user_after = find_one(graph, file="models.py", name="User", kind=SymbolKind.CLASS)
-        refs_after = graph.references_to(user_after.symbol_id)
+        refs_after = graph.references_to(user_after.durable_id)
         assert refs_after, f"Expected User to still have incoming references after update, got {refs_after}"

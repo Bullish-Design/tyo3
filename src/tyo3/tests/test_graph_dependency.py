@@ -15,7 +15,7 @@ class TestDependencyGraph:
     def test_construction_and_lookup(self) -> None:
         g = rx.PyDiGraph()
         node = SymbolNode(
-            symbol_id="stdlib::json.loads",
+            durable_id="stdlib::json.loads",
             name="loads",
             qualified_name="json.loads",
             kind=SymbolKind.FUNCTION,
@@ -42,7 +42,7 @@ class TestDependencyGraph:
     def test_all_symbols(self) -> None:
         g = rx.PyDiGraph()
         n1 = SymbolNode(
-            symbol_id="pkg::A",
+            durable_id="pkg::A",
             name="A",
             qualified_name="A",
             kind=SymbolKind.CLASS,
@@ -52,7 +52,7 @@ class TestDependencyGraph:
             package="pkg",
         )
         n2 = SymbolNode(
-            symbol_id="pkg::B",
+            durable_id="pkg::B",
             name="B",
             qualified_name="B",
             kind=SymbolKind.CLASS,
@@ -76,7 +76,7 @@ class TestDependencyGraph:
 
         g = rx.PyDiGraph()
         node = SymbolNode(
-            symbol_id="testpkg::Foo",
+            durable_id="testpkg::Foo",
             name="Foo",
             qualified_name="Foo",
             kind=SymbolKind.CLASS,
@@ -109,7 +109,7 @@ class TestDependencyGraph:
 
         g = rx.PyDiGraph()
         n1 = SymbolNode(
-            symbol_id="testpkg::A",
+            durable_id="testpkg::A",
             name="A",
             qualified_name="A",
             kind=SymbolKind.CLASS,
@@ -119,7 +119,7 @@ class TestDependencyGraph:
             package="testpkg",
         )
         n2 = SymbolNode(
-            symbol_id="testpkg::B",
+            durable_id="testpkg::B",
             name="B",
             qualified_name="B",
             kind=SymbolKind.FUNCTION,
@@ -170,7 +170,7 @@ class TestDependencyGraph:
         for pkg, ver in [("alpha", "1.0"), ("beta", "2.0")]:
             g = rx.PyDiGraph()
             node = SymbolNode(
-                symbol_id=f"{pkg}::X",
+                durable_id=f"{pkg}::X",
                 name="X",
                 qualified_name="X",
                 kind=SymbolKind.CLASS,
@@ -200,7 +200,7 @@ class TestResolveExternal:
     def test_returns_same_node_when_not_external(self) -> None:
         graph = CodeGraph()
         node = SymbolNode(
-            symbol_id="src/main.py::foo",
+            durable_id="src/main.py::foo",
             name="foo",
             qualified_name="foo",
             kind=SymbolKind.FUNCTION,
@@ -216,7 +216,7 @@ class TestResolveExternal:
     def test_returns_stub_when_no_cache(self) -> None:
         graph = CodeGraph()
         graph._add_stub_node(
-            symbol_id="unknown::Bar",
+            durable_id="unknown::Bar",
             name="Bar",
             qualified_name="Bar",
             kind=SymbolKind.CLASS,
@@ -232,7 +232,7 @@ class TestResolveExternal:
 
         g = rx.PyDiGraph()
         rich_node = SymbolNode(
-            symbol_id="stdlib::pathlib.Path",
+            durable_id="stdlib::pathlib.Path",
             name="Path",
             qualified_name="pathlib.Path",
             kind=SymbolKind.CLASS,
@@ -250,7 +250,7 @@ class TestResolveExternal:
 
         graph = CodeGraph()
         graph._add_stub_node(
-            symbol_id="stdlib::pathlib.Path",
+            durable_id="stdlib::pathlib.Path",
             name="Path",
             qualified_name="pathlib.Path",
             kind=SymbolKind.CLASS,

@@ -40,18 +40,18 @@ def find_one(
         ]
         tag = f"*{file_suffix}"
     assert len(matches) == 1, (
-        f"Expected exactly one {kind} named {name!r} in {tag}, got {[m.symbol_id for m in matches]}"
+        f"Expected exactly one {kind} named {name!r} in {tag}, got {[m.durable_id for m in matches]}"
     )
     return matches[0]
 
 
 def edges_of_kind(graph: CodeGraph, kind: EdgeKind) -> list[tuple[str, str]]:
-    """Return all ``(source_symbol_id, target_symbol_id)`` pairs for edges of *kind*."""
+    """Return all ``(source_id, target_id)`` pairs for edges of *kind*."""
     result: list[tuple[str, str]] = []
     for edge_idx in graph.graph.edge_indices():
         data = graph.graph.get_edge_data_by_index(edge_idx)
         if data.kind != kind:
             continue
         src, tgt = graph.graph.get_edge_endpoints_by_index(edge_idx)
-        result.append((graph.graph[src].symbol_id, graph.graph[tgt].symbol_id))
+        result.append((graph.graph[src].durable_id, graph.graph[tgt].durable_id))
     return result

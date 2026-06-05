@@ -16,7 +16,7 @@ from tyo3.tests.graph_helpers import edges_of_kind
 
 
 def _node_ids(g: CodeGraph) -> set[str]:
-    return {g.graph[i].symbol_id for i in g.graph.node_indices()}
+    return {g.graph[i].durable_id for i in g.graph.node_indices()}
 
 
 def _edge_triples(g: CodeGraph) -> set[tuple[str, str, str]]:
@@ -25,7 +25,7 @@ def _edge_triples(g: CodeGraph) -> set[tuple[str, str, str]]:
     for ei in g.graph.edge_indices():
         data = g.graph.get_edge_data_by_index(ei)
         s, t = g.graph.get_edge_endpoints_by_index(ei)
-        out.add((g.graph[s].symbol_id, g.graph[t].symbol_id, str(data.kind)))
+        out.add((g.graph[s].durable_id, g.graph[t].durable_id, str(data.kind)))
     return out
 
 
@@ -41,6 +41,12 @@ def _assert_structurally_equal(a: CodeGraph, b: CodeGraph) -> None:
 
 
 def _build(session: TyO3Session) -> CodeGraph:
+    """Build a graph, ensuring the identity registry is populated first."""
+    # id_for() requires reconciliation which happens during sync_all() / edit().
+    # Ensure the identity system is initialized before the first build.
+    if not hasattr(session, '_graph_identity_primed'):
+        session.sync_all()
+        session._graph_identity_primed = True
     return CodeGraph.build(session)
 
 
@@ -59,8 +65,7 @@ def test_apply_delta_changed_file_equals_rebuild(tmp_path: StdPath) -> None:
         sync = s.edit(
             "models.py", "class User:\n    def save(self): ...\n    def load(self): ...\n"
         )
-        with s.snapshot() as snap:
-            g.apply_delta(snap, sync)
+        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -71,8 +76,7 @@ def test_apply_delta_created_file_equals_rebuild(tmp_path: StdPath) -> None:
         g = _build(s)
         sync = s.edit("helpers.py", "def helper():\n    return 42\n")  # Created
         assert sync.created, "expected a created file in the delta"
-        with s.snapshot() as snap:
-            g.apply_delta(snap, sync)
+        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -86,8 +90,7 @@ def test_apply_delta_deleted_file_equals_rebuild(tmp_path: StdPath) -> None:
         (tmp_path / "app.py").unlink()
         sync = s.sync_path("app.py")
         assert sync.deleted, "expected a deleted file in the delta"
-        with s.snapshot() as snap:
-            g.apply_delta(snap, sync)
+        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -104,8 +107,7 @@ def test_apply_delta_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> 
             "models.py",
             "class User:\n    def save(self): ...\n    def extra(self): ...\n",
         )
-        with s.snapshot() as snap:
-            g.apply_delta(snap, sync)
+        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
         # explicit: app.py still imports models.py after the change
@@ -121,8 +123,7 @@ def test_apply_delta_rescan_equals_rebuild(tmp_path: StdPath) -> None:
         g = _build(s)
         sync = s.sync_all()
         assert sync.rescan
-        with s.snapshot() as snap:
-            g.apply_delta(snap, sync)
+        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -145,8 +146,7 @@ def test_importers_index_survives_apply_delta(tmp_path: StdPath) -> None:
     with TyO3Session(str(tmp_path)) as s:
         g = _build(s)
         sync = s.edit("models.py", "class User:\n    name: str\n")
-        with s.snapshot() as snap:
-            g.apply_delta(snap, sync)
+        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         assert "app.py" in g._importers_of({"models.py"})  # rebuilt, not lost
 
 
@@ -164,8 +164,7 @@ def test_apply_delta_sequence_matches_rebuild(tmp_path: StdPath) -> None:
             "class User:\n    b: int\n",
         ):
             sync = s.edit("models.py", text)
-            with s.snapshot() as snap:
-                g.apply_delta(snap, sync)
+            g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 

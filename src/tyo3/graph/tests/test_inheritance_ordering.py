@@ -34,7 +34,7 @@ def _edges_of_kind(graph: CodeGraph, kind: EdgeKind) -> list[tuple[str, str]]:
         if data.kind != kind:
             continue
         s, t = graph.graph.get_edge_endpoints_by_index(ei)
-        result.append((graph.graph[s].symbol_id, graph.graph[t].symbol_id))
+        result.append((graph.graph[s].durable_id, graph.graph[t].durable_id))
     return result
 
 
