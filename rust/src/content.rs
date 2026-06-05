@@ -5,6 +5,7 @@
 //! (insert/delete) shares structure with the previous one, and capturing a
 //! generation (for a snapshot) is an O(1) `Arc` clone.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use ruff_db::system::{SystemPathBuf, SystemVirtualPathBuf};
@@ -62,12 +63,23 @@ pub type Generation = Arc<ContentMap>;
 
 /// The mutable, head-side owner of content. The writer holds exactly one of
 /// these. Every mutation bumps the application `Revision`.
+///
+/// A bounded `retained` buffer keeps recent (revision → generation) pairs so
+/// `snapshot(at=r)` can time-travel to a still-retained revision. Old entries
+/// are evicted past `retain_cap`. A live snapshot holding its own `Generation`
+/// is unaffected by eviction — it pins its generation independently.
 #[derive(Debug)]
 pub struct ContentStore {
     generation: Generation,
     revision: Revision,
     version_counter: u64,
+    /// Recent (revision → generation) for `snapshot(at=r)` time-travel. Bounded;
+    /// oldest entries evicted past `retain_cap`.
+    retained: BTreeMap<Revision, Generation>,
+    retain_cap: usize,
 }
+
+const DEFAULT_RETAIN_CAP: usize = 256;
 
 impl Default for ContentStore {
     fn default() -> Self {
@@ -77,10 +89,15 @@ impl Default for ContentStore {
 
 impl ContentStore {
     pub fn new() -> Self {
+        let generation: Generation = Arc::new(ContentMap::new());
+        let mut retained = BTreeMap::new();
+        retained.insert(Revision(0), Arc::clone(&generation));
         Self {
-            generation: Arc::new(ContentMap::new()),
+            generation,
             revision: Revision(0),
             version_counter: 0,
+            retained,
+            retain_cap: DEFAULT_RETAIN_CAP,
         }
     }
 
@@ -107,6 +124,7 @@ impl ContentStore {
         f(&mut map);
         self.generation = Arc::new(map);
         self.revision = Revision(self.revision.0 + 1);
+        self.record_retained();
         self.revision
     }
 
@@ -169,9 +187,35 @@ impl ContentStore {
 
     /// Advance the application revision without changing content (used by
     /// `sync_all` / rescan, where ty does the work but we want observability).
+    ///
+    /// Re-retains the *same* generation under the new revision: a rescan
+    /// changes no overlay content, so `snapshot(at=that_rev)` and
+    /// `snapshot(at=prev_rev)` pin identical content but build dbs that
+    /// re-walk disk independently.
     pub fn bump_revision(&mut self) -> Revision {
         self.revision = Revision(self.revision.0 + 1);
+        self.record_retained();
         self.revision
+    }
+
+    /// Record the current (revision, generation) and evict the oldest beyond cap.
+    fn record_retained(&mut self) {
+        self.retained.insert(self.revision, Arc::clone(&self.generation));
+        while self.retained.len() > self.retain_cap {
+            let oldest = *self.retained.keys().next().expect("non-empty");
+            self.retained.remove(&oldest);
+        }
+    }
+
+    /// The generation pinned at `rev`, if still retained. `None` ⇒ evicted
+    /// (caller raises a `ValueError`).
+    pub fn generation_at(&self, rev: Revision) -> Option<Generation> {
+        self.retained.get(&rev).cloned()
+    }
+
+    /// The oldest revision still in the retained buffer.
+    pub fn oldest_retained(&self) -> Revision {
+        *self.retained.keys().next().unwrap_or(&self.revision)
     }
 }
 

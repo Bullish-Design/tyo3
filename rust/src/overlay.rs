@@ -10,6 +10,7 @@
 
 use std::any::Any;
 use std::panic::RefUnwindSafe;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -36,6 +37,12 @@ pub struct OverlaySystem {
     native: Arc<dyn System + Send + Sync + RefUnwindSafe>,
     /// `None` = live head; `Some(R)` = pinned snapshot view of revision R.
     frozen: Option<Revision>,
+    /// Monotonic version source for disk files captured lazily by a *frozen*
+    /// overlay (read-once capture). Shared across clones so every `db.clone()`
+    /// of one snapshot observes the same captured content. Unused on a live
+    /// head (which floats to disk and never captures). Starts high to avoid
+    /// colliding with store `Document` versions in debug output.
+    capture_version: Arc<AtomicU64>,
 }
 
 impl OverlaySystem {
@@ -46,6 +53,7 @@ impl OverlaySystem {
             content: Arc::new(ArcSwap::new(initial)),
             native: Arc::new(OsSystem::new(root)),
             frozen: None,
+            capture_version: Arc::new(AtomicU64::new(1 << 32)),
         }
     }
 
@@ -60,6 +68,7 @@ impl OverlaySystem {
             content: Arc::new(ArcSwap::new(generation)),
             native: Arc::new(OsSystem::new(root)),
             frozen: Some(rev),
+            capture_version: Arc::new(AtomicU64::new(1 << 32)),
         }
     }
 
@@ -95,6 +104,44 @@ impl OverlaySystem {
             .get(&path.to_path_buf())
             .cloned()
     }
+
+    /// Frozen read-once capture. If `path` is already in the content cell
+    /// (overlaid or previously captured), return it. Otherwise read disk
+    /// *once*, intern the result additively, and return it. Idempotent:
+    /// concurrent callers converge on a single captured `Document` (last CAS
+    /// wins; content is identical).
+    ///
+    /// Only meaningful when `self.frozen.is_some()`. The live head never calls
+    /// this.
+    fn capture_disk_file(&self, path: &SystemPath) -> std::io::Result<Document> {
+        // Fast path: already overlaid or captured.
+        if let Some(doc) = self.document(path) {
+            return Ok(doc);
+        }
+        // Read disk exactly once.
+        let text = self.native.read_to_string(path)?;
+        let version = self.capture_version.fetch_add(1, Ordering::Relaxed);
+        let doc = Document::Text {
+            text: text.into(),
+            version,
+        };
+
+        // Additive, race-safe intern. Do NOT clobber a concurrent capture of
+        // the same path: if another thread already interned it, keep theirs.
+        let key = path.to_path_buf();
+        self.content.rcu(|cur| {
+            if cur.system.contains_key(&key) {
+                Arc::clone(cur)
+            } else {
+                let mut next = (**cur).clone();
+                next.system = next.system.insert(key.clone(), doc.clone());
+                Arc::new(next)
+            }
+        });
+
+        // Return whatever is now stored (the race winner), falling back to ours.
+        Ok(self.document(path).unwrap_or(doc))
+    }
 }
 
 impl System for OverlaySystem {
@@ -106,6 +153,23 @@ impl System for OverlaySystem {
                 FileType::File,
             )),
             Some(Document::Deleted { .. }) => Err(not_found(path)),
+            None if self.frozen.is_some() => {
+                // Pin structure via native metadata, but for FILES derive the
+                // revision from the captured content so it matches
+                // read_to_string.
+                let meta = self.native.path_metadata(path)?;
+                if meta.file_type().is_file() {
+                    let doc = self.capture_disk_file(path)?;
+                    Ok(Metadata::new(
+                        FileRevision::new(u128::from(doc.version())),
+                        meta.permissions(),
+                        FileType::File,
+                    ))
+                } else {
+                    // Directories/symlinks: structure floats to live disk.
+                    Ok(meta)
+                }
+            }
             None => self.native.path_metadata(path),
         }
     }
@@ -118,6 +182,10 @@ impl System for OverlaySystem {
         match self.document(path) {
             Some(Document::Text { text, .. }) => Ok(text.to_string()),
             Some(Document::Deleted { .. }) => Err(not_found(path)),
+            None if self.frozen.is_some() => match self.capture_disk_file(path)? {
+                Document::Text { text, .. } => Ok(text.to_string()),
+                Document::Deleted { .. } => Err(not_found(path)),
+            },
             None => self.native.read_to_string(path),
         }
     }
@@ -165,6 +233,16 @@ impl System for OverlaySystem {
                 .and_then(PySourceType::try_from_extension)
                 .or(Some(PySourceType::Python)),
             Some(Document::Deleted { .. }) => None,
+            None if self.frozen.is_some() => {
+                // Capture so the type is decided against pinned content.
+                match self.capture_disk_file(path) {
+                    Ok(Document::Text { .. }) => path
+                        .extension()
+                        .and_then(PySourceType::try_from_extension)
+                        .or(Some(PySourceType::Python)),
+                    _ => None,
+                }
+            }
             None => self.native.source_type(path),
         }
     }

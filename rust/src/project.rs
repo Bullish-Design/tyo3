@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::pythonize;
 
@@ -18,8 +18,10 @@ use ty_project::watch::{ChangeEvent, ChangedKind, CreatedKind, DeletedKind, Exis
 use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
-use crate::content::ContentStore;
+use crate::content::{ContentStore, Generation, Revision};
 use crate::overlay::OverlaySystem;
+
+use ruff_python_ast::name::Name;
 
 use crate::convert;
 use crate::coordinates;
@@ -801,6 +803,52 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
     }
 }
 
+/// Build an independent, revision-pinned `ProjectDatabase` over a frozen overlay.
+///
+/// Construction mirrors `build_head` (discover → apply user config → fallible,
+/// with a `use_defaults` fallback) but over `OverlaySystem::frozen(...)`, so the
+/// resulting db has its OWN `Zalsa`: it can never be cancelled by a HEAD
+/// `apply_changes`, and a HEAD `apply_changes` never blocks on it (architecture §0).
+///
+/// `generation` is the content pinned at `rev` (captured from the store, O(1)).
+/// Disk files not in `generation` are captured read-once by the frozen overlay
+/// (overlay.rs §2), so the snapshot never races live disk.
+fn build_frozen(root: SystemPathBuf, generation: Generation, rev: Revision) -> TyProjectState {
+    let system = OverlaySystem::frozen(root.clone(), generation, rev);
+
+    let built: Result<ProjectDatabase, String> = ProjectMetadata::discover(&root, &system)
+        .map_err(|e| format!("project discovery failed: {e}"))
+        .map(|metadata| {
+            if metadata.root() == &*root {
+                metadata
+            } else {
+                ProjectMetadata::new(
+                    Name::new(root.file_name().unwrap_or("root")),
+                    root.clone(),
+                )
+            }
+        })
+        .and_then(|mut metadata| {
+            metadata
+                .apply_configuration_files(&system)
+                .map_err(|e| format!("failed to apply configuration files: {e}"))?;
+            ProjectDatabase::fallible(metadata, system.clone())
+                .map_err(|e| format!("failed to build snapshot database: {e:#}"))
+        });
+
+    let db = match built {
+        Ok(db) => db,
+        Err(err) => {
+            eprintln!("WARNING: {err}. Falling back to default project settings for snapshot.");
+            let metadata =
+                ProjectMetadata::new(Name::new("tyo3-project"), root.clone());
+            ProjectDatabase::use_defaults(metadata, system)
+        }
+    };
+
+    TyProjectState { db, root }
+}
+
 // ── Sync-path resolver & event synthesis (Phase 3) ──────────────────────
 
 /// Resolve a caller-supplied path to the absolute `SystemPathBuf` used as BOTH
@@ -1136,428 +1184,40 @@ impl PyTyProject {
 
     // ── Snapshot ─────────────────────────────────────────────────────
 
-    /// Take a cheap, read-only, revision-pinned snapshot of the current project
-    /// state. The returned snapshot is safe to share across threads and is
-    /// isolated from later `reload()` calls (which swap in a fresh database).
-    fn snapshot(&self) -> PyResult<PySnapshot> {
-        let state = clone_locked_state(&self.inner, "snapshot")?;
-        // Eagerly materialize every project file's source_text into the
-        // shared salsa memo so the snapshot is pinned against future disk
-        // edits. Without this, salsa's lazy-read model means the first
-        // read on the snapshot touches live disk and can "see" later
-        // edits — violating the snapshot contract (§8.4).
-        //
-        // When the session is warm (already check()ed), all memos hit in
-        // O(1).  Cold sessions pay O(files) one-time parse cost — still
-        // far cheaper than check().
-        let project = state.db.project();
-        for f in project.files(&state.db).iter() {
-            let _ = source_text(&state.db, *f);
-        }
+    /// Pin a revision-isolated MVCC snapshot. `at=None` pins the current head
+    /// revision; `at=r` time-travels to a still-retained revision (else an error).
+    ///
+    /// The returned snapshot owns an INDEPENDENT `ProjectDatabase` (its own
+    /// `Zalsa`), so holding it across HEAD edits neither blocks the writer nor
+    /// risks cancellation (architecture §0). No eager materialisation: content
+    /// is pinned by the captured `Generation` + read-once disk capture.
+    #[pyo3(signature = (at=None))]
+    fn snapshot(&self, at: Option<u64>) -> PyResult<PySnapshot> {
+        let guard = lock_state(&self.inner, "snapshot")?;
+        let head = guard.as_ref().unwrap();
+        let root = head.root.clone();
+
+        let (generation, rev) = match at {
+            None => (head.store.capture(), head.store.revision()),
+            Some(r) => {
+                let rev = Revision(r);
+                let gen = head.store.generation_at(rev).ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "revision {} is no longer retained (oldest retained: {})",
+                        r,
+                        head.store.oldest_retained().0
+                    ))
+                })?;
+                (gen, rev)
+            }
+        };
+        drop(guard); // release the head lock BEFORE the (cold) db build
+
+        let state = build_frozen(root, generation, rev);
         Ok(PySnapshot {
             inner: Mutex::new(Some(state)),
+            revision: rev.0,
         })
-    }
-
-    // ── Files ────────────────────────────────────────────────────────
-
-    /// List all source files in the project.
-    fn files(&self, py: Python<'_>) -> PyResult<Vec<String>> {
-        let state = clone_locked_state(&self.inner, "files")?;
-        Ok(py.detach(move || compute_files(&state)))
-    }
-
-    // ── Check ────────────────────────────────────────────────────────
-
-    /// Run the type checker on the entire project.
-    ///
-    /// Clones the database under a brief lock, then runs the analysis with the
-    /// GIL released (`py.detach`), so other Python threads make progress during
-    /// the scan. See the `TyProjectState` concurrency note.
-    fn check<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "check")?;
-        let check_result = py.detach(move || compute_check(&state));
-        pythonize(py, &check_result)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    /// Run the type checker and return diagnostics for a single file.
-    fn check_file<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "check_file")?;
-        let path = path.to_owned();
-        let dto = py.detach(move || compute_check_file(&state, &path))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dto)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Document Symbols ─────────────────────────────────────────────
-
-    /// Get document symbols for a file in the project.
-    fn document_symbols<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "document_symbols")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || compute_document_symbols(&state, &path))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Workspace Symbols ────────────────────────────────────────────
-
-    /// Search for symbols matching a query across all workspace files.
-    fn workspace_symbols<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "workspace_symbols")?;
-        let query = query.to_owned();
-        let dtos = py.detach(move || compute_workspace_symbols(&state, &query));
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Goto Definition ──────────────────────────────────────────────
-
-    /// Navigate to the definition of the symbol at the given position.
-    fn goto_definition<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "goto_definition")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || {
-            compute_navigate(&state, &path, line, column, ty_ide::goto_definition)
-        })
-        .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Goto Declaration ─────────────────────────────────────────────
-
-    /// Navigate to the declaration of the symbol at the given position.
-    fn goto_declaration<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "goto_declaration")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || {
-            compute_navigate(&state, &path, line, column, ty_ide::goto_declaration)
-        })
-        .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Goto Type Definition ─────────────────────────────────────────
-
-    /// Navigate to the type definition of the symbol at the given position.
-    fn goto_type_definition<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "goto_type_definition")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || {
-            compute_navigate(&state, &path, line, column, ty_ide::goto_type_definition)
-        })
-        .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Find References ──────────────────────────────────────────────
-
-    /// Find all references to the symbol at the given position.
-    fn find_references<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-        include_declaration: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "find_references")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || {
-            compute_find_references(&state, &path, line, column, include_declaration)
-        })
-        .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Semantic Tokens ─────────────────────────────────────────
-
-    /// Return semantic tokens for a file, optionally scoped to a range.
-    #[pyo3(signature = (path, *, start_line = None, start_col = None, end_line = None, end_col = None))]
-    fn semantic_tokens<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        start_line: Option<u32>,
-        start_col: Option<u32>,
-        end_line: Option<u32>,
-        end_col: Option<u32>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "semantic_tokens")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || {
-            compute_semantic_tokens(&state, &path, start_line, start_col, end_line, end_col)
-        })
-        .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── File Occurrences ─────────────────────────────────────────
-
-    /// Batch-resolve all name occurrences in a file.
-    ///
-    /// Returns a list describing every name-like token in the file,
-    /// including its location, the symbol it resolves to (target file +
-    /// target name), and the reference role.
-    ///
-    /// This replaces the per-token `goto_definition` approach with a
-    /// single Rust call per file — O(1) FFI calls instead of O(tokens).
-    fn file_occurrences<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "file_occurrences")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || compute_file_occurrences(&state, &path))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Type Hierarchy ──────────────────────────────────────────
-
-    /// Query type hierarchy at a position: returns the item with supertypes and subtypes.
-    fn type_hierarchy<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "type_hierarchy")?;
-        let path = path.to_owned();
-        match py.detach(move || compute_type_hierarchy(&state, &path, line, column))
-            .map_err(AnalysisError::into_pyerr)?
-        {
-            None => Ok(py.None().bind(py).clone()),
-            Some(dto) => pythonize(py, &dto)
-                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
-        }
-    }
-
-    // ── Inlay Hints ──────────────────────────────────────────────────
-
-    /// Return inlay hints for a file.
-    fn inlay_hints<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "inlay_hints")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || compute_inlay_hints(&state, &path))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Hints ────────────────────────────────────────────────────────
-
-    /// Return hints (unused bindings, unreachable code) for a file.
-    fn hints<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "hints")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || compute_hints(&state, &path))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Code Actions ─────────────────────────────────────────────────
-
-    /// Get quick fixes for a diagnostic at a range.
-    fn code_actions<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        start_line: u32,
-        start_col: u32,
-        end_line: u32,
-        end_col: u32,
-        diagnostic_id: &str,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "code_actions")?;
-        let path = path.to_owned();
-        let diagnostic_id = diagnostic_id.to_owned();
-        let dtos = py.detach(move || {
-            compute_code_actions(&state, &path, start_line, start_col, end_line, end_col, &diagnostic_id)
-        })
-        .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Selection Ranges ────────────────────────────────────────────
-
-    /// Compute selection ranges at the given position.
-    fn selection_ranges<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "selection_ranges")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || compute_selection_ranges(&state, &path, line, column))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Folding Ranges ───────────────────────────────────────────────
-
-    /// Return folding ranges for a file.
-    fn folding_ranges<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "folding_ranges")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || compute_folding_ranges(&state, &path))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Signature Help ───────────────────────────────────────────────
-
-    /// Get signature help at the given position.
-    fn signature_help<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "signature_help")?;
-        let path = path.to_owned();
-        match py.detach(move || compute_signature_help(&state, &path, line, column))
-            .map_err(AnalysisError::into_pyerr)?
-        {
-            None => Ok(py.None().bind(py).clone()),
-            Some(dto) => pythonize(py, &dto)
-                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
-        }
-    }
-
-    // ── Completion ───────────────────────────────────────────────────
-
-    /// Get completion suggestions at the given position.
-    #[pyo3(signature = (path, line, column, *, auto_import = true))]
-    fn completions<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-        auto_import: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "completions")?;
-        let path = path.to_owned();
-        let dtos = py.detach(move || compute_completions(&state, &path, line, column, auto_import))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &dtos)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Document Highlights ──────────────────────────────────────────
-
-    /// Highlight all in-file occurrences of the symbol at the given position.
-    fn document_highlights<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "document_highlights")?;
-        let path = path.to_owned();
-        let refs = py.detach(move || compute_document_highlights(&state, &path, line, column))
-            .map_err(AnalysisError::into_pyerr)?;
-        pythonize(py, &refs)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
-    }
-
-    // ── Rename ───────────────────────────────────────────────────────
-
-    /// Check if the symbol at the given position can be renamed.
-    fn can_rename<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "can_rename")?;
-        let path = path.to_owned();
-        match py.detach(move || compute_can_rename(&state, &path, line, column))
-            .map_err(AnalysisError::into_pyerr)?
-        {
-            None => Ok(py.None().bind(py).clone()),
-            Some(range) => pythonize(py, &range)
-                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
-        }
-    }
-
-    /// Rename the symbol at the given position.
-    fn rename<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-        new_name: &str,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "rename")?;
-        let path = path.to_owned();
-        let new_name = new_name.to_owned();
-        match py.detach(move || compute_rename(&state, &path, line, column, &new_name))
-            .map_err(AnalysisError::into_pyerr)?
-        {
-            None => Ok(py.None().bind(py).clone()),
-            Some(dto) => pythonize(py, &dto)
-                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
-        }
-    }
-
-    // ── Hover ────────────────────────────────────────────────────────
-
-    /// Get hover information for the symbol at the given position.
-    ///
-    /// Returns a dict, or None if no hover info is available.
-    fn hover<'py>(
-        &self,
-        py: Python<'py>,
-        path: &str,
-        line: u32,
-        column: u32,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let state = clone_locked_state(&self.inner, "hover")?;
-        let path = path.to_owned();
-        match py.detach(move || compute_hover(&state, &path, line, column))
-            .map_err(AnalysisError::into_pyerr)?
-        {
-            None => Ok(py.None().bind(py).clone()),
-            Some(dto) => pythonize(py, &dto)
-                .map_err(|e| PyRuntimeError::new_err(e.to_string())),
-        }
     }
 }
 
@@ -1571,10 +1231,18 @@ impl PyTyProject {
 #[pyclass(name = "TySnapshot", module = "tyo3._native_impl", frozen)]
 pub struct PySnapshot {
     inner: Mutex<Option<TyProjectState>>,
+    /// The application revision this snapshot is pinned to (immutable).
+    revision: u64,
 }
 
 #[pymethods]
 impl PySnapshot {
+    /// The revision this snapshot is pinned to.
+    #[getter]
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
     // ── Files ────────────────────────────────────────────────────
 
     /// List all source files in the project.
@@ -2160,5 +1828,105 @@ mod phase3_tests {
 
         let f = system_path_to_file(&head.db, &a).unwrap();
         assert!(source_text(&head.db, f).as_str().contains("DISK = 2"));
+    }
+}
+
+// ── Phase 4 tests ────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod phase4_tests {
+    use super::*;
+    use ruff_db::source::source_text;
+    use std::io::Write;
+
+    fn project(a_py: &str) -> (tempfile::TempDir, SystemPathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("a.py")).unwrap();
+        f.write_all(a_py.as_bytes()).unwrap();
+        let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
+        (dir, root)
+    }
+
+    fn read(state: &TyProjectState, path: &SystemPathBuf) -> String {
+        let f = ruff_db::files::system_path_to_file(&state.db, path).unwrap();
+        source_text(&state.db, f).as_str().to_string()
+    }
+
+    /// THE Phase-4 invariant: a snapshot pinned at R keeps reading R's content
+    /// across many later HEAD edits — including for disk-backed files captured
+    /// read-once (no eager materialisation).
+    #[test]
+    fn snapshot_is_isolated_from_later_head_edits() {
+        let (_dir, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        // Snapshot @ r0 (disk content "X = 1"), captured lazily on first read.
+        let snap0 = build_frozen(root.clone(), head.store.capture(), head.store.revision());
+        assert!(read(&snap0, &a).contains("X = 1")); // capture-once pins it
+
+        // Many HEAD edits land afterwards.
+        for i in 2..=5 {
+            head.store.insert_text(a.clone(), format!("X = {i}\n"));
+            head.system.publish(head.store.capture());
+            let ev = ChangeEvent::file_content_changed(a.clone());
+            head.db
+                .apply_changes(std::slice::from_ref(&ev), None);
+        }
+
+        // Snapshot still reads r0; head reads latest.
+        assert!(read(&snap0, &a).contains("X = 1"));
+        let head_state = head.read_clone();
+        assert!(read(&head_state, &a).contains("X = 5"));
+    }
+
+    /// Read-once capture pins disk content even if disk changes out from under a
+    /// snapshot AFTER the snapshot first read the file.
+    #[test]
+    fn read_once_capture_pins_first_read() {
+        let (_dir, root) = project("DISK = 1\n");
+        let head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        let snap = build_frozen(root.clone(), head.store.capture(), head.store.revision());
+        assert!(read(&snap, &a).contains("DISK = 1")); // captures "DISK = 1"
+
+        // Mutate the real file on disk (an out-of-band change).
+        std::fs::write(_dir.path().join("a.py"), "DISK = 999\n").unwrap();
+
+        // The snapshot still serves the captured first read.
+        assert!(read(&snap, &a).contains("DISK = 1"));
+    }
+
+    /// Overlaid (never-on-disk) content is pinned by the generation.
+    #[test]
+    fn snapshot_pins_overlay_buffer() {
+        let (_dir, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+        head.store.insert_text(a.clone(), "OVERLAY = 1\n");
+        head.system.publish(head.store.capture());
+        let ev = ChangeEvent::file_content_changed(a.clone());
+        head.db
+            .apply_changes(std::slice::from_ref(&ev), None);
+
+        let snap = build_frozen(root.clone(), head.store.capture(), head.store.revision());
+        assert!(read(&snap, &a).contains("OVERLAY = 1"));
+    }
+
+    /// Time-travel: snapshot(at=r) reaches a retained revision; eviction errors.
+    #[test]
+    fn time_travel_to_retained_revision() {
+        let (_dir, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        let r0 = head.store.revision();
+        head.store.insert_text(a.clone(), "X = 2\n");
+        let _r1 = head.store.revision();
+
+        let g0 = head.store.generation_at(r0).expect("r0 still retained");
+        let snap0 = build_frozen(root.clone(), g0, r0);
+        assert!(read(&snap0, &a).contains("X = 1")); // pinned to r0's (disk) content
     }
 }
