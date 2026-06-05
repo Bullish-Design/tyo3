@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use ruff_db::system::SystemPathBuf;
+use ruff_db::system::{SystemPathBuf, SystemVirtualPathBuf};
 use rpds::HashTrieMapSync;
 
 /// Application-level monotonic revision. Distinct from salsa's internal revision;
@@ -35,11 +35,33 @@ impl Document {
     }
 }
 
-/// An immutable snapshot of all overlay content at one revision.
-pub type Generation = Arc<HashTrieMapSync<SystemPathBuf, Document>>;
+// ── ContentMap / Generation ─────────────────────────────────────────────
 
-/// The mutable, head-side owner of content. The writer (Phase 3) holds exactly
-/// one of these. Phase 1 only needs construct / insert / delete / capture.
+/// All overlay content at one revision: system-path documents and virtual-path
+/// documents. Both are persistent maps, so cloning a `ContentMap` is two cheap
+/// `Arc` bumps and structurally shares with the previous generation.
+#[derive(Debug, Clone)]
+pub struct ContentMap {
+    pub system: HashTrieMapSync<SystemPathBuf, Document>,
+    pub virtual_files: HashTrieMapSync<SystemVirtualPathBuf, Document>,
+}
+
+impl ContentMap {
+    pub fn new() -> Self {
+        Self {
+            system: HashTrieMapSync::new_sync(),
+            virtual_files: HashTrieMapSync::new_sync(),
+        }
+    }
+}
+
+/// An immutable snapshot of all overlay content at one revision.
+pub type Generation = Arc<ContentMap>;
+
+// ── ContentStore ────────────────────────────────────────────────────────
+
+/// The mutable, head-side owner of content. The writer holds exactly one of
+/// these. Every mutation bumps the application `Revision`.
 #[derive(Debug)]
 pub struct ContentStore {
     generation: Generation,
@@ -56,7 +78,7 @@ impl Default for ContentStore {
 impl ContentStore {
     pub fn new() -> Self {
         Self {
-            generation: Arc::new(HashTrieMapSync::new_sync()),
+            generation: Arc::new(ContentMap::new()),
             revision: Revision(0),
             version_counter: 0,
         }
@@ -78,6 +100,18 @@ impl ContentStore {
         self.version_counter
     }
 
+    /// Apply `f` to a clone of the current `ContentMap`, swap the generation,
+    /// and bump the application revision. Centralises the copy-on-write pattern.
+    fn mutate(&mut self, f: impl FnOnce(&mut ContentMap)) -> Revision {
+        let mut map = (*self.generation).clone();
+        f(&mut map);
+        self.generation = Arc::new(map);
+        self.revision = Revision(self.revision.0 + 1);
+        self.revision
+    }
+
+    // ── System-path overlay methods ─────────────────────────────────────
+
     /// Overlay `path` with in-memory text. Returns the new revision.
     pub fn insert_text(&mut self, path: SystemPathBuf, text: impl Into<Arc<str>>) -> Revision {
         let version = self.next_version();
@@ -85,29 +119,63 @@ impl ContentStore {
             text: text.into(),
             version,
         };
-        self.generation = Arc::new(self.generation.insert(path, doc));
-        self.revision = Revision(self.revision.0 + 1);
-        self.revision
+        self.mutate(|m| {
+            m.system = m.system.insert(path, doc);
+        })
     }
 
     /// Overlay `path` as deleted. Returns the new revision.
     pub fn delete(&mut self, path: SystemPathBuf) -> Revision {
         let version = self.next_version();
-        self.generation = Arc::new(self.generation.insert(path, Document::Deleted { version }));
-        self.revision = Revision(self.revision.0 + 1);
-        self.revision
+        self.mutate(|m| {
+            m.system = m.system.insert(path, Document::Deleted { version });
+        })
     }
 
     /// Drop any overlay for `path` (revert to whatever disk says). Returns the
     /// new revision.
     pub fn forget(&mut self, path: &SystemPathBuf) -> Revision {
-        self.generation = Arc::new(self.generation.remove(path));
+        let path = path.clone();
+        self.mutate(|m| {
+            m.system = m.system.remove(&path);
+        })
+    }
+
+    // ── Virtual-path overlay methods (Phase 3) ──────────────────────────
+
+    /// Overlay a virtual path (e.g. "untitled:1") with in-memory text.
+    pub fn insert_virtual(
+        &mut self,
+        path: SystemVirtualPathBuf,
+        text: impl Into<Arc<str>>,
+    ) -> Revision {
+        let version = self.next_version();
+        let doc = Document::Text {
+            text: text.into(),
+            version,
+        };
+        self.mutate(|m| {
+            m.virtual_files = m.virtual_files.insert(path, doc);
+        })
+    }
+
+    /// Drop any overlay for a virtual path.
+    pub fn forget_virtual(&mut self, path: &SystemVirtualPathBuf) -> Revision {
+        let path = path.clone();
+        self.mutate(|m| {
+            m.virtual_files = m.virtual_files.remove(&path);
+        })
+    }
+
+    /// Advance the application revision without changing content (used by
+    /// `sync_all` / rescan, where ty does the work but we want observability).
+    pub fn bump_revision(&mut self) -> Revision {
         self.revision = Revision(self.revision.0 + 1);
         self.revision
     }
 }
 
-/// Look a path up inside a captured generation.
+/// Look a system path up inside a captured generation.
 pub fn lookup<'a>(generation: &'a Generation, path: &SystemPathBuf) -> Option<&'a Document> {
-    generation.get(path)
+    generation.system.get(path)
 }

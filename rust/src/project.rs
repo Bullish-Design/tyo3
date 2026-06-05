@@ -10,9 +10,11 @@ use crate::{ProjectClosedError, PathResolutionError, PositionError};
 
 use ruff_db::files::File;
 use ruff_db::source::source_text;
-use ruff_db::system::SystemPathBuf;
+use ruff_db::system::{SystemPath, SystemPathBuf, SystemVirtualPathBuf};
+use ruff_db::Db as _; // bring files() etc. into scope
 use ruff_source_file::LineIndex;
 
+use ty_project::watch::{ChangeEvent, ChangedKind, CreatedKind, DeletedKind, ExistingPathKind};
 use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
@@ -77,7 +79,6 @@ struct HeadState {
     store: ContentStore,
     /// Handle onto the *same* overlay content cell the `db` reads through
     /// (clone-shares the inner `Arc<ArcSwap<…>>`). Used by Phase 3 to publish.
-    #[allow(dead_code)]  // activated in Phase 3
     system: OverlaySystem,
 }
 
@@ -800,6 +801,139 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
     }
 }
 
+// ── Sync-path resolver & event synthesis (Phase 3) ──────────────────────
+
+/// Resolve a caller-supplied path to the absolute `SystemPathBuf` used as BOTH
+/// the overlay store key AND the `ChangeEvent` path. Absolute → as-is; relative →
+/// joined onto the project root. The leaf is never canonicalised (so deletes and
+/// new paths are representable). The SAME value must key the store and the event,
+/// or the overlay lookup inside `apply_changes` won't align.
+fn resolve_sync_path(root: &SystemPath, path: &str) -> SystemPathBuf {
+    let p = SystemPath::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        root.join(p)
+    }
+}
+
+/// Classify a *content overlay* edit of a system path into a `ChangeEvent`.
+/// New (not yet interned, or interned-but-absent) → `Created{File}`; otherwise an
+/// existing file's content changed → `Changed{FileContent}`. Mirrors ty_server's
+/// `open_document_in_db` "is_maybe_new_system_file" test.
+///
+/// Also checks disk via `ExistingPathKind::from_system` as a fallback for files
+/// that exist on disk but have not yet been interned in salsa (lazy interning).
+fn classify_overlay_edit(
+    system: &OverlaySystem,
+    db: &ProjectDatabase,
+    path: &SystemPathBuf,
+) -> ChangeEvent {
+    let is_new = match db.files().try_system(db, path) {
+        Some(f) => !f.exists(db),
+        None => {
+            // Not interned yet — check if the file exists on disk.
+            // If it does, it's a change; if not, it's a creation.
+            !matches!(
+                ExistingPathKind::from_system(system, path),
+                ExistingPathKind::File
+            )
+        }
+    };
+    if is_new {
+        ChangeEvent::Created {
+            path: path.clone(),
+            kind: CreatedKind::File,
+        }
+    } else {
+        ChangeEvent::file_content_changed(path.clone())
+    }
+}
+
+/// Classify a *disk ingest* for `path`: first the overlay for this path has
+/// been forgotten, so `ExistingPathKind::from_system` reads the underlying disk
+/// truth through the overlay. Returns the appropriate `ChangeEvent`.
+fn classify_disk_sync(
+    system: &OverlaySystem,
+    db: &ProjectDatabase,
+    path: &SystemPathBuf,
+) -> ChangeEvent {
+    match ExistingPathKind::from_system(system, path) {
+        ExistingPathKind::File => {
+            let is_new = db.files().try_system(db, path).is_none_or(|f: File| !f.exists(db));
+            if is_new {
+                ChangeEvent::Created {
+                    path: path.clone(),
+                    kind: CreatedKind::File,
+                }
+            } else {
+                ChangeEvent::Changed {
+                    path: path.clone(),
+                    kind: ChangedKind::Any,
+                }
+            }
+        }
+        // Directory or absent → treat as a (possibly recursive) delete.
+        _ => ChangeEvent::Deleted {
+            path: path.clone(),
+            kind: DeletedKind::Any,
+        },
+    }
+}
+
+/// Publish the captured store generation, apply `events` to the db, and build the
+/// SyncResult. Caller has already mutated `head.store` and bucketed the paths.
+///
+/// PRECONDITION: `head.store` is already mutated; this captures+publishes it.
+fn commit_head(
+    head: &mut HeadState,
+    events: &[ChangeEvent],
+    created: Vec<String>,
+    changed: Vec<String>,
+    deleted: Vec<String>,
+    rescan: bool,
+) -> dto::SyncResultDto {
+    // 2. publish BEFORE apply so apply_changes re-reads new content.
+    head.system.publish(head.store.capture());
+    // 3. ty does all incremental work.
+    let result = head.db.apply_changes(events, None);
+    // 4 + 5.
+    dto::SyncResultDto {
+        revision: head.store.revision().0,
+        created,
+        changed,
+        deleted,
+        project_changed: result.project_changed(),
+        custom_stdlib_changed: result.custom_stdlib_changed(),
+        rescan,
+    }
+}
+
+/// Shared body of `sync_path` and `discard`: forget the overlay for `abs`, publish
+/// so the overlay falls through to disk, classify, apply, and build the result.
+fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultDto {
+    head.store.forget(&abs);
+    head.system.publish(head.store.capture());
+    let event = classify_disk_sync(&head.system, &head.db, &abs);
+
+    let path_str = abs.as_str().to_string();
+    let (created, changed, deleted) = match &event {
+        ChangeEvent::Created { .. } => (vec![path_str], vec![], vec![]),
+        ChangeEvent::Deleted { .. } => (vec![], vec![], vec![path_str]),
+        _ => (vec![], vec![path_str], vec![]),
+    };
+    let result = head.db.apply_changes(std::slice::from_ref(&event), None);
+    dto::SyncResultDto {
+        revision: head.store.revision().0,
+        created,
+        changed,
+        deleted,
+        project_changed: result.project_changed(),
+        custom_stdlib_changed: result.custom_stdlib_changed(),
+        rescan: false,
+    }
+}
+
 // ── PyO3 Methods ─────────────────────────────────────────────────────────
 
 #[pymethods]
@@ -861,6 +995,143 @@ impl PyTyProject {
         // Setting None on an already-None guard is harmless.
         *guard = None;
         Ok(())
+    }
+
+    // ── Write path (Phase 3) ───────────────────────────────────────
+    //
+    // All writes hold the GIL (§7.3) and mutate the HeadState in-place.
+    // Each returns a SyncResult dict (via pythonize) describing the delta.
+    //
+    // IMPORTANT: a live snapshot (`snapshot()`) shares the HEAD Zalsa and
+    // will block `apply_changes` forever (architecture §0). Always close()
+    // snapshots before calling any write method. Phase 4 fixes this.
+
+    /// Overlay `path` with in-memory `text` (no disk write). Returns a
+    /// SyncResult dict with the new revision and the affected paths.
+    fn edit<'py>(&self, py: Python<'py>, path: &str, text: &str) -> PyResult<Bound<'py, PyAny>> {
+        let mut guard = lock_state(&self.inner, "edit")?;
+        let head = guard.as_mut().unwrap();
+
+        let abs = resolve_sync_path(&head.root, path);
+        let event = classify_overlay_edit(&head.system, &head.db, &abs); // classify BEFORE mutating
+        head.store.insert_text(abs.clone(), text); // 1. mutate
+
+        let path_str = abs.as_str().to_string();
+        let (created, changed) = match &event {
+            ChangeEvent::Created { .. } => (vec![path_str], vec![]),
+            _ => (vec![], vec![path_str]),
+        };
+        let dto =
+            commit_head(head, std::slice::from_ref(&event), created, changed, vec![], false);
+        drop(guard);
+        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Overlay many files atomically (one publish, one `apply_changes`, one
+    /// published revision).
+    fn edit_many<'py>(
+        &self,
+        py: Python<'py>,
+        edits: std::collections::HashMap<String, String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let mut guard = lock_state(&self.inner, "edit_many")?;
+        let head = guard.as_mut().unwrap();
+
+        let mut events = Vec::with_capacity(edits.len());
+        let (mut created, mut changed) = (Vec::new(), Vec::new());
+        for (path, text) in edits {
+            let abs = resolve_sync_path(&head.root, &path);
+            let event = classify_overlay_edit(&head.system, &head.db, &abs);
+            head.store.insert_text(abs.clone(), text);
+            match &event {
+                ChangeEvent::Created { .. } => created.push(abs.as_str().to_string()),
+                _ => changed.push(abs.as_str().to_string()),
+            }
+            events.push(event);
+        }
+        let dto = commit_head(head, &events, created, changed, vec![], false);
+        drop(guard);
+        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Overlay a virtual/unsaved buffer (e.g. "untitled:1"). No disk involvement.
+    fn edit_virtual<'py>(
+        &self,
+        py: Python<'py>,
+        uri: &str,
+        text: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let mut guard = lock_state(&self.inner, "edit_virtual")?;
+        let head = guard.as_mut().unwrap();
+
+        let vpath = SystemVirtualPathBuf::from(uri.to_string());
+        let is_new = head.db.files().try_virtual_file(&vpath).is_none();
+        head.store.insert_virtual(vpath.clone(), text);
+
+        let event = if is_new {
+            ChangeEvent::CreatedVirtual(vpath.clone())
+        } else {
+            ChangeEvent::ChangedVirtual(vpath.clone())
+        };
+        let (created, changed) = if is_new {
+            (vec![uri.to_string()], vec![])
+        } else {
+            (vec![], vec![uri.to_string()])
+        };
+        let dto =
+            commit_head(head, std::slice::from_ref(&event), created, changed, vec![], false);
+        drop(guard);
+        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Ingest a disk change for `path`: drop any overlay for it and re-read disk.
+    fn sync_path<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let mut guard = lock_state(&self.inner, "sync_path")?;
+        let head = guard.as_mut().unwrap();
+        let abs = resolve_sync_path(&head.root, path);
+        let dto = sync_path_inner(head, abs);
+        drop(guard);
+        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Drop the overlay buffer for `path`, reverting to disk. Same semantics as
+    /// `sync_path` but named for intent.
+    fn discard<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
+        let mut guard = lock_state(&self.inner, "discard")?;
+        let head = guard.as_mut().unwrap();
+        let abs = resolve_sync_path(&head.root, path);
+        let dto = sync_path_inner(head, abs);
+        drop(guard);
+        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Rescan everything (in-place, via `apply_changes`). Existing overlay
+    /// buffers are preserved; ty re-walks and re-reads all files.
+    fn sync_all<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let mut guard = lock_state(&self.inner, "sync_all")?;
+        let head = guard.as_mut().unwrap();
+
+        head.system.publish(head.store.capture());
+        let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
+        let revision = head.store.bump_revision().0;
+        let dto = dto::SyncResultDto {
+            revision,
+            created: vec![],
+            changed: vec![],
+            deleted: vec![],
+            project_changed: result.project_changed(),
+            custom_stdlib_changed: result.custom_stdlib_changed(),
+            rescan: true,
+        };
+        drop(guard);
+        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// The current application revision.
+    #[getter]
+    fn head(&self) -> PyResult<u64> {
+        let guard = lock_state(&self.inner, "head")?;
+        Ok(guard.as_ref().unwrap().store.revision().0)
     }
 
     // ── Snapshot ─────────────────────────────────────────────────────
@@ -1780,5 +2051,114 @@ mod phase2_tests {
         let a = root.join("a.py");
         let file = system_path_to_file(&head.db, &a).unwrap();
         assert!(source_text(&head.db, file).as_str().contains("X = 1"));
+    }
+}
+
+// ── Phase 3 tests ────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod phase3_tests {
+    use super::*;
+    use ruff_db::files::system_path_to_file;
+    use ruff_db::source::source_text;
+    use std::io::Write;
+
+    fn project(a_py: &str) -> (tempfile::TempDir, SystemPathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("a.py")).unwrap();
+        f.write_all(a_py.as_bytes()).unwrap();
+        let root =
+            SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap().to_path_buf())
+                .unwrap();
+        (dir, root)
+    }
+
+    /// An overlay edit changes what the db reads — without touching disk.
+    #[test]
+    fn edit_overlays_content_without_disk_write() {
+        let (_dir, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        // baseline reads disk
+        let f = system_path_to_file(&head.db, &a).unwrap();
+        assert!(source_text(&head.db, f).as_str().contains("X = 1"));
+
+        // overlay edit
+        head.store.insert_text(a.clone(), "Y = 2\n");
+        head.system.publish(head.store.capture());
+        let ev = ChangeEvent::file_content_changed(a.clone());
+        head.db
+            .apply_changes(std::slice::from_ref(&ev), None);
+
+        let f2 = system_path_to_file(&head.db, &a).unwrap();
+        assert!(source_text(&head.db, f2).as_str().contains("Y = 2"));
+        // disk is untouched
+        assert_eq!(
+            std::fs::read_to_string(_dir.path().join("a.py")).unwrap(),
+            "X = 1\n"
+        );
+    }
+
+    /// The application revision advances on each edit.
+    #[test]
+    fn revision_advances() {
+        let (_dir, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let r0 = head.store.revision().0;
+        head.store.insert_text(root.join("a.py"), "X = 2\n");
+        assert!(head.store.revision().0 > r0);
+    }
+
+    /// A created (previously-absent) file is classified Created and becomes
+    /// visible.
+    #[test]
+    fn edit_creates_new_file() {
+        let (_dir, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let b = root.join("b.py");
+        let ev = classify_overlay_edit(&head.system, &head.db, &b);
+        assert!(matches!(ev, ChangeEvent::Created { .. }));
+        head.store.insert_text(b.clone(), "Z = 3\n");
+        head.system.publish(head.store.capture());
+        head.db
+            .apply_changes(std::slice::from_ref(&ev), None);
+        let f = system_path_to_file(&head.db, &b).unwrap();
+        assert!(source_text(&head.db, f).as_str().contains("Z = 3"));
+    }
+
+    /// A virtual buffer is analysed without ever creating a disk file.
+    #[test]
+    fn edit_virtual_is_disk_free() {
+        let (_dir, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let vpath = SystemVirtualPathBuf::from("untitled:1".to_string());
+        head.store.insert_virtual(vpath.clone(), "VV = 9\n");
+        head.system.publish(head.store.capture());
+        head.db
+            .apply_changes(&[ChangeEvent::CreatedVirtual(vpath.clone())], None);
+        let vf = head.db.files().virtual_file(&head.db, &vpath);
+        assert!(source_text(&head.db, vf.file()).as_str().contains("VV = 9"));
+    }
+
+    /// sync_path on a disk edit re-reads disk after forgetting the overlay.
+    #[test]
+    fn sync_path_reingests_disk() {
+        let (_dir, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+        // overlay it, then change disk underneath, then sync_path should win = disk
+        head.store.insert_text(a.clone(), "OVERLAY = 1\n");
+        head.system.publish(head.store.capture());
+        std::fs::write(_dir.path().join("a.py"), "DISK = 2\n").unwrap();
+
+        head.store.forget(&a);
+        head.system.publish(head.store.capture());
+        let ev = classify_disk_sync(&head.system, &head.db, &a);
+        head.db
+            .apply_changes(std::slice::from_ref(&ev), None);
+
+        let f = system_path_to_file(&head.db, &a).unwrap();
+        assert!(source_text(&head.db, f).as_str().contains("DISK = 2"));
     }
 }

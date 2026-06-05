@@ -21,10 +21,10 @@ use ruff_db::system::{
 };
 use ruff_python_ast::PySourceType;
 
-use crate::content::{Document, Generation, Revision};
+use crate::content::{ContentMap, Document, Generation, Revision};
 
 /// Shared handle to the live (or pinned) content cell.
-type SharedContent = Arc<ArcSwap<rpds::HashTrieMapSync<SystemPathBuf, Document>>>;
+type SharedContent = Arc<ArcSwap<ContentMap>>;
 
 #[derive(Debug, Clone)]
 pub struct OverlaySystem {
@@ -82,6 +82,16 @@ impl OverlaySystem {
         // `load()` is a cheap RCU read; clone the small `Document` (Arc<str> inside).
         self.content
             .load()
+            .system
+            .get(&path.to_path_buf())
+            .cloned()
+    }
+
+    /// Look up an overlay virtual document for `path`, if any.
+    fn virtual_document(&self, path: &SystemVirtualPath) -> Option<Document> {
+        self.content
+            .load()
+            .virtual_files
             .get(&path.to_path_buf())
             .cloned()
     }
@@ -123,7 +133,11 @@ impl System for OverlaySystem {
         &self,
         path: &SystemVirtualPath,
     ) -> std::io::Result<String> {
-        self.native.read_virtual_path_to_string(path)
+        match self.virtual_document(path) {
+            Some(Document::Text { text, .. }) => Ok(text.to_string()),
+            Some(Document::Deleted { .. }) => Err(virtual_not_found(path)),
+            None => self.native.read_virtual_path_to_string(path),
+        }
     }
 
     fn read_virtual_path_to_notebook(
@@ -131,6 +145,17 @@ impl System for OverlaySystem {
         path: &SystemVirtualPath,
     ) -> std::result::Result<ruff_notebook::Notebook, ruff_notebook::NotebookError> {
         self.native.read_virtual_path_to_notebook(path)
+    }
+
+    fn virtual_path_source_type(&self, path: &SystemVirtualPath) -> Option<PySourceType> {
+        match self.virtual_document(path) {
+            Some(Document::Text { .. }) => path
+                .extension()
+                .and_then(PySourceType::try_from_extension)
+                .or(Some(PySourceType::Python)),
+            Some(Document::Deleted { .. }) => None,
+            None => self.native.virtual_path_source_type(path),
+        }
     }
 
     fn source_type(&self, path: &SystemPath) -> Option<PySourceType> {
@@ -210,6 +235,13 @@ fn not_found(path: &SystemPath) -> std::io::Error {
     )
 }
 
+fn virtual_not_found(path: &SystemVirtualPath) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("No such virtual path (overlaid as deleted): {path}"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,7 +266,7 @@ mod tests {
         let (_dir, root, a) = fixture("X = 1\n");
         let sys = OverlaySystem::live(
             root,
-            Arc::new(rpds::HashTrieMapSync::new_sync()),
+            Arc::new(ContentMap::new()),
         );
         assert_eq!(sys.read_to_string(&a).unwrap(), "X = 1\n");
         assert!(sys.path_metadata(&a).is_ok());
@@ -300,7 +332,7 @@ mod tests {
     fn project_database_builds_over_overlay() {
         use ruff_db::source::source_text;
         let (_dir, root, a) = fixture("VALUE = 42\n");
-        let empty: Generation = Arc::new(rpds::HashTrieMapSync::new_sync());
+        let empty: Generation = Arc::new(ContentMap::new());
         let system = OverlaySystem::live(root.clone(), empty);
         let metadata = ProjectMetadata::new(Name::new("tyo3-project"), root);
         let db = ProjectDatabase::use_defaults(metadata, system);
