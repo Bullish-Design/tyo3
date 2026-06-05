@@ -539,24 +539,35 @@ mod tests {
 
     #[test]
     fn test_occurrences_resolve_project_local_targets() {
+        // Two-file fixture simulating the cross-file reference case
+        // from the refactoring guide.
+        // Note: goto_definition resolves imported names to their import
+        // alias in the local file, NOT to the original definition file.
+        // Cross-file resolution (alias → original def) happens on the
+        // Python side.  The Rust layer's job is to produce a complete
+        // set of occurrences with correct name, role, and target_name.
         let files = vec![
             (
-                "/project/test.py",
-                "class User:\n    def save(self): pass\n\ndef run():\n    return User().save()\n",
+                "/project/models.py",
+                "class User:\n    def save(self): ...\n",
+            ),
+            (
+                "/project/app.py",
+                "from models import User\ndef run():\n    return User().save()\n",
             ),
         ];
 
         let (_dir, state) = state_with_files(files);
 
-        let test_path = state.root.join("test.py");
-        let test_file = ruff_db::files::system_path_to_file(&state.db, &test_path)
-            .expect("test.py should be known to the DB");
+        let app_path = state.root.join("app.py");
+        let app_file = ruff_db::files::system_path_to_file(&state.db, &app_path)
+            .expect("app.py should be known to the DB");
 
-        let source = ruff_db::source::source_text(&state.db, test_file);
+        let source = ruff_db::source::source_text(&state.db, app_file);
         let source_str = source.as_str();
         let line_index = LineIndex::from_source_text(source_str);
 
-        let occurrences = convert_file_occurrences(&state.db, test_file, source_str, &line_index);
+        let occurrences = convert_file_occurrences(&state.db, app_file, source_str, &line_index);
 
         let occ_names: Vec<String> = occurrences
             .iter()
@@ -570,17 +581,17 @@ mod tests {
             occ_names.join("\n  ")
         );
 
-        // Check for the `User` class definition.
-        let user_defs: Vec<_> = occurrences
+        // Check that `User` appears as an Import role (from 'from models import User')
+        let user_imports: Vec<_> = occurrences
             .iter()
             .filter(|o| {
                 o.name.as_deref() == Some("User")
-                    && o.role == ReferenceRoleDto::Definition
+                    && o.role == ReferenceRoleDto::Import
             })
             .collect();
         assert!(
-            !user_defs.is_empty(),
-            "Expected a 'User' Definition occurrence, got:\n  {}",
+            !user_imports.is_empty(),
+            "Expected a 'User' Import occurrence (from 'from models import User'), got:\n  {}",
             occ_names.join("\n  ")
         );
 
@@ -598,7 +609,9 @@ mod tests {
             occ_names.join("\n  ")
         );
 
-        // Check that `User` reference resolves.
+        // Check that `User` reference (in `User()`) exists with Read role
+        // and has a resolved target_name (even if target_file is the local
+        // import-binding file, not models.py).
         let user_refs: Vec<_> = occurrences
             .iter()
             .filter(|o| o.name.as_deref() == Some("User") && o.role == ReferenceRoleDto::Read)
@@ -614,6 +627,35 @@ mod tests {
             user_ref.target_name.as_deref() == Some("User"),
             "User reference should target name 'User', got target_name={:?}\n  {}",
             user_ref.target_name,
+            occ_names.join("\n  ")
+        );
+        assert!(
+            user_ref.target_file.is_some(),
+            "User reference should have a resolved target_file\n  {}",
+            occ_names.join("\n  ")
+        );
+
+        // Check that `save` reference (in `.save()`) exists with Read role
+        // and has a resolved target_name.
+        let save_refs: Vec<_> = occurrences
+            .iter()
+            .filter(|o| o.name.as_deref() == Some("save") && o.role == ReferenceRoleDto::Read)
+            .collect();
+        assert!(
+            !save_refs.is_empty(),
+            "Expected a 'save' reference occurrence (from user.save()), got:\n  {}",
+            occ_names.join("\n  ")
+        );
+
+        let save_ref = &save_refs[0];
+        assert!(
+            save_ref.target_name.is_some(),
+            "save reference should have a resolved target_name\n  {}",
+            occ_names.join("\n  ")
+        );
+        assert!(
+            save_ref.target_file.is_some(),
+            "save reference should have a resolved target_file\n  {}",
             occ_names.join("\n  ")
         );
     }
