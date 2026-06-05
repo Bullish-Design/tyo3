@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "_native_impl"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 # ── PyO3 ───────────────────────────────────────────────
@@ -15,6 +15,10 @@ pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods",
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 pythonize = "0.28"
+
+# ── Content store ──────────────────────────────────────
+rpds = "1"          # persistent (immutable, structurally-shared) HashTrieMap
+arc-swap = "1"      # lock-free atomic swap of the live content generation
 
 # ── ty/Ruff crates (ty v0.0.40) ────────────────────────
 # ty v0.0.40 (astral-sh/ty tag 0.0.40) pins ruff submodule at
@@ -28,6 +32,10 @@ ty_ide = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e79
 ty_python_semantic = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
 ty_module_resolver = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
 ty_python_core = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
+ruff_notebook = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
+
+[dev-dependencies]
+tempfile = "3"      # real temp directories for OsSystem-backed tests
 
 [profile.release]
 lto = true

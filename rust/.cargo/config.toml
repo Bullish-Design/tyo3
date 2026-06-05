@@ -1,0 +1,2 @@
+# Build configuration for tyo3 Rust extension.
+# The build.rs handles Python linking for test binaries.
