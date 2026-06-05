@@ -7,10 +7,23 @@
 //!   * `frozen == Some(R)` → a pinned, immutable view of revision R (an MVCC
 //!     snapshot's view). It is never republished, so it is isolated from the
 //!     head forever.
+//!
+//! # Design A: pre-population (no frozen disk fallback)
+//!
+//! Frozen views have **no** disk fallback for content or directory enumeration.
+//! A miss in the generation is `not_found`.  Disk-backed files that belong to
+//! the project at revision R must be pre-populated into the generation when
+//! the snapshot is built (Step 8).  This makes §1.3.1 structural: the
+//! snapshot's content is fixed at build time and cannot drift.
+//!
+//! `canonicalize_path`, `which`, `current_directory`, `path_exists_case_sensitive`,
+//! and `case_sensitivity` still delegate to `native` regardless of `frozen` —
+//! these are structural queries that do not return revision content and are
+//! exempt from the pinning invariant (§1.3.1 applies to content and directory
+//! membership, not canonical path resolution).
 
 use std::any::Any;
 use std::panic::RefUnwindSafe;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -30,19 +43,13 @@ type SharedContent = Arc<ArcSwap<ContentMap>>;
 #[derive(Debug, Clone)]
 pub struct OverlaySystem {
     /// The live (or pinned) content. `ArcSwap` so the head can be republished
-    /// lock-free in Phase 3; `Arc<...>` so all clones of this system (and all
+    /// lock-free; `Arc<...>` so all clones of this system (and all
     /// `db.clone()`s that share it) observe the same content cell.
     content: SharedContent,
     /// Disk fallback for paths the overlay does not cover.
     native: Arc<dyn System + Send + Sync + RefUnwindSafe>,
     /// `None` = live head; `Some(R)` = pinned snapshot view of revision R.
     frozen: Option<Revision>,
-    /// Monotonic version source for disk files captured lazily by a *frozen*
-    /// overlay (read-once capture). Shared across clones so every `db.clone()`
-    /// of one snapshot observes the same captured content. Unused on a live
-    /// head (which floats to disk and never captures). Starts high to avoid
-    /// colliding with store `Document` versions in debug output.
-    capture_version: Arc<AtomicU64>,
 }
 
 impl OverlaySystem {
@@ -53,12 +60,15 @@ impl OverlaySystem {
             content: Arc::new(ArcSwap::new(initial)),
             native: Arc::new(OsSystem::new(root)),
             frozen: None,
-            capture_version: Arc::new(AtomicU64::new(1 << 32)),
         }
     }
 
-    /// Build a frozen, pinned view of `generation` at revision `rev`. Used by the
-    /// snapshot path in Phase 4; included now so the isolation test can exist.
+    /// Build a frozen, pinned view of `generation` at revision `rev`.
+    ///
+    /// Under Design A, `generation` must contain **all** project files for
+    /// revision `rev` (pre-populated by the snapshot builder in Step 8).
+    /// Files not in the generation are invisible to this system — there is
+    /// no disk fallback on a frozen view (§1.3.1).
     pub fn frozen(
         root: SystemPathBuf,
         generation: Generation,
@@ -68,12 +78,14 @@ impl OverlaySystem {
             content: Arc::new(ArcSwap::new(generation)),
             native: Arc::new(OsSystem::new(root)),
             frozen: Some(rev),
-            capture_version: Arc::new(AtomicU64::new(1 << 32)),
         }
     }
 
-    /// Republish the live content (HEAD only). No-op-able in Phase 1; exercised
-    /// in Phase 3.
+    /// Republish the live content (HEAD only).
+    ///
+    /// CONCURRENCY: `publish` is called under the write lock.  The `ArcSwap`
+    /// store is lock-free, so readers see the new generation instantly once
+    /// the lock is released.
     pub fn publish(&self, generation: Generation) {
         debug_assert!(
             self.frozen.is_none(),
@@ -82,13 +94,15 @@ impl OverlaySystem {
         self.content.store(generation);
     }
 
+    /// Whether this is a frozen (pinned) overlay.
     pub fn is_frozen(&self) -> bool {
         self.frozen.is_some()
     }
 
-    /// Snapshot-look-up the overlay document for `path`, if any.
+    // ── Content lookup helpers ───────────────────────────────────────────
+
+    /// Look up the overlay document for `path`, if any.
     fn document(&self, path: &SystemPath) -> Option<Document> {
-        // `load()` is a cheap RCU read; clone the small `Document` (Arc<str> inside).
         self.content
             .load()
             .system
@@ -105,73 +119,41 @@ impl OverlaySystem {
             .cloned()
     }
 
-    /// Frozen read-once capture. If `path` is already in the content cell
-    /// (overlaid or previously captured), return it. Otherwise read disk
-    /// *once*, intern the result additively, and return it. Idempotent:
-    /// concurrent callers converge on a single captured `Document` (last CAS
-    /// wins; content is identical).
-    ///
-    /// Only meaningful when `self.frozen.is_some()`. The live head never calls
-    /// this.
-    fn capture_disk_file(&self, path: &SystemPath) -> std::io::Result<Document> {
-        // Fast path: already overlaid or captured.
-        if let Some(doc) = self.document(path) {
-            return Ok(doc);
-        }
-        // Read disk exactly once.
-        let text = self.native.read_to_string(path)?;
-        let version = self.capture_version.fetch_add(1, Ordering::Relaxed);
-        let doc = Document::text(text, version);
-
-        // Additive, race-safe intern. Do NOT clobber a concurrent capture of
-        // the same path: if another thread already interned it, keep theirs.
-        let key = path.to_path_buf();
-        self.content.rcu(|cur| {
-            if cur.system.contains_key(&key) {
-                Arc::clone(cur)
-            } else {
-                let mut next = (**cur).clone();
-                next.system = next.system.insert(key.clone(), doc.clone());
-                Arc::new(next)
-            }
-        });
-
-        // Return whatever is now stored (the race winner), falling back to ours.
-        Ok(self.document(path).unwrap_or(doc))
+    /// Iterate over all system-path keys in the content map.  Used by frozen
+    /// directory enumeration (Step 6).
+    fn system_keys(&self) -> Vec<SystemPathBuf> {
+        self.content
+            .load()
+            .system
+            .keys()
+            .cloned()
+            .collect()
     }
 }
 
 impl System for OverlaySystem {
     fn path_metadata(&self, path: &SystemPath) -> std::io::Result<Metadata> {
         match self.document(path) {
-            Some(Document::Text { version, .. }) => Ok(Metadata::new(
-                FileRevision::new(u128::from(version)),
-                None,
-                FileType::File,
-            )),
-            Some(Document::Deleted { .. }) => Err(not_found(path)),
-            None if self.frozen.is_some() => {
-                // Pin structure via native metadata, but for FILES derive the
-                // revision from the captured content so it matches
-                // read_to_string.
-                let meta = self.native.path_metadata(path)?;
-                if meta.file_type().is_file() {
-                    let doc = self.capture_disk_file(path)?;
-                    Ok(Metadata::new(
-                        FileRevision::new(u128::from(doc.version())),
-                        meta.permissions(),
-                        FileType::File,
-                    ))
-                } else {
-                    // Directories/symlinks: structure floats to live disk.
-                    Ok(meta)
-                }
+            Some(Document::Text { version, .. }) => {
+                // INVARIANT: metadata revision derives from the document
+                // version so a read and its metadata never disagree.
+                Ok(Metadata::new(
+                    FileRevision::new(u128::from(version)),
+                    None,
+                    FileType::File,
+                ))
             }
+            Some(Document::Deleted { .. }) => Err(not_found(path)),
+            // Design A: frozen views have no disk fallback.  If a path is not
+            // in the generation, it does not exist at this revision.
+            None if self.frozen.is_some() => Err(not_found(path)),
+            // Live head: fall through to native disk.
             None => self.native.path_metadata(path),
         }
     }
 
     fn canonicalize_path(&self, path: &SystemPath) -> std::io::Result<SystemPathBuf> {
+        // Structural query — exempt from the pinning invariant (see module doc).
         self.native.canonicalize_path(path)
     }
 
@@ -179,10 +161,9 @@ impl System for OverlaySystem {
         match self.document(path) {
             Some(Document::Text { text, .. }) => Ok(text.to_string()),
             Some(Document::Deleted { .. }) => Err(not_found(path)),
-            None if self.frozen.is_some() => match self.capture_disk_file(path)? {
-                Document::Text { text, .. } => Ok(text.to_string()),
-                Document::Deleted { .. } => Err(not_found(path)),
-            },
+            // Design A: frozen views have no disk fallback — a miss is not_found.
+            None if self.frozen.is_some() => Err(not_found(path)),
+            // Live head: fall through to native disk.
             None => self.native.read_to_string(path),
         }
     }
@@ -201,6 +182,7 @@ impl System for OverlaySystem {
         match self.virtual_document(path) {
             Some(Document::Text { text, .. }) => Ok(text.to_string()),
             Some(Document::Deleted { .. }) => Err(virtual_not_found(path)),
+            // Virtual paths have no native fallback regardless of frozen/live.
             None => self.native.read_virtual_path_to_string(path),
         }
     }
@@ -230,16 +212,9 @@ impl System for OverlaySystem {
                 .and_then(PySourceType::try_from_extension)
                 .or(Some(PySourceType::Python)),
             Some(Document::Deleted { .. }) => None,
-            None if self.frozen.is_some() => {
-                // Capture so reads are pinned, but keep ty/native source-type
-                // classification for disk files. Unknown extensions like
-                // ".keep" must stay non-source; overlaid text above is the
-                // only branch that defaults extensionless content to Python.
-                match self.capture_disk_file(path) {
-                    Ok(Document::Text { .. }) => self.native.source_type(path),
-                    _ => None,
-                }
-            }
+            // Design A: frozen views — no disk fallback for source_type.
+            // A file not in the generation has no source type.
+            None if self.frozen.is_some() => None,
             None => self.native.source_type(path),
         }
     }
@@ -272,10 +247,19 @@ impl System for OverlaySystem {
         &'a self,
         path: &SystemPath,
     ) -> std::io::Result<Box<dyn Iterator<Item = std::io::Result<DirectoryEntry>> + 'a>> {
+        // Step 6 will replace this with generation-based enumeration for
+        // frozen views.  For now, live head delegates to native; frozen
+        // views produce an empty listing (pre-population not yet wired).
+        if self.frozen.is_some() {
+            // TODO Step 6: enumerate from generation keys
+            return Ok(Box::new(std::iter::empty()));
+        }
         self.native.read_directory(path)
     }
 
     fn walk_directory(&self, path: &SystemPath) -> WalkDirectoryBuilder {
+        // Step 6 will replace this with generation-based walk for frozen
+        // views.  For now, live head delegates to native.
         self.native.walk_directory(path)
     }
 
@@ -306,14 +290,14 @@ impl System for OverlaySystem {
 fn not_found(path: &SystemPath) -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::NotFound,
-        format!("No such file (overlaid as deleted): {path}"),
+        format!("No such file: {path}"),
     )
 }
 
 fn virtual_not_found(path: &SystemVirtualPath) -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::NotFound,
-        format!("No such virtual path (overlaid as deleted): {path}"),
+        format!("No such virtual path: {path}"),
     )
 }
 
@@ -336,13 +320,19 @@ mod tests {
         (dir, root, a)
     }
 
+    /// Create a generation with a pre-populated file entry (as the snapshot
+    /// builder will do in Step 8).
+    fn gen_with(path: SystemPathBuf, text: &str) -> Generation {
+        let mut map = ContentMap::new();
+        let doc = Document::text(text.to_string(), 1);
+        map.system = map.system.insert(path, doc);
+        Arc::new(map)
+    }
+
     #[test]
     fn reads_fall_through_to_disk_when_not_overlaid() {
         let (_dir, root, a) = fixture("X = 1\n");
-        let sys = OverlaySystem::live(
-            root,
-            Arc::new(ContentMap::new()),
-        );
+        let sys = OverlaySystem::live(root, Arc::new(ContentMap::new()));
         assert_eq!(sys.read_to_string(&a).unwrap(), "X = 1\n");
         assert!(sys.path_metadata(&a).is_ok());
     }
@@ -401,18 +391,55 @@ mod tests {
         assert_eq!(head.read_to_string(&a).unwrap(), "moved on\n");
     }
 
-    /// Smoke test: a ProjectDatabase builds over the overlay and reads disk
+    /// The gate: a frozen view at R, with file `a` pre-populated in its
+    /// generation, returns the pinned content even after disk is mutated.
+    /// Under Design A there is no disk read to race.
+    #[test]
+    fn frozen_view_never_reads_disk_for_content() {
+        let (_dir, root, a) = fixture("DISK_ORIGINAL\n");
+        let mut store = ContentStore::new();
+
+        // Pre-populate the file in the generation (as snapshot builder will).
+        store.insert_text(a.clone(), "PINNED_CONTENT\n");
+        let gen_at_r = store.capture();
+        let r = store.revision();
+
+        let frozen = OverlaySystem::frozen(root.clone(), gen_at_r, r);
+
+        // Mutate disk after the frozen view is created.
+        std::fs::write(_dir.path().join("a.py"), b"DISK_MUTATED\n").unwrap();
+
+        // Frozen still returns the pinned content — no disk read attempted.
+        assert_eq!(frozen.read_to_string(&a).unwrap(), "PINNED_CONTENT\n");
+
+        // Live read sees the new disk content (no overlay in the head).
+        let live = OverlaySystem::live(root, Arc::new(ContentMap::new()));
+        assert_eq!(live.read_to_string(&a).unwrap(), "DISK_MUTATED\n");
+    }
+
+    /// A frozen view with an empty generation returns not_found for every
+    /// path, including ones that exist on disk.  This is by design — the
+    /// snapshot builder (Step 8) must pre-populate project files.
+    #[test]
+    fn frozen_empty_generation_has_no_disk_fallback() {
+        let (_dir, root, a) = fixture("X = 1\n");
+        let gen = Arc::new(ContentMap::new());
+        let frozen = OverlaySystem::frozen(root, gen, Revision(0));
+        assert!(frozen.read_to_string(&a).is_err());
+        assert!(frozen.path_metadata(&a).is_err());
+    }
+
+    /// Smoke test: a ProjectDatabase builds over a live overlay and reads disk
     /// content through it.
     #[test]
-    fn project_database_builds_over_overlay() {
+    fn project_database_builds_over_live_overlay() {
         use ruff_db::source::source_text;
         let (_dir, root, a) = fixture("VALUE = 42\n");
         let empty: Generation = Arc::new(ContentMap::new());
         let system = OverlaySystem::live(root.clone(), empty);
         let metadata = ProjectMetadata::new(Name::new("tyo3-project"), root);
         let db = ProjectDatabase::use_defaults(metadata, system);
-        let file =
-            ruff_db::files::system_path_to_file(&db, &a).unwrap();
+        let file = ruff_db::files::system_path_to_file(&db, &a).unwrap();
         assert!(source_text(&db, file).as_str().contains("VALUE = 42"));
     }
 }

@@ -2516,6 +2516,15 @@ mod phase4_tests {
         (dir, root)
     }
 
+    /// Pre-populate a generation with the content of a file on disk, so
+    /// a frozen snapshot can read it under Design A (no disk fallback).
+    fn pre_populate(store: &mut ContentStore, path: SystemPathBuf, disk_text: &str) -> Generation {
+        // Read disk into the store, then capture the generation that includes it.
+        store.insert_text(path, disk_text);
+        let gen = store.capture();
+        gen
+    }
+
     fn read(state: &TyProjectState, path: &SystemPathBuf) -> String {
         let f = ruff_db::files::system_path_to_file(&state.db, path).unwrap();
         source_text(&state.db, f).as_str().to_string()
@@ -2533,17 +2542,21 @@ mod phase4_tests {
     }
 
     /// THE Phase-4 invariant: a snapshot pinned at R keeps reading R's content
-    /// across many later HEAD edits — including for disk-backed files captured
-    /// read-once (no eager materialisation).
+    /// across many later HEAD edits.
+    ///
+    /// Under Design A, the snapshot's generation must be pre-populated with
+    /// all project files at build time (Step 8).  This test demonstrates that
+    /// pre-populated content is pinned and unaffected by later head edits.
     #[test]
     fn snapshot_is_isolated_from_later_head_edits() {
         let (_dir, root) = project("X = 1\n");
         let mut head = build_head(root.clone(), ContentStore::new());
         let a = root.join("a.py");
 
-        // Snapshot @ r0 (disk content "X = 1"), captured lazily on first read.
-        let snap0 = build_frozen(root.clone(), head.store.capture(), head.store.revision());
-        assert!(read(&snap0, &a).contains("X = 1")); // capture-once pins it
+        // Pre-populate the generation with the disk content at r0.
+        let gen_r0 = pre_populate(&mut head.store, a.clone(), "X = 1\n");
+        let snap0 = build_frozen(root.clone(), gen_r0, head.store.revision());
+        assert!(read(&snap0, &a).contains("X = 1"));
 
         // Many HEAD edits land afterwards.
         for i in 2..=5 {
@@ -2560,21 +2573,24 @@ mod phase4_tests {
         assert!(read(&head_state, &a).contains("X = 5"));
     }
 
-    /// Read-once capture pins disk content even if disk changes out from under a
-    /// snapshot AFTER the snapshot first read the file.
+    /// Design A pre-population pins the content built into the generation, even
+    /// if disk changes afterward.  The frozen view has NO disk fallback, so a
+    /// later disk mutation cannot affect the pinned content.
     #[test]
-    fn read_once_capture_pins_first_read() {
+    fn pre_populated_content_survives_disk_mutation() {
         let (_dir, root) = project("DISK = 1\n");
-        let head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new());
         let a = root.join("a.py");
 
-        let snap = build_frozen(root.clone(), head.store.capture(), head.store.revision());
-        assert!(read(&snap, &a).contains("DISK = 1")); // captures "DISK = 1"
+        // Pre-populate the disk content into the generation.
+        let gen = pre_populate(&mut head.store, a.clone(), "DISK = 1\n");
+        let snap = build_frozen(root.clone(), gen, head.store.revision());
+        assert!(read(&snap, &a).contains("DISK = 1"));
 
         // Mutate the real file on disk (an out-of-band change).
         std::fs::write(_dir.path().join("a.py"), "DISK = 999\n").unwrap();
 
-        // The snapshot still serves the captured first read.
+        // The snapshot still serves the pre-populated content — no disk read.
         assert!(read(&snap, &a).contains("DISK = 1"));
     }
 
@@ -2601,22 +2617,25 @@ mod phase4_tests {
         let mut head = build_head(root.clone(), ContentStore::new());
         let a = root.join("a.py");
 
+        // Pre-populate r0's content.
+        let gen_r0 = pre_populate(&mut head.store, a.clone(), "X = 1\n");
         let r0 = head.store.revision();
+        // Create r1 with different content.
         head.store.insert_text(a.clone(), "X = 2\n");
-        let _r1 = head.store.revision();
 
+        // Build frozen from the pre-populated r0 generation (clone out of retained).
         let g0 = head.store.generation_at(r0).expect("r0 still retained");
         let snap0 = build_frozen(root.clone(), g0, r0);
-        assert!(read(&snap0, &a).contains("X = 1")); // pinned to r0's (disk) content
+        assert!(read(&snap0, &a).contains("X = 1"));
     }
 }
 
 // ── Phase 5 tests: Concurrency proof ──────────────────────────────────────
 //
 // Prove the core architectural invariant: many reader snapshots held open
-// do NOT block the writer (independent Zalsa per snapshot), snapshot reads
-// never surface salsa::Cancelled, and frozen read-once disk capture is
-// race-safe under concurrent reads.
+// do NOT block the writer (independent Zalsa per snapshot), and snapshot
+// reads never surface salsa::Cancelled.  Under Design A, snapshots use
+// pre-populated generations — there is no lazy disk capture to race.
 
 #[cfg(test)]
 mod phase5_concurrency_tests {
@@ -2646,6 +2665,13 @@ mod phase5_concurrency_tests {
         source_text(&state.db, file).as_str().to_string()
     }
 
+    /// Pre-populate a generation with a file's content so a frozen snapshot
+    /// can read it under Design A (no disk fallback).
+    fn pre_populate_gen(store: &mut ContentStore, path: &SystemPathBuf, text: &str) -> Generation {
+        store.insert_text(path.clone(), text);
+        store.capture()
+    }
+
     /// Apply an overlay edit using the same ordering as the production
     /// write path: classify → mutate store → publish → apply_changes.
     fn apply_overlay_edit(head: &mut HeadState, path: &SystemPathBuf, text: String) {
@@ -2668,21 +2694,21 @@ mod phase5_concurrency_tests {
         let mut head = build_head(root.clone(), ContentStore::new());
         let a = root.join("a.py");
 
+        // Pre-populate the content so snapshots can read it (Design A).
+        let gen = pre_populate_gen(&mut head.store, &a, "x: int = 0\n");
+        let rev = head.store.revision();
+        // Apply the change to the head db so it doesn't interfere.
+        head.system.publish(head.store.capture());
+        head.db.apply_changes(&[ChangeEvent::file_content_changed(a.clone())], None);
+
         let snapshot_count = stress_count("TYO3_MVCC_STRESS_SNAPSHOTS", 32);
         let edit_count = stress_count("TYO3_MVCC_STRESS_EDITS", 100);
 
         let snapshots: Vec<TyProjectState> = (0..snapshot_count)
-            .map(|_| {
-                build_frozen(
-                    root.clone(),
-                    head.store.capture(),
-                    head.store.revision(),
-                )
-            })
+            .map(|_| build_frozen(root.clone(), gen.clone(), rev))
             .collect();
 
         // Force each snapshot to do real work before the writer starts.
-        // This catches both "held but idle clone" and "active snapshot db" bugs.
         for snap in &snapshots {
             assert!(read_source(snap, &a).contains("x: int = 0"));
         }
@@ -2723,17 +2749,14 @@ mod phase5_concurrency_tests {
         let mut head = build_head(root.clone(), ContentStore::new());
         let a = root.join("a.py");
 
+        // Pre-populate the content for snapshot reads (Design A).
+        let gen = pre_populate_gen(&mut head.store, &a, "x: int = 0\n");
+        let rev = head.store.revision();
         let reader_count = stress_count("TYO3_MVCC_STRESS_READERS", 8);
         let edit_count = stress_count("TYO3_MVCC_STRESS_EDITS", 100);
 
         let snapshots: Vec<TyProjectState> = (0..reader_count)
-            .map(|_| {
-                build_frozen(
-                    root.clone(),
-                    head.store.capture(),
-                    head.store.revision(),
-                )
-            })
+            .map(|_| build_frozen(root.clone(), gen.clone(), rev))
             .collect();
 
         let barrier = Arc::new(Barrier::new(reader_count + 1));
@@ -2815,22 +2838,21 @@ mod phase5_concurrency_tests {
         );
     }
 
-    // ── 5.3 Concurrent frozen disk capture is race-safe ─────────────────
+    // ── 5.3 Pre-populated snapshot content is race-safe ─────────────────
 
-    /// Phase 4's `capture_disk_file` uses `ArcSwap::rcu` and a shared
-    /// `capture_version`. This test makes many clones of one snapshot read
-    /// the same uncaptured disk-backed file at once. Every reader must get
-    /// the same content and no reader may panic.
+    /// Under Design A, all snapshot content is pre-populated at build time.
+    /// This test verifies many clones of one snapshot reading the same
+    /// pre-populated content concurrently get identical results.
     #[test]
-    fn frozen_read_once_capture_is_race_safe() {
+    fn concurrent_snapshot_reads_are_deterministic() {
         let (_dir, root) = project("CAPTURED = 1\n");
-        let head = build_head(root.clone(), ContentStore::new());
+        let mut head = build_head(root.clone(), ContentStore::new());
         let a = root.join("a.py");
-        let snap = build_frozen(
-            root.clone(),
-            head.store.capture(),
-            head.store.revision(),
-        );
+
+        // Pre-populate the content (Design A).
+        let gen = pre_populate_gen(&mut head.store, &a, "CAPTURED = 1\n");
+        let rev = head.store.revision();
+        let snap = build_frozen(root.clone(), gen, rev);
 
         let reader_count = stress_count("TYO3_MVCC_STRESS_READERS", 16);
         let barrier = Arc::new(Barrier::new(reader_count));
@@ -2847,7 +2869,7 @@ mod phase5_concurrency_tests {
                 let result =
                     catch_unwind(AssertUnwindSafe(|| read_source(&snap_clone, &a)));
                 let _ = tx.send(
-                    result.map_err(|_| "panic during frozen capture".to_string()),
+                    result.map_err(|_| "panic during snapshot read".to_string()),
                 );
             });
         }
@@ -2857,14 +2879,14 @@ mod phase5_concurrency_tests {
         for _ in 0..reader_count {
             let result = rx
                 .recv_timeout(Duration::from_secs(5))
-                .expect("frozen capture reader did not finish");
-            texts.push(result.expect("frozen capture reader panicked"));
+                .expect("snapshot reader did not finish");
+            texts.push(result.expect("snapshot reader panicked"));
         }
 
         assert!(texts.iter().all(|t| t.contains("CAPTURED = 1")));
         assert!(
             texts.windows(2).all(|w| w[0] == w[1]),
-            "all concurrent first reads should observe identical captured content"
+            "all concurrent reads should observe identical pre-populated content"
         );
     }
 }
