@@ -20,6 +20,13 @@ pythonize = "0.28"
 rpds = "1"          # persistent (immutable, structurally-shared) HashTrieMap
 arc-swap = "1"      # lock-free atomic swap of the live content generation
 
+# ── Phase 9: cancel-retry on the floating warm fast path ─
+# MUST match the version ty_project pins so salsa::Cancelled unwind payloads
+# from ProjectDatabase queries downcast in our crate too.
+salsa = { version = "0.26.1", default-features = false, features = [
+    "compact_str", "macros", "salsa_unstable", "inventory",
+] }
+
 # ── ty/Ruff crates (ty v0.0.40) ────────────────────────
 # ty v0.0.40 (astral-sh/ty tag 0.0.40) pins ruff submodule at
 #   3cb09eba689ebb49e799131092121928cc789c18

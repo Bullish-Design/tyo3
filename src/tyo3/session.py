@@ -634,6 +634,22 @@ class TyO3Session(_ReadOps):
         self._check_open()
         return self._inner.head
 
+    @property
+    def latest(self) -> LatestView:
+        """A floating, warm read view of the live HEAD (Phase 9).
+
+        ``session.latest.check()`` reflects the newest revision, warm.
+        Contrast ``session.snapshot()`` (pinned, cold, isolated).
+        See :class:`LatestView`."""
+        self._check_open()
+        try:
+            native_head_view = self._inner.head_view()
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in latest: {e}") from e
+        return LatestView(native_head_view)
+
     # ── Head snapshot caching ───────────────────────────────────────
 
     def _native(self) -> Any:
@@ -921,3 +937,33 @@ class Snapshot(_ReadOps):
                 self.close()
             except Exception:
                 pass
+
+
+# ── LatestView — floating warm reads (Phase 9) ────────────────────────────
+
+
+class LatestView(_ReadOps):
+    """A floating, warm read view of the live HEAD.
+
+    Every read reflects the *newest* HEAD revision (including edits made after
+    this view was obtained) and reuses the type-checker's warm memos, so it is
+    faster than a cold snapshot for "what is the current state?" glances.
+    Internally each read is retried if a concurrent write cancels it, so
+    callers never see a cancellation.
+
+    Tradeoff (architecture §7): because a floating read shares HEAD's storage,
+    it can briefly delay a concurrent write (until the read notices the write
+    and retries). For isolated, repeatable reads that never perturb the
+    writer, use :meth:`TyO3Session.snapshot` instead — distinct by intent.
+    """
+
+    def __init__(self, native_head_view: Any) -> None:
+        self._inner = native_head_view
+        self._closed = False
+
+    def _native(self) -> Any:
+        self._check_open()
+        return self._inner
+
+    # No close()/revision: a LatestView pins nothing and has no fixed revision
+    # (it floats). It is valid as long as the owning session is open.
