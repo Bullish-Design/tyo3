@@ -210,23 +210,13 @@ fn not_found(path: &SystemPath) -> std::io::Error {
     )
 }
 
-/// Construct a `ProjectDatabase` over a fresh live overlay. Phase-1 helper used by
-/// tests; Phase 2 wires this into `PyTyProject::open`.
-pub fn open_overlay_database(root: SystemPathBuf) -> ty_project::ProjectDatabase {
-    use ruff_python_ast::name::Name;
-    use ty_project::{ProjectDatabase, ProjectMetadata};
-
-    let empty: Generation = Arc::new(rpds::HashTrieMapSync::new_sync());
-    let system = OverlaySystem::live(root.clone(), empty);
-    let metadata = ProjectMetadata::new(Name::new("tyo3-project"), root);
-    ProjectDatabase::use_defaults(metadata, system)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::content::ContentStore;
     use std::io::Write;
+    use ruff_python_ast::name::Name;
+    use ty_project::{ProjectDatabase, ProjectMetadata};
 
     /// A temp dir with one file `a.py` containing `disk_contents`, plus the
     /// matching `SystemPathBuf` root and `a.py` path.
@@ -310,7 +300,10 @@ mod tests {
     fn project_database_builds_over_overlay() {
         use ruff_db::source::source_text;
         let (_dir, root, a) = fixture("VALUE = 42\n");
-        let db = open_overlay_database(root.clone());
+        let empty: Generation = Arc::new(rpds::HashTrieMapSync::new_sync());
+        let system = OverlaySystem::live(root.clone(), empty);
+        let metadata = ProjectMetadata::new(Name::new("tyo3-project"), root);
+        let db = ProjectDatabase::use_defaults(metadata, system);
         let file =
             ruff_db::files::system_path_to_file(&db, &a).unwrap();
         assert!(source_text(&db, file).as_str().contains("VALUE = 42"));

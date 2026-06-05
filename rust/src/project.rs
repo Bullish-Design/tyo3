@@ -10,11 +10,14 @@ use crate::{ProjectClosedError, PathResolutionError, PositionError};
 
 use ruff_db::files::File;
 use ruff_db::source::source_text;
-use ruff_db::system::{OsSystem, SystemPathBuf};
+use ruff_db::system::SystemPathBuf;
 use ruff_source_file::LineIndex;
 
 use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
+
+use crate::content::ContentStore;
+use crate::overlay::OverlaySystem;
 
 use crate::convert;
 use crate::coordinates;
@@ -44,7 +47,8 @@ impl AnalysisError {
 
 // ── State ────────────────────────────────────────────────────────────────
 
-/// Internal mutable state of a TyO3 project session.
+/// The cheap read-only clone produced for every analysis call. Owns a cloned
+/// `ProjectDatabase` + project root — the minimum needed for GIL-released analysis.
 ///
 /// CONCURRENCY: `ProjectDatabase` (salsa 0.26) is `Send + Clone` but `!Sync`
 /// — its `salsa::Storage` holds a per-thread `ZalsaLocal` (`RefCell`/`UnsafeCell`).
@@ -53,28 +57,70 @@ impl AnalysisError {
 /// worker). Read methods take a `db.clone()` snapshot via `clone_locked_state` and
 /// run inside `py.detach(...)` to release the GIL. Because `#[pyclass]` only
 /// requires `Send` (not `Sync`), the `Mutex` below is what makes concurrent `&self`
-/// access sound once the GIL is released. The canonical db is only ever swapped
-/// (never mutated in place) — see `reload` — so outstanding clones stay isolated.
+/// access sound once the GIL is released.
 struct TyProjectState {
     db: ProjectDatabase,
     root: SystemPathBuf,
+}
+
+/// The live, mutable HEAD of a session. Owns the database plus the content
+/// substrate behind it. Distinct from `TyProjectState` (the cheap read clone)
+/// because `store`/`system` must never be cloned per-read nor exposed to
+/// snapshots.
+///
+/// In Phase 2 `store`/`system` are wired but idle: no edits flow through them
+/// yet. Phase 3 activates them (`store.insert_text` → `system.publish` →
+/// `db.apply_changes`).
+struct HeadState {
+    db: ProjectDatabase,
+    root: SystemPathBuf,
+    store: ContentStore,
+    /// Handle onto the *same* overlay content cell the `db` reads through
+    /// (clone-shares the inner `Arc<ArcSwap<…>>`). Used by Phase 3 to publish.
+    #[allow(dead_code)]  // activated in Phase 3
+    system: OverlaySystem,
+}
+
+/// Anything that can produce the cheap, GIL-releasable read clone.
+trait ReadCloneSource {
+    fn read_clone(&self) -> TyProjectState;
+}
+
+impl ReadCloneSource for TyProjectState {
+    fn read_clone(&self) -> TyProjectState {
+        TyProjectState {
+            db: self.db.clone(),
+            root: self.root.clone(),
+        }
+    }
+}
+
+impl ReadCloneSource for HeadState {
+    fn read_clone(&self) -> TyProjectState {
+        // Clone *only* db + root. store/system stay in the head; the read clone
+        // (and any snapshot built from it) never sees them.
+        TyProjectState {
+            db: self.db.clone(),
+            root: self.root.clone(),
+        }
+    }
 }
 
 /// Python-facing wrapper.  The inner `Option` is `None` after `close()`;
 /// every operation checks this first and raises if the project is closed.
 #[pyclass(name = "TyProject", module = "tyo3._native_impl", frozen)]
 pub struct PyTyProject {
-    inner: Mutex<Option<TyProjectState>>,
+    inner: Mutex<Option<HeadState>>,
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 
 /// Lock and access the state.  Returns an error if the project is closed
 /// or the mutex is poisoned.
-fn lock_state<'a>(
-    inner: &'a Mutex<Option<TyProjectState>>,
+fn lock_state<'a, T>(
+    inner: &'a Mutex<Option<T>>,
     op_name: &str,
-) -> PyResult<std::sync::MutexGuard<'a, Option<TyProjectState>>> {
+) -> PyResult<std::sync::MutexGuard<'a, Option<T>>> {
     let guard = inner.lock().map_err(|e| {
         PyRuntimeError::new_err(format!("Lock poisoned: {}", e))
     })?;
@@ -93,16 +139,12 @@ fn lock_state<'a>(
 ///
 /// The lock is held only for the duration of the clone (microseconds); the heavy
 /// analysis then runs on the owned clone with both the lock and the GIL released.
-fn clone_locked_state(
-    inner: &Mutex<Option<TyProjectState>>,
+fn clone_locked_state<T: ReadCloneSource>(
+    inner: &Mutex<Option<T>>,
     op_name: &str,
 ) -> PyResult<TyProjectState> {
     let guard = lock_state(inner, op_name)?;
-    let s = guard.as_ref().unwrap();
-    Ok(TyProjectState {
-        db: s.db.clone(),
-        root: s.root.clone(),
-    })
+    Ok(guard.as_ref().unwrap().read_clone())
 }
 
 /// Resolve a file handle and return its source text as a String.
@@ -694,6 +736,54 @@ fn compute_hover(
     }
 }
 
+// ── Head builder ─────────────────────────────────────────────────────────
+
+/// Build a live HEAD over an `OverlaySystem`, seeding the overlay from
+/// `initial_store` (an empty store on first open; the preserved store on reload).
+///
+/// Construction mirrors ty_server (`ty_server/src/session.rs:602`):
+///   1. discover project metadata from disk (`pyproject.toml` / `ty.toml`),
+///   2. layer user-level configuration on top,
+///   3. build the db with `fallible` (surfaces config errors),
+///   4. on any failure, fall back to a default blank project (never panic).
+fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
+    use ruff_python_ast::name::Name;
+
+    // The overlay the db reads through. The clone handed to fallible/use_defaults
+    // shares the same content cell, so `system.publish(...)` (Phase 3) is visible
+    // to the db.
+    let system = OverlaySystem::live(root.clone(), initial_store.capture());
+
+    // 1+2+3: discover → apply user config → build. Each step's error is mapped to
+    // a string so the chain has one error type (no `anyhow` dependency).
+    let built: Result<ProjectDatabase, String> = ProjectMetadata::discover(&root, &system)
+        .map_err(|e| format!("project discovery failed: {e}"))
+        .and_then(|mut metadata| {
+            metadata
+                .apply_configuration_files(&system)
+                .map_err(|e| format!("failed to apply configuration files: {e}"))?;
+            ProjectDatabase::fallible(metadata, system.clone())
+                .map_err(|e| format!("failed to build project database: {e:#}"))
+        });
+
+    let db = match built {
+        Ok(db) => db,
+        Err(err) => {
+            // 4. Fallback: blank project over the same overlay, defaults substituted.
+            eprintln!("WARNING: {err}. Falling back to default project settings.");
+            let metadata = ProjectMetadata::new(Name::new("tyo3-project"), root.clone());
+            ProjectDatabase::use_defaults(metadata, system.clone())
+        }
+    };
+
+    HeadState {
+        db,
+        root,
+        store: initial_store,
+        system,
+    }
+}
+
 // ── PyO3 Methods ─────────────────────────────────────────────────────────
 
 #[pymethods]
@@ -713,44 +803,33 @@ impl PyTyProject {
         })?;
         let system_root = SystemPathBuf::from(s);
 
-        let system = OsSystem::new(system_root.clone());
-        let metadata = ProjectMetadata::new(
-            ruff_python_ast::name::Name::new("tyo3-project"),
-            system_root.clone(),
-        );
-
-        let db = ProjectDatabase::use_defaults(metadata, system);
+        let head = build_head(system_root, ContentStore::new());
 
         Ok(PyTyProject {
-            inner: Mutex::new(Some(TyProjectState {
-                db,
-                root: system_root,
-            })),
+            inner: Mutex::new(Some(head)),
         })
     }
 
     // ── Lifecycle: Reload ────────────────────────────────────────────
 
     /// Reload the project: drop the current database and re-create it.
-    /// Clears all cached diagnostics and symbol data.
+    /// Clears all cached diagnostics and symbol data. Preserves any overlay
+    /// content across the rebuild so Phase 3 edits survive a reload.
     ///
     /// Holds the lock throughout — no window where concurrent callers
     /// see a closed project.
     fn reload(&self) -> PyResult<()> {
         let mut guard = lock_state(&self.inner, "reload")?;
-        let root = guard.as_ref().unwrap().root.clone();
+        let head = guard.as_mut().unwrap();
 
-        // Create the new database while still holding the lock.
-        // This is CPU-bound work with no lock-contention risk.
-        let system = OsSystem::new(root.clone());
-        let metadata = ProjectMetadata::new(
-            ruff_python_ast::name::Name::new("tyo3-project"),
-            root.clone(),
-        );
-        let db = ProjectDatabase::use_defaults(metadata, system);
+        let root = head.root.clone();
+        // Preserve overlay content across the rebuild: move the existing store
+        // out and re-seed the new head from it. (Empty in Phase 2; meaningful
+        // once edits land in Phase 3.)
+        let store = std::mem::replace(&mut head.store, ContentStore::new());
 
-        // Atomically swap — old database drops when guard's previous value drops
-        *guard = Some(TyProjectState { db, root });
+        // Rebuild while still holding the lock, then swap atomically.
+        *guard = Some(build_head(root, store));
         Ok(())
     }
 
@@ -1606,5 +1685,84 @@ impl PySnapshot {
         })?;
         *guard = None;
         Ok(())
+    }
+}
+
+// ── Phase 2 tests ────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod phase2_tests {
+    use super::*;
+    use ruff_db::files::system_path_to_file;
+    use ruff_db::source::source_text;
+    use std::io::Write;
+
+    /// Temp project dir with `a.py` and an optional `pyproject.toml`.
+    fn project(pyproject: Option<&str>, a_py: &str) -> (tempfile::TempDir, SystemPathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(toml) = pyproject {
+            let mut f = std::fs::File::create(dir.path().join("pyproject.toml")).unwrap();
+            f.write_all(toml.as_bytes()).unwrap();
+        }
+        let mut f = std::fs::File::create(dir.path().join("a.py")).unwrap();
+        f.write_all(a_py.as_bytes()).unwrap();
+        let root = SystemPathBuf::from_path_buf(
+            dir.path().canonicalize().unwrap().to_path_buf(),
+        )
+        .unwrap();
+        (dir, root)
+    }
+
+    /// build_head over a directory with no config still yields a working db that
+    /// reads disk content through the overlay.
+    #[test]
+    fn build_head_no_config_reads_disk() {
+        let (_dir, root) = project(None, "VALUE = 42\n");
+        let head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+        let file = system_path_to_file(&head.db, &a).unwrap();
+        assert!(source_text(&head.db, file).as_str().contains("VALUE = 42"));
+    }
+
+    /// THE Phase-2 behavioural win: a `pyproject.toml` is discovered and applied.
+    ///
+    /// Strategy: use the `python-version` environment setting. ty defaults to the
+    /// system Python (3.13 here). Setting `python-version = "3.8"` restricts
+    /// analysis to Python 3.8 syntax, flagging 3.9+ features as errors.
+    #[test]
+    fn config_discovery_is_applied() {
+        // PEP 695 type parameter syntax (Python 3.12+). Under 3.8, this is a
+        // syntax error, producing diagnostics. Under default (3.13), it's fine.
+        let pep695 = "def foo[T](x: T) -> T: return x\n";
+        let toml_38 = "[tool.ty.environment]\npython-version = \"3.8\"\n";
+
+        // Default (no config): system Python → 3.13 → no syntax error.
+        let (_d1, root_default) = project(None, pep695);
+        let head_default = build_head(root_default.clone(), ContentStore::new());
+        let diags_default = head_default.db.check();
+
+        // Config forces Python 3.8 → syntax error on PEP 695 generics.
+        let (_d2, root_38) = project(Some(toml_38), pep695);
+        let head_38 = build_head(root_38.clone(), ContentStore::new());
+        let diags_38 = head_38.db.check();
+
+        assert!(
+            diags_38.len() > diags_default.len(),
+            "forcing python-version=3.8 must increase diagnostics for 3.12+ syntax \
+             (default={}, forced_3_8={}) — proves discovery+apply_configuration_files ran",
+            diags_default.len(),
+            diags_38.len(),
+        );
+    }
+
+    /// Malformed config must not panic: build_head falls back to defaults.
+    #[test]
+    fn malformed_config_falls_back_to_defaults() {
+        let (_dir, root) = project(Some("this is not = valid toml ]["), "X = 1\n");
+        let head = build_head(root.clone(), ContentStore::new()); // must not panic
+        // The db is usable despite the broken config.
+        let a = root.join("a.py");
+        let file = system_path_to_file(&head.db, &a).unwrap();
+        assert!(source_text(&head.db, file).as_str().contains("X = 1"));
     }
 }
