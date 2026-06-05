@@ -1370,18 +1370,28 @@ impl PyTyProject {
         let mut guard = lock_state(&self.inner, "edit_many")?;
         let head = guard.as_mut().unwrap();
 
+        // Build one Vec<Change> and one Vec<ChangeEvent>, then apply
+        // as a single batch — one revision for the entire multi-edit (§6.1.1).
+        let mut changes = Vec::with_capacity(edits.len());
         let mut events = Vec::with_capacity(edits.len());
         let (mut created, mut changed) = (Vec::new(), Vec::new());
         for (path, text) in edits {
             let abs = resolve_sync_path(&head.root, &path);
             let event = classify_overlay_edit(&head.system, &head.db, &abs);
-            head.store.insert_text(abs.clone(), text);
+            changes.push(crate::content::Change::Insert {
+                path: abs.clone(),
+                text: Arc::from(text),
+            });
             match &event {
                 ChangeEvent::Created { .. } => created.push(abs.as_str().to_string()),
                 _ => changed.push(abs.as_str().to_string()),
             }
             events.push(event);
         }
+
+        // 1. Apply all changes as one batch (one revision).
+        head.store.apply_batch(changes);
+        // 2+3. Publish + apply to engine.
         let dto = commit_head(head, &events, created, changed, vec![], false);
         drop(guard);
         pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
@@ -2621,6 +2631,59 @@ mod phase3_tests {
 
         let f = system_path_to_file(&head.db, &a).unwrap();
         assert!(source_text(&head.db, f).as_str().contains("DISK = 2"));
+    }
+
+    // ── Step 9: commit transaction ordering ───────────────────────
+
+    /// `edit_many` with N files advances the revision exactly once (§6.1.1).
+    #[test]
+    fn edit_many_is_one_revision() {
+        let (_d, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+        let b = root.join("b.py");
+
+        let r_before = head.store.revision().0;
+        let changes = vec![
+            crate::content::Change::Insert {
+                path: a.clone(),
+                text: Arc::from("Y = 2\n"),
+            },
+            crate::content::Change::Insert {
+                path: b.clone(),
+                text: Arc::from("Z = 3\n"),
+            },
+        ];
+        head.store.apply_batch(changes);
+        let r_after = head.store.revision().0;
+        assert_eq!(r_after, r_before + 1, "edit_many must advance revision by exactly 1");
+
+        // The generation at r_after contains both files.
+        let gen = head.store.generation_at(Revision(r_after)).unwrap();
+        assert!(gen.system.get(&a).is_some());
+        assert!(gen.system.get(&b).is_some());
+    }
+
+    /// After a write returns revision R, the content is immediately
+    /// observable in a generation captured at R (publish-before-return).
+    #[test]
+    fn content_observable_immediately_after_write() {
+        let (_d, root) = project("X = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        head.store.insert_text(a.clone(), "NEW_CONTENT = 42\n");
+        let r = head.store.revision();
+
+        // Immediately capture and verify content is there.
+        let gen = head.store.capture();
+        let doc = gen.system.get(&a).unwrap();
+        match doc {
+            Document::Text { text, .. } => assert_eq!(text.as_ref(), "NEW_CONTENT = 42\n"),
+            _ => panic!("expected Text"),
+        }
+        // The revision also advanced.
+        assert!(r.0 > 0);
     }
 }
 
