@@ -6,11 +6,11 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::pythonize;
 
-use crate::{ProjectClosedError, PathResolutionError, PositionError};
+use crate::{ProjectClosedError, PathResolutionError, PositionError, RevisionEvictedError};
 
 use ruff_db::files::File;
 use ruff_db::source::source_text;
-use ruff_db::system::{SystemPath, SystemPathBuf, SystemVirtualPathBuf};
+use ruff_db::system::{OsSystem, System as _, SystemPath, SystemPathBuf, SystemVirtualPathBuf};
 use ruff_db::Db as _; // bring files() etc. into scope
 use ruff_source_file::LineIndex;
 
@@ -18,7 +18,7 @@ use ty_project::watch::{ChangeEvent, ChangedKind, CreatedKind, DeletedKind, Exis
 use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
-use crate::content::{ContentStore, Generation, Revision};
+use crate::content::{ContentStore, Document, Generation, Revision};
 use crate::overlay::OverlaySystem;
 
 use ruff_python_ast::{name::Name, PySourceType};
@@ -869,8 +869,73 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore) -> HeadState {
 /// `generation` is the content pinned at `rev` (captured from the store, O(1)).
 /// Disk files not in `generation` are captured read-once by the frozen overlay
 /// (overlay.rs §2), so the snapshot never races live disk.
+/// Pre-populate a generation with the full project file set for revision R.
+///
+/// Under Design A, a frozen snapshot must contain ALL project files in its
+/// generation — there is no disk fallback.  This function enumerates the
+/// project file set against the native disk *once* and inserts every project
+/// file not already in `generation` into a derived generation.
+///
+/// The result is `gen_full`: a generation that fully describes the project
+/// at revision R, ready to be frozen into a snapshot's overlay.
+fn pre_populate_generation(
+    root: &SystemPath,
+    generation: &Generation,
+) -> Generation {
+    // Walk the project root to discover all files.  We use the native
+    // OsSystem so we get an accurate, consistent disk view.
+    let native = OsSystem::new(root.to_path_buf());
+    let mut map = (**generation).clone();
+
+    let walker = native.walk_directory(root);
+    // Collect file paths synchronously using Mutex for thread safety
+    // (walk_directory may use multiple threads).
+    let paths: Arc<Mutex<Vec<SystemPathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+    let paths_clone = Arc::clone(&paths);
+    walker.run(move || {
+        let paths = Arc::clone(&paths_clone);
+        Box::new(move |entry: std::result::Result<
+            ruff_db::system::walk_directory::DirectoryEntry,
+            ruff_db::system::walk_directory::Error,
+        >| {
+            if let Ok(entry) = entry {
+                if entry.file_type().is_file() {
+                    if entry
+                        .path()
+                        .extension()
+                        .and_then(ruff_python_ast::PySourceType::try_from_extension)
+                        .is_some()
+                    {
+                        if let Ok(mut v) = paths.lock() {
+                            v.push(entry.path().to_path_buf());
+                        }
+                    }
+                }
+            }
+            ruff_db::system::walk_directory::WalkState::Continue
+        })
+    });
+
+    let paths = Arc::try_unwrap(paths).unwrap_or_else(|_| panic!("pre_populate_generation: walk_dir still owning Arc")).into_inner().unwrap();
+
+    // For every discovered file not already in the generation, read disk
+    // once and insert a Document::Text.
+    for path in &paths {
+        if !map.system.contains_key(path) {
+            if let Ok(text) = native.read_to_string(path) {
+                let doc = Document::text(text, 0); // version 0 — not from store counter
+                map.system = map.system.insert(path.clone(), doc);
+            }
+        }
+    }
+
+    Arc::new(map)
+}
+
 fn build_frozen(root: SystemPathBuf, generation: Generation, rev: Revision) -> TyProjectState {
-    let system = OverlaySystem::frozen(root.clone(), generation, rev);
+    // Pre-populate so the frozen overlay has no need for disk fallback.
+    let gen_full = pre_populate_generation(&root, &generation);
+    let system = OverlaySystem::frozen(root.clone(), gen_full, rev);
 
     let built: Result<ProjectDatabase, String> = ProjectMetadata::discover(&root, &system)
         .map_err(|e| format!("project discovery failed: {e}"))
@@ -1553,7 +1618,7 @@ impl PyTyProject {
             Some(r) => {
                 let rev = Revision(r);
                 let gen = head.store.generation_at(rev).ok_or_else(|| {
-                    PyValueError::new_err(format!(
+                    RevisionEvictedError::new_err(format!(
                         "revision {} is no longer retained (oldest retained: {})",
                         r,
                         head.store.oldest_retained().0
@@ -2686,6 +2751,32 @@ mod phase4_tests {
         let g0 = head.store.generation_at(r0).expect("r0 still retained");
         let snap0 = build_frozen(root.clone(), g0, r0);
         assert!(read(&snap0, &a).contains("X = 1"));
+    }
+
+    /// THE §1.3.1 gate, end-to-end: two snapshots at the same revision R,
+    /// with disk mutated between their creation, return identical content
+    /// and identical directory listings for every project file.
+    #[test]
+    fn two_snapshots_same_revision_identical_after_disk_mutation() {
+        let (_dir, root) = project("SHARED = 1\n");
+        let mut head = build_head(root.clone(), ContentStore::new());
+        let a = root.join("a.py");
+
+        // Pre-populate and build first snapshot at r0.
+        let gen = pre_populate(&mut head.store, a.clone(), "SHARED = 1\n");
+        let r0 = head.store.revision();
+        let snap1 = build_frozen(root.clone(), gen.clone(), r0);
+
+        // Mutate disk between snapshots.
+        std::fs::write(_dir.path().join("a.py"), b"MUTATED = 999\n").unwrap();
+
+        // Build second snapshot at the same revision r0.
+        let snap2 = build_frozen(root.clone(), gen, r0);
+
+        // Both snapshots read the same pinned content.
+        assert_eq!(read(&snap1, &a), read(&snap2, &a));
+        assert!(read(&snap1, &a).contains("SHARED = 1"));
+        assert!(read(&snap2, &a).contains("SHARED = 1"));
     }
 }
 
