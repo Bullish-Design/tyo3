@@ -37,14 +37,16 @@ class ReferenceRole(StrEnum):
 class NameOccurrence(BaseModel):
     """A single resolved name occurrence in a file.
 
-    Records where a name appears, what symbol it resolves to, and
-    the reference role (read, write, import, or definition).
+    Records where a name appears (the source token text), what symbol
+    it resolves to, and the reference role (read, write, import, or
+    definition).
     Produced by :meth:`TyO3Session.file_occurrences`.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     range: Range
+    name: str | None = None
     target_file: str | None = None
     target_name: str | None = None
     target_qualified_name: str | None = None

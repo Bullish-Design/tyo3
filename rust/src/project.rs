@@ -19,8 +19,8 @@ use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
 use crate::content::{ContentStore, Document, Generation, Revision};
-use crate::entity::{extract_entities, Entity};
-use crate::identity::{reconcile, DurableId, IdentityRegistry, IdentityStatus};
+use crate::entity::extract_entities;
+use crate::identity::{reconcile, DurableId, IdentityRegistry};
 use crate::overlay::OverlaySystem;
 
 use ruff_python_ast::{name::Name, PySourceType};
