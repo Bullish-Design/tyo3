@@ -1766,6 +1766,60 @@ class CodeGraph:
         self._assert_mutable()
         self._replace_with(CodeGraph.build(session))
 
+    def _handle_moved_entities(
+        self,
+        source,
+        moved: set[str],
+        root: Path,
+        native_by_graph: dict[str, str],
+    ) -> None:
+        """Update location payloads for moved entities (§6.3).
+
+        Moved entities keep the same DurableId but have a new location.
+        Update their file and range fields without dropping/re-adding nodes,
+        preserving out-edges and avoiding unnecessary edge churn.
+        """
+        if not moved:
+            return
+        for file_str in moved:
+            native_path = native_by_graph.get(file_str, file_str)
+            try:
+                symbols = source.document_symbols(native_path)
+            except Exception:
+                continue
+            for symbol in symbols:
+                start = (symbol.selection_range or symbol.location.range).start
+                # Resolve the DurableId for this entity
+                durable_id = source.id_for(native_path, start.line, start.column) if hasattr(source, 'id_for') else None
+                if durable_id is None:
+                    continue
+                # Find the existing node by DurableId
+                idx = self._id_to_index.get(durable_id)
+                if idx is None:
+                    continue
+                node: SymbolNode = self._graph[idx]
+                if node.file == file_str:
+                    continue  # Already at the right location
+                # Update location — create a new node with updated fields and
+                # replace in-place using rustworkx's node substitution.
+                updated = SymbolNode(
+                    durable_id=node.durable_id,
+                    name=symbol.name,
+                    qualified_name=symbol.qualified_name or symbol.name,
+                    kind=symbol.kind,
+                    file=file_str,
+                    range=symbol.location.range,
+                    selection_range=symbol.selection_range,
+                    external=node.external,
+                    package=node.package,
+                )
+                self._graph[idx] = updated
+                # Update file→node index
+                old_file = node.file
+                if old_file in self._file_to_nodes and idx in self._file_to_nodes[old_file]:
+                    self._file_to_nodes[old_file].remove(idx)
+                self._file_to_nodes[file_str].append(idx)
+
     def apply_delta(
         self,
         source,
@@ -1813,7 +1867,13 @@ class CodeGraph:
         dirty = changed | deleted  # nodes to drop
         to_index = sorted(created | changed)  # files to (re-)extract
 
-        # 0. Snapshot inbound dependencies BEFORE removal — step 1 deletes the edges
+        # 0a. Handle moved entities: update location payload without changing
+        #     the DurableId or churning edges — preserves §5.5.1 at the graph
+        #     level and avoids needless edge churn.
+        moved = {_to_relative(root, p) for p in delta.moved}
+        self._handle_moved_entities(source, moved, root, native_by_graph)
+
+        # 0b. Snapshot inbound dependencies BEFORE removal — step 1 deletes the edges
         #    that encode them (they are incident to dirty nodes).
         importers = self._importers_of(dirty)
         importers -= set(to_index)  # re-indexed files rebuild their own out-edges
