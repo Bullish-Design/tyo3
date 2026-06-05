@@ -11,6 +11,8 @@ use std::sync::Arc;
 use ruff_db::system::{SystemPathBuf, SystemVirtualPathBuf};
 use rpds::HashTrieMapSync;
 
+use crate::hash::{hash_text, ContentHash};
+
 /// Application-level monotonic revision. Distinct from salsa's internal revision;
 /// this is the number we will eventually hand back to Python as `SyncResult.revision`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -19,16 +21,41 @@ pub struct Revision(pub u64);
 /// One overlaid document, or a tombstone marking a path as known-absent.
 #[derive(Debug, Clone)]
 pub enum Document {
-    /// In-memory text content. `version` is a monotonic per-store counter; it
-    /// changes every time the content at a path changes, so a consumer (salsa,
-    /// in Phase 3) can tell "this file changed" by comparing versions.
-    Text { text: Arc<str>, version: u64 },
+    /// In-memory text content. `hash` is computed once at construction and
+    /// never changes; `version` is a monotonic per-store counter that changes
+    /// every time the content at a path changes, so a consumer (salsa, in
+    /// Phase 3) can tell "this file changed" by comparing versions.
+    ///
+    /// INVARIANT: `hash` is always `hash_text(&text)` at construction time.
+    Text {
+        text: Arc<str>,
+        hash: ContentHash,
+        version: u64,
+    },
     /// The path is overlaid as deleted: reads must fail even if a file exists on
     /// disk. Needed so an agent can model "what if this file didn't exist".
     Deleted { version: u64 },
 }
 
 impl Document {
+    /// Construct a `Text` document, computing the content hash from the text
+    /// bytes. The `version` must come from the owning `ContentStore`'s
+    /// monotonic counter.
+    pub fn text(text: impl Into<Arc<str>>, version: u64) -> Self {
+        let text: Arc<str> = text.into();
+        let hash = hash_text(&text);
+        Document::Text { text, hash, version }
+    }
+
+    /// The content hash, if this is a `Text` document.  Tombstones
+    /// (`Deleted`) have no hash and return `None`.
+    pub fn hash(&self) -> Option<ContentHash> {
+        match self {
+            Document::Text { hash, .. } => Some(*hash),
+            Document::Deleted { .. } => None,
+        }
+    }
+
     pub fn version(&self) -> u64 {
         match self {
             Document::Text { version, .. } | Document::Deleted { version } => *version,
@@ -133,10 +160,7 @@ impl ContentStore {
     /// Overlay `path` with in-memory text. Returns the new revision.
     pub fn insert_text(&mut self, path: SystemPathBuf, text: impl Into<Arc<str>>) -> Revision {
         let version = self.next_version();
-        let doc = Document::Text {
-            text: text.into(),
-            version,
-        };
+        let doc = Document::text(text, version);
         self.mutate(|m| {
             m.system = m.system.insert(path, doc);
         })
@@ -168,10 +192,7 @@ impl ContentStore {
         text: impl Into<Arc<str>>,
     ) -> Revision {
         let version = self.next_version();
-        let doc = Document::Text {
-            text: text.into(),
-            version,
-        };
+        let doc = Document::text(text, version);
         self.mutate(|m| {
             m.virtual_files = m.virtual_files.insert(path, doc);
         })
@@ -230,5 +251,25 @@ impl ContentStore {
     /// unsaved overlay buffer win over a racing disk-watcher event.
     pub fn has_overlay(&self, path: &SystemPathBuf) -> bool {
         self.generation.system.contains_key(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hash::hash_text;
+
+    #[test]
+    fn document_text_hashes_its_content() {
+        let doc = Document::text("Y = 2\n", 1);
+        assert_eq!(doc.hash(), Some(hash_text("Y = 2\n")));
+        assert_eq!(doc.version(), 1);
+    }
+
+    #[test]
+    fn document_deleted_has_no_hash() {
+        let doc = Document::Deleted { version: 1 };
+        assert_eq!(doc.hash(), None);
+        assert_eq!(doc.version(), 1);
     }
 }

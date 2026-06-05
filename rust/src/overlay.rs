@@ -121,10 +121,7 @@ impl OverlaySystem {
         // Read disk exactly once.
         let text = self.native.read_to_string(path)?;
         let version = self.capture_version.fetch_add(1, Ordering::Relaxed);
-        let doc = Document::Text {
-            text: text.into(),
-            version,
-        };
+        let doc = Document::text(text, version);
 
         // Additive, race-safe intern. Do NOT clobber a concurrent capture of
         // the same path: if another thread already interned it, keep theirs.
