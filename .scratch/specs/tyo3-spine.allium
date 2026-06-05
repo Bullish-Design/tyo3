@@ -1,0 +1,565 @@
+-- allium: 3
+-- tyo3-spine.allium
+
+-- Scope: The TyO3 spine — the small universal core every layer depends on:
+--   durable identity, revisioned snapshot-isolated content, and the change delta.
+-- Includes:
+--   - Participants and the operations they perform on the substrate
+--   - Durable identity and its review/orphan lifecycle (reconciliation outcomes)
+--   - Commits, revisions, and the per-revision change delta
+--   - Snapshots: the isolated, revision-pinned read surface
+--   - The delegation contracts for source analysis and entity hashing
+-- Excludes:
+--   - The layer model: code (L0), derived, authored (tyo3-layers.allium)
+--   - Sidecar persistence and the round-trip (tyo3-sidecar.allium)
+--   - Commit atomicity ordering, the subscription bus, the derivation DAG
+--     (tyo3-coordination.allium)
+--   - Parsing, type analysis, graph algorithms (delegated; see SourceAnalysis)
+--   - Vector storage and nearest-neighbour search (delegated; tyo3-layers.allium)
+-- Dependencies: none. The spine is the root every other spec imports.
+--
+-- Behavioural stance: this spec captures what is OBSERVABLE of the spine — the
+-- identity, atomicity, isolation, and delta guarantees a participant can rely on.
+-- It deliberately says nothing about HOW these hold (persistent maps, frozen
+-- overlays, per-revision databases, minting schemes, lock ordering). Those are
+-- implementation and live in the architecture, not here.
+
+------------------------------------------------------------
+-- Given
+------------------------------------------------------------
+
+given {
+    project: Project
+}
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+-- A developer or an AI agent. The substrate treats them symmetrically: both
+-- read through pinned snapshots, write through serialised commits, and react to
+-- deltas. "Many participants at once" is the defining usage; the human/agent
+-- distinction is not a behavioural one at this layer.
+external entity Participant {}
+
+-- The delegated analysis engine (parsing, type analysis, symbol extraction,
+-- incremental change application) is not modelled as an entity: it is a pure
+-- delegation boundary, captured by the SourceAnalysis contract below.
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value Revision {
+    -- A point in the substrate's history. Every committed write produces a new
+    -- revision. `ordinal` totally orders revisions so that "in revision order"
+    -- and time-travel are expressible; it is never arithmetic'd in this spec.
+    ordinal: Integer
+}
+
+value DurableId {
+    -- A minted, persistent anchor for one entity. Stable across content edits,
+    -- moves, renames, and restarts. Never derived from content, location, name,
+    -- or line. The key every layer and every authored record attaches to.
+    value: String
+}
+
+value ContentHash {
+    -- A hash of an entity's NORMALISED definition. Stable across cosmetic edits,
+    -- changes on meaningful ones. Keys derived caches and is the secondary
+    -- matcher for reconciliation. Distinct from DurableId by design.
+    value: String
+}
+
+value QualifiedPath {
+    -- An entity's last-known location, e.g. "pkg/models.py::User.save". Used to
+    -- look an entity up (a participant may point at a position to resolve the
+    -- enclosing entity); never used AS its identity.
+    value: String
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+contract SourceAnalysis {
+    -- TyO3's delegation boundary to the analysis engine. TyO3 supplies a
+    -- revision's authoritative content; the engine supplies structure.
+    symbols_at: (revision: Revision) -> Any
+    apply_change: (revision: Revision) -> Any
+    supertypes: (entity: CodeEntity) -> Any
+
+    @invariant RevisionAuthoritative
+        -- The engine analyses the content TyO3 records for a revision, not live
+        -- disk. Two analyses of the same revision see the same source.
+
+    @invariant IncrementalEqualsRebuild
+        -- Applying a change yields the same structure as a full rebuild over the
+        -- resulting content. Incremental analysis is an optimisation, not a
+        -- different answer.
+
+    @guidance
+        -- TyO3 owns identity, revisions, and the delta. Parsing, type analysis,
+        -- symbol extraction, and change application are the engine's; the spec
+        -- treats their results as authoritative for a revision.
+}
+
+contract EntityHashing {
+    -- The normalised content hash that makes the delta and derived caches
+    -- precise (the secondary key for reconciliation).
+    hash_entity: (entity: CodeEntity) -> ContentHash
+
+    @invariant StableToCosmetic
+        -- Whitespace, formatting, and (by default) comment/docstring edits that
+        -- do not change meaning produce the SAME hash.
+
+    @invariant SensitiveToMeaning
+        -- A changed identifier, literal, or structure produces a DIFFERENT hash.
+
+    @invariant FormEquality
+        -- Two entities with identical normalised form produce identical hashes,
+        -- so moves and duplicates reuse derived work.
+
+    @guidance
+        -- Computed over a canonical rendering of the entity's syntax tree, not
+        -- raw bytes. Normalisation policy is configurable per layer
+        -- (see config); the hashing itself is delegated.
+}
+
+contract SnapshotIsolation {
+    -- The read contract a snapshot fulfils. These are cross-read and temporal
+    -- properties (they compare independent reads over time), so they are stated
+    -- as contract invariants rather than expression-bearing invariants.
+    read_entity: (snapshot: Snapshot, entity: CodeEntity) -> Any
+
+    @invariant SameRevisionDeterminism
+        -- Any two reads of revision R — by any snapshot, at any time — observe
+        -- identical content and identical directory membership. The substrate,
+        -- not live disk, is the system of record for what a revision contains.
+
+    @invariant IsolatedFromHead
+        -- A snapshot pinned at R observes R unchanged no matter how far head
+        -- advances afterwards, including disk changes that bypass TyO3.
+
+    @invariant NeverBlocksWriter
+        -- Holding a snapshot never blocks a writer, and a snapshot read is never
+        -- cancelled by a concurrent write.
+
+    @guidance
+        -- A snapshot pins a revision for its whole lifetime. The pinned revision
+        -- fixes content, the reconciled identity map, and every entity's content
+        -- hash at R, from which all layers resolve consistently
+        -- (see CrossLayerConsistency in tyo3-layers.allium).
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum SymbolKind { module | class | function | method | variable }
+
+-- The reconciliation lifecycle of a durable identity. `active` is the normal
+-- state; `needs_review` flags an ambiguous re-bind for a human/agent to confirm;
+-- `orphaned` marks an entity that vanished from source. An identity record is
+-- NEVER removed — orphaning retains it so it can re-bind if the entity returns.
+enum IdentityStatus { active | needs_review | orphaned }
+
+-- How a delta classifies an entity at a revision.
+enum ChangeKind { created | changed | deleted | moved }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity Project {
+    root_path: String
+    head: Revision
+    -- The substrate's current revision. Advances by exactly one per commit.
+}
+
+entity CodeEntity {
+    -- One addressable code symbol, carrying its durable identity. The same
+    -- DurableId is the join key for its embedding, docstring, description, and
+    -- authored intent in the layer specs.
+    durable_id: DurableId
+    qualified_path: QualifiedPath
+    content_hash: ContentHash
+    kind: SymbolKind
+    identity_status: IdentityStatus
+    first_seen: Revision
+    last_seen: Revision
+
+    transitions identity_status {
+        active -> needs_review
+        needs_review -> active
+        active -> orphaned
+        needs_review -> orphaned
+        orphaned -> active
+    }
+}
+
+entity Snapshot {
+    -- An isolated, revision-pinned read view over all layers. Explicit lifetime:
+    -- holding it pins its revision; closing it releases the pin.
+    pinned_revision: Revision
+    status: open | closed
+
+    transitions status {
+        open -> closed
+        terminal: closed
+    }
+}
+
+entity Commit {
+    -- The record of one committed write. Exactly one Commit — and one new
+    -- Revision — is produced per write. Its DeltaEntries are the change delta.
+    revision: Revision
+    is_rescan: Boolean
+    -- is_rescan = true means the change was too coarse to describe precisely
+    -- (e.g. a project/config change); consumers must rebuild rather than trust
+    -- the per-entity entries.
+
+    entries: DeltaEntry with commit = this
+    created_entries: entries where change_kind = created
+    changed_entries: entries where change_kind = changed
+    deleted_entries: entries where change_kind = deleted
+    moved_entries: entries where change_kind = moved
+}
+
+entity DeltaEntry {
+    -- One entity's change within a commit's delta.
+    commit: Commit
+    entity: CodeEntity
+    change_kind: ChangeKind
+    old_path: QualifiedPath?
+    -- Present only for `moved` entries: the location the entity moved from. A
+    -- move keeps the SAME DurableId, so consumers preserve content-hash cache
+    -- hits rather than treating it as delete-then-create.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- How many recent revisions stay addressable for time-travel and lagging
+    -- subscribers. A snapshot already held pins its revision regardless of this.
+    retain_cap: Integer = 256
+
+    -- Normalisation policy for EntityHashing. These are the domain-visible knobs
+    -- (a semantic layer may want docstrings to count; a structural layer not).
+    hash_ignore_whitespace: Boolean = true
+    hash_ignore_trailing_comma: Boolean = true
+    hash_include_comments: Boolean = false
+    hash_include_docstrings: Boolean = false
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule CommitEdit {
+    when: EditCode(participant, path, content)
+    ensures: Commit.created(
+        revision: project.head
+        is_rescan: false
+    )
+    @guidance
+        -- A single edit to one file's buffer. Produces exactly one Commit (one
+        -- new revision). Identity is reconciled and the delta computed as part
+        -- of the same committed outcome, before the revision is observable; the
+        -- ordering of those steps is an implementation concern (see
+        -- CommitAtomicity in tyo3-coordination.allium). `path` is a file path,
+        -- not an entity's qualified path.
+}
+
+rule CommitEditBatch {
+    when: EditFiles(participant, edits)
+    ensures: Commit.created(
+        revision: project.head
+        is_rescan: false
+    )
+    @guidance
+        -- An atomic multi-file write. Produces exactly ONE Commit and one
+        -- revision for the whole batch; no half-applied, intermediate revision
+        -- is ever observable (see BatchAtomicity guarantee). `edits` is the set
+        -- of (path, content) pairs applied together.
+}
+
+rule IngestDiskChange {
+    when: SyncPath(participant, path)
+    ensures: Commit.created(
+        revision: project.head
+        is_rescan: false
+    )
+    @guidance
+        -- An external disk change is ingested as a first-class commit: the disk
+        -- content is read once, at commit time, and recorded as the authoritative
+        -- content of the new revision. A later disk change does not alter what a
+        -- snapshot pinned at this revision observes.
+}
+
+rule RescanProject {
+    when: SyncAll(participant)
+    ensures: Commit.created(
+        revision: project.head
+        is_rescan: true
+    )
+    @guidance
+        -- A coarse change the substrate cannot describe per-entity. The commit is
+        -- marked is_rescan; consumers rebuild rather than trust per-entity deltas.
+}
+
+rule OpenSnapshot {
+    when: OpenSnapshot(participant, at)
+    ensures: Snapshot.created(
+        pinned_revision: at
+        status: open
+    )
+    @guidance
+        -- Pins a revision for consistent, isolated reads across all layers.
+        -- `at` may be the current head or any still-retained past revision
+        -- (time-travel). Pinning an evicted revision fails with a typed error
+        -- (RevisionEvicted), never an approximate view.
+}
+
+rule CloseSnapshot {
+    when: CloseSnapshot(snapshot)
+    requires: snapshot.status = open
+    ensures: snapshot.status = closed
+    @guidance
+        -- Releases the pinned revision so superseded content can be reclaimed.
+}
+
+rule FlagForReview {
+    when: EntityRebindAmbiguous(entity)
+    requires: entity.identity_status = active
+    ensures: entity.identity_status = needs_review
+    @guidance
+        -- Reconciliation kept the entity's DurableId but could only match it
+        -- conservatively (a rename with a body change, or a low-confidence
+        -- structural match). The identity is preserved and flagged so a human or
+        -- agent can confirm or correct it — never silently dropped. The matching
+        -- itself is the deferred Reconciliation spec.
+}
+
+rule OrphanEntity {
+    when: EntityVanished(entity)
+    requires: entity.identity_status in {active, needs_review}
+    ensures: entity.identity_status = orphaned
+    @guidance
+        -- The entity is gone from source. Its identity record is retained as
+        -- `orphaned` (not deleted) so any authored knowledge keyed by its
+        -- DurableId survives and can re-attach if the entity returns.
+}
+
+rule ConfirmIdentity {
+    when: ConfirmIdentity(participant, entity)
+    requires: entity.identity_status = needs_review
+    ensures: entity.identity_status = active
+    @guidance
+        -- A participant resolves a flagged re-bind, returning the identity to
+        -- active. The authored records keyed by it stay attached throughout.
+}
+
+rule ReboundVanishedEntity {
+    when: EntityReappeared(entity)
+    requires: entity.identity_status = orphaned
+    ensures: entity.identity_status = active
+    @guidance
+        -- A previously-orphaned entity returns (its body re-appears, matched by
+        -- content hash). It re-binds to the SAME retained DurableId, so authored
+        -- records reattach exactly. This is why orphaned records are never
+        -- deleted.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant DurableIdsUnique {
+    -- Two distinct live entities never share a durable id. Identity is the join
+    -- key for every layer; collisions would cross-link unrelated knowledge.
+    for a in CodeEntities:
+        for b in CodeEntities:
+            a != b implies a.durable_id != b.durable_id
+}
+
+invariant MovedEntriesCarryOrigin {
+    -- A `moved` delta entry records where the entity moved from, so consumers
+    -- can preserve cache hits across the move.
+    for e in DeltaEntries:
+        e.change_kind = moved implies e.old_path != null
+}
+
+invariant OnlyMovesCarryOrigin {
+    -- Non-move entries carry no origin; origin is meaningful only for moves.
+    for e in DeltaEntries:
+        e.change_kind != moved implies e.old_path = null
+}
+
+invariant DeltaClassificationDisjoint {
+    -- An entity is classified at most once per commit. (No entity is both
+    -- created and changed, etc., in the same delta.)
+    for a in DeltaEntries:
+        for b in DeltaEntries:
+            a != b and a.commit = b.commit
+                implies a.entity != b.entity
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+actor Reviewer {
+    -- A participant resolving flagged identities. Any participant may review.
+    identified_by: Participant where true
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface WriteSurface {
+    facing writer: Participant
+
+    context project: Project
+
+    exposes:
+        project.head
+
+    provides:
+        EditCode(writer, path: String, content: String)
+        EditFiles(writer, edits: String)
+        SyncPath(writer, path: String)
+        SyncAll(writer)
+
+    @guarantee BatchAtomicity
+        -- A batch write advances the revision exactly once; no intermediate,
+        -- half-applied revision is ever observable to any reader.
+
+    @guarantee PartitionedWriters
+        -- Writers are serialised, not merged. Concurrency is made safe by
+        -- partitioning what each participant touches, not by conflict resolution
+        -- on the same entity.
+}
+
+surface SnapshotReadSurface {
+    facing reader: Participant
+
+    context snapshot: Snapshot where status = open
+
+    exposes:
+        snapshot.pinned_revision
+        snapshot.status
+
+    provides:
+        OpenSnapshot(reader, at: Revision)
+        CloseSnapshot(snapshot)
+
+    contracts:
+        fulfils SnapshotIsolation
+
+    @guidance
+        -- One read surface serves every layer at a pinned revision; the per-layer
+        -- reads (code, derived, authored) are specified in tyo3-layers.allium and
+        -- all resolve against this snapshot's revision.
+}
+
+surface IdentityLookup {
+    facing reader: Participant
+
+    context entity: CodeEntity
+
+    exposes:
+        entity.durable_id
+        entity.qualified_path
+        entity.kind
+        entity.identity_status
+
+    @guidance
+        -- Resolve an entity's durable id and current location. A participant may
+        -- point at a SourceLocation to find the enclosing entity; the location is
+        -- a lookup key, never the identity.
+}
+
+surface IdentityReviewSurface {
+    facing reviewer: Reviewer
+
+    exposes:
+        for entity in CodeEntities where identity_status = needs_review:
+            entity.durable_id
+            entity.qualified_path
+        for entity in CodeEntities where identity_status = orphaned:
+            entity.durable_id
+            entity.qualified_path
+
+    provides:
+        ConfirmIdentity(reviewer, entity: CodeEntity)
+
+    @guarantee NoSilentIdentityLoss
+        -- Every ambiguous re-bind surfaces here as needs_review and every lost
+        -- entity as orphaned. Reconciliation never drops a durable identity (and
+        -- so never drops the authored knowledge keyed by it).
+}
+
+surface CommitDeltaSurface {
+    facing reader: Participant
+
+    context commit: Commit
+
+    exposes:
+        commit.revision
+        commit.is_rescan
+        commit.created_entries
+        commit.changed_entries
+        commit.deleted_entries
+        commit.moved_entries
+
+    @guidance
+        -- The precise change a revision carried: which entities were created,
+        -- changed, deleted, or moved. This is both the invalidation signal for
+        -- derived layers and what the subscription bus scopes and delivers
+        -- (see tyo3-coordination.allium). is_rescan = true means treat the delta
+        -- as "rebuild everything".
+}
+
+surface AnalysisIntegration {
+    exposes:
+        SymbolKind
+
+    contracts:
+        demands SourceAnalysis
+        demands EntityHashing
+
+    @guarantee DelegatedAnalysis
+        -- The substrate owns identity, revisions, and the delta. It delegates
+        -- parsing, type analysis, change application, and entity hashing across
+        -- this boundary, treating their results as authoritative for a revision.
+}
+
+------------------------------------------------------------
+-- Deferred Specifications
+------------------------------------------------------------
+
+-- The four-rule matching that binds each new-state entity to a DurableId:
+-- EXACT (qualified-path match) -> HASH (content-hash match, reporting a move) ->
+-- STRUCT (name+kind+container, low-confidence, flags needs_review) -> MINT (new
+-- id). Deterministic regardless of processing order; one-to-one per pass. Emits
+-- the EntityRebindAmbiguous / EntityVanished / EntityReappeared outcomes the
+-- lifecycle rules above respond to.
+deferred Reconciliation.reconcile     -- see: detailed/reconciliation.allium
+
+-- Evicts revisions older than the retained window; pinning an evicted revision
+-- raises RevisionEvicted.
+deferred RevisionRetention.evict      -- see: detailed/revision-retention.allium
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should hash_include_docstrings default differently per layer (false for structural layers, true for semantic/embedding layers)?"
+
+open question "How is an anonymous or generated entity (lambda, comprehension) given a stable qualified path for EXACT matching without falling back to a line number?"
+
+open question "Does time-travel read need to expose a revision range to participants, or is opening a snapshot at a past revision sufficient?"

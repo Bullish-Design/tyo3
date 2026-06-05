@@ -1,0 +1,384 @@
+-- allium: 3
+-- tyo3-coordination.allium
+
+-- Scope: TyO3 coordination — how concurrent participants stay consistent: the
+--   single-writer commit transaction, the delta subscription bus, and the
+--   derivation DAG that orders recomputation.
+-- Includes:
+--   - The atomicity/publish-last/serialisation contract of a commit
+--   - Subscriptions: interest, scoped & ordered delivery, lagging & teardown
+--   - The derivation DAG: acyclic, topological recompute, terminating, idempotent
+--   - The file watcher as a change source
+-- Excludes:
+--   - Content authority, identity, the delta's contents (tyo3-spine.allium)
+--   - What a derived artifact or authored record is (tyo3-layers.allium)
+--   - Where state persists (tyo3-sidecar.allium)
+--   - Vector search and generation (delegated; tyo3-layers.allium)
+-- Dependencies: tyo3-spine.allium (Revision, Commit, Project, Participant),
+--   tyo3-layers.allium (DerivedLayer).
+--
+-- Behavioural stance: coordination is specified by what a writer and a reacting
+-- subscriber observe — atomic revisions, scoped and ordered notifications,
+-- terminating recomputation — not by locks, queues, or scheduler internals.
+
+use "./tyo3-spine.allium" as spine
+use "./tyo3-layers.allium" as layers
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value Interest {
+    -- What a subscriber cares about. The matching of a commit's affected set
+    -- against an interest is delegated (the Affects predicate); this value just
+    -- records the scope.
+    kind: InterestKind
+    scope: String
+    -- For `files`/`entities`/`layer` interests, the concrete set/name; ignored
+    -- for `all`.
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+contract CommitTransaction {
+    -- The atomicity contract the substrate's write path fulfils. These compare
+    -- states across the commit boundary and across writers, so they are contract
+    -- invariants rather than expression-bearing ones.
+    commit: (project: spine/Project) -> spine/Commit
+
+    @invariant Atomic
+        -- Content, identity reconciliation, the code-layer update, and the delta
+        -- are one indivisible step. No participant ever observes a half-applied
+        -- revision — e.g. new content paired with stale structure.
+
+    @invariant PublishLast
+        -- A revision becomes observable only after all of its layer state is in
+        -- place. A reader that sees revision R sees R's fully-updated layers.
+
+    @invariant RevisionAdvancesOnce
+        -- Each committed write advances the revision exactly once — a batch edit
+        -- as much as a single edit.
+
+    @invariant RollbackOnError
+        -- A failure partway through a commit leaves the committed state at the
+        -- prior revision. Either the whole write publishes R, or nothing does.
+
+    @invariant Serialised
+        -- All writers are serialised through this one transaction; the substrate
+        -- never requires concurrent-edit conflict resolution on the same entity.
+}
+
+contract ChangeNotification {
+    -- The contract TyO3 fulfils to reacting participants. Temporal and
+    -- delivery-ordering properties, hence contract invariants.
+    deliver: (subscriber: Subscriber, commit: spine/Commit) -> Any
+
+    @invariant ScopedToInterest
+        -- A subscriber is notified for a committed revision if and only if that
+        -- revision's transitive affected set intersects its interest, scoped to
+        -- the intersection.
+
+    @invariant RevisionOrdered
+        -- Deltas reach a subscriber in revision order. Coalescing several
+        -- revisions into one notification is permitted only if it delivers the
+        -- union of their affected sets, hiding no intervening change.
+
+    @invariant NonBlocking
+        -- Delivery happens after publication and never blocks the writer. A slow
+        -- or dead subscriber stalls neither the writer nor other subscribers.
+
+    @invariant CarriesRevision
+        -- Every delivered delta carries its revision, so the subscriber can pin a
+        -- snapshot at exactly the revision it was notified about.
+
+    @invariant LagFallsBackToRescan
+        -- A subscriber that lags until its revision is no longer retained receives
+        -- a typed RevisionEvicted on snapshot and falls back to a rescan, rather
+        -- than silently missing changes.
+}
+
+contract DerivationOrdering {
+    -- The scheduling contract for recomputing derived layers.
+    schedule: (commit: spine/Commit) -> Any
+
+    @invariant Acyclic
+        -- The layer-dependency graph is acyclic and rooted at the code layer (L0).
+        -- Registering a layer that would introduce a cycle is rejected.
+
+    @invariant TopologicalRecompute
+        -- On a delta, affected artifacts are recomputed in dependency order: a
+        -- layer that derives from another recomputes only after it.
+
+    @invariant Terminates
+        -- Authored layers are never derivation sources (they are sinks), so the
+        -- recomputation cascade always terminates.
+
+    @invariant Idempotent
+        -- Scheduling the same (layer, content hash) recompute twice computes it
+        -- at most once.
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum InterestKind { files | entities | layer | all }
+
+-- A subscriber's standing. `lagging` means it has fallen behind delivery;
+-- `closed` is terminal (its queue and pinned revisions are released).
+enum SubscriberStatus { active | lagging | closed }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity Subscriber {
+    interest: Interest
+    status: SubscriberStatus
+    last_delivered: spine/Revision?
+
+    transitions status {
+        active -> lagging
+        lagging -> active
+        active -> closed
+        lagging -> closed
+        terminal: closed
+    }
+}
+
+entity Notification {
+    -- One scoped delta delivered to one subscriber. Its existence is the record
+    -- that the subscriber was notified about a revision affecting its interest.
+    subscriber: Subscriber
+    revision: spine/Revision
+}
+
+entity DerivationEdge {
+    -- One dependency in the derivation DAG. `from_code` marks an edge rooted at
+    -- the code layer (L0); otherwise `upstream` is the derived layer depended on.
+    -- `downstream` is always a derived layer — authored layers never appear here.
+    upstream: layers/DerivedLayer?
+    downstream: layers/DerivedLayer
+    from_code: Boolean
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- Per-subscriber bounded queue depth before back-pressure/coalescing applies.
+    bus_queue_capacity: Integer = 1024
+    watcher_enabled: Boolean = false
+    watcher_debounce_ms: Integer = 200
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule Subscribe {
+    when: Subscribe(participant, interest)
+    ensures: Subscriber.created(
+        interest: interest
+        status: active
+    )
+    @guidance
+        -- A participant registers an interest (a file/entity set, a layer, or
+        -- ALL). It will receive precise deltas instead of polling.
+}
+
+rule NotifyAffectedSubscribers {
+    when: commit: spine/Commit.created
+    for subscriber in Subscribers where status = active:
+        requires: Affects(commit, subscriber)
+        ensures: Notification.created(
+            subscriber: subscriber
+            revision: commit.revision
+        )
+    @guidance
+        -- For each active subscriber whose interest the commit's transitive
+        -- affected set touches, a scoped delta is delivered, carrying the
+        -- revision. Affected-set closure uses the reverse-dependency view of the
+        -- code layer (tyo3-layers.allium). Delivery is after publication and off
+        -- the write path, so it never blocks the writer.
+}
+
+rule RecordDelivery {
+    when: notification: Notification.created
+    ensures: notification.subscriber.last_delivered = notification.revision
+    @guidance
+        -- Tracks the last revision a subscriber has seen, so ordering and lag are
+        -- observable.
+}
+
+rule MarkLagging {
+    when: SubscriberFellBehind(subscriber)
+    requires: subscriber.status = active
+    ensures: subscriber.status = lagging
+    @guidance
+        -- The subscriber's queue overflowed or its last-delivered revision is no
+        -- longer retained. It is marked lagging; the writer and other subscribers
+        -- are unaffected.
+}
+
+rule ResyncSubscriber {
+    when: SubscriberRescanned(subscriber)
+    requires: subscriber.status = lagging
+    ensures: subscriber.status = active
+    @guidance
+        -- A lagging subscriber catches up via a rescan delta (RevisionEvicted on
+        -- its stale pin forces a rebuild) and returns to active.
+}
+
+rule CloseSubscriber {
+    when: Unsubscribe(subscriber)
+    requires: subscriber.status in {active, lagging}
+    ensures: subscriber.status = closed
+    @guidance
+        -- Clean teardown releases the subscriber's queue and any pinned revisions.
+}
+
+rule RegisterDerivationEdge {
+    when: DependencyDeclared(downstream, upstream, on_code)
+    requires: not IntroducesCycle(downstream, upstream)
+    ensures: DerivationEdge.created(
+        upstream: upstream
+        downstream: downstream
+        from_code: on_code
+    )
+    @guidance
+        -- Adds a dependency to the DAG. Validated acyclic at registration; rooted
+        -- at the code layer. `downstream` is a derived layer; an authored layer
+        -- can never be a dependency, so the cascade terminates.
+}
+
+rule RejectCyclicDependency {
+    when: DependencyDeclared(downstream, upstream, on_code)
+    requires: IntroducesCycle(downstream, upstream)
+    ensures: DependencyRejected(downstream: downstream)
+    @guidance
+        -- A dependency that would create a cycle is rejected at registration; the
+        -- DAG invariant is preserved by construction.
+}
+
+rule ScheduleRecompute {
+    when: commit: spine/Commit.created
+    requires: not commit.is_rescan
+    ensures: RecomputeScheduled(revision: commit.revision)
+    @guidance
+        -- Walks the DAG in topological order over the affected entity set,
+        -- marking dependent artifacts stale and scheduling recompute (lazy or
+        -- eager per layer). Idempotent per (layer, content hash); terminates
+        -- because authored layers are sinks.
+}
+
+rule WatcherIngest {
+    when: DiskEventsObserved(events)
+    requires: config.watcher_enabled
+    ensures: WatchedPathsSynced(events: events)
+    @guidance
+        -- The file watcher is a change source like any other. Events within
+        -- watcher_debounce_ms are collapsed (latest per path) and ingested as
+        -- commits; a path with a live edit buffer is ignored (the buffer wins);
+        -- a coarse rescan event triggers a full rebuild.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant NotificationsCarryRevision {
+    -- Every delivered notification names the revision it concerns, so a
+    -- subscriber can always pin a snapshot at exactly what it was told about.
+    for n in Notifications:
+        n.revision != null
+}
+
+invariant NoSelfDependency {
+    -- A derived layer never depends on itself — the base case of acyclicity.
+    for e in DerivationEdges:
+        e.upstream != null implies e.upstream != e.downstream
+}
+
+invariant CodeRootedEdgesHaveNoUpstream {
+    -- An edge rooted at the code layer carries no upstream derived layer, and a
+    -- non-code edge always names one. The DAG's single root is the code layer.
+    for e in DerivationEdges:
+        e.from_code implies e.upstream = null
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface SubscriptionSurface {
+    facing subscriber_party: spine/Participant
+
+    provides:
+        Subscribe(subscriber_party, interest: Interest)
+
+    contracts:
+        fulfils ChangeNotification
+
+    @guarantee PrecisePushNotPoll
+        -- Subscribers react to exactly the changes that touch their interest, in
+        -- revision order, instead of polling and re-deriving the world.
+}
+
+surface SubscriberInbox {
+    context subscriber: Subscriber where status in {active, lagging}
+
+    let inbox = Notifications where subscriber = subscriber
+
+    exposes:
+        subscriber.interest
+        subscriber.status
+        subscriber.last_delivered
+        for notification in inbox:
+            notification.revision
+
+    provides:
+        Unsubscribe(subscriber)
+
+    @guidance
+        -- A subscriber reads its delivered deltas in revision order; each names a
+        -- revision it can snapshot at. A lagging subscriber resyncs via a rescan.
+}
+
+surface CommitCoordination {
+    exposes:
+        InterestKind
+
+    contracts:
+        fulfils CommitTransaction
+        fulfils DerivationOrdering
+
+    @guarantee OneConsistentStatePerRevision
+        -- Every committed revision is a single, fully-consistent state across
+        -- content, identity, and all layers; recomputation of derived layers is
+        -- ordered and terminating.
+}
+
+------------------------------------------------------------
+-- Deferred Specifications
+------------------------------------------------------------
+
+-- Whether a commit's transitive affected set intersects a subscriber's interest,
+-- computed from the reverse-dependency closure of the code layer.
+deferred Affects                      -- see: detailed/affected-set.allium
+
+-- Whether adding a dependency edge would create a cycle in the derivation DAG.
+deferred IntroducesCycle              -- see: detailed/derivation-dag.allium
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should a subscriber be able to request a catch-up delta covering everything since its last delivered revision, distinct from a full rescan?"
+
+open question "Should interests support filtering by SymbolKind (e.g. only methods), or is file/entity/layer/all scoping sufficient?"
+
+open question "What is the exact coalescing rule when a burst exceeds bus_queue_capacity — union-and-collapse to the latest revision, or block the producer for that one subscriber?"

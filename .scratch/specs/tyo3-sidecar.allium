@@ -1,0 +1,239 @@
+-- allium: 3
+-- tyo3-sidecar.allium
+
+-- Scope: The `.tyo3/` sidecar — the committable directory beside the project that
+--   holds all durable, non-source state without ever touching the source files.
+-- Includes:
+--   - What the sidecar holds and how durable each part is (identity and authored
+--     knowledge are durable; the derived cache is regenerable)
+--   - Session start: load durable state, then reconcile against fresh code
+--   - Persist-on-commit and the persist/reload round-trip guarantee
+--   - Format versioning (reject newer, never silently misread)
+--   - Non-invasiveness for collaborators who do not use TyO3
+-- Excludes:
+--   - The reconciliation algorithm itself (tyo3-spine.allium)
+--   - The layer model and what an artifact/record means (tyo3-layers.allium)
+--   - The write transaction, bus, and DAG (tyo3-coordination.allium)
+--   - Vector-store file formats (delegated; tyo3-layers.allium VectorIndex)
+-- Dependencies: tyo3-spine.allium (Revision, DurableId, Project),
+--   tyo3-layers.allium (LayerName).
+--
+-- Behavioural stance: the sidecar is specified by what survives a round-trip,
+-- what stays inert to non-users, and what fails loudly — not by file formats,
+-- write-temp-then-rename mechanics, or directory layout.
+
+use "./tyo3-spine.allium" as spine
+use "./tyo3-layers.allium" as layers
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- What the sidecar holds. `identity` and `authored` are durable knowledge that
+-- cannot be recomputed from source; `cache` is derived and regenerable.
+enum StoreRole { identity | authored | cache }
+
+-- Whether a store's contents can be rebuilt from source.
+enum Durability { durable | regenerable }
+
+-- The delegated backend a cache store is realised on. The choice is a deployment
+-- decision; the substrate only holds content-addressed keys, not the store.
+enum BackendType { fs | lancedb | qdrant | sqlite_vec }
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+contract SidecarPersistence {
+    -- The durability contract the sidecar surface fulfils. These are temporal,
+    -- round-trip, and counterfactual (crash) properties, so they live as contract
+    -- invariants rather than expression-bearing ones.
+    persist: (revision: spine/Revision) -> Any
+    load: (sidecar: Sidecar) -> Any
+
+    @invariant RoundTripNoLoss
+        -- persist -> process exit -> reload -> reconcile restores identity
+        -- bindings and authored records exactly (modulo re-binding to current
+        -- code). No authored record is ever lost or silently altered.
+
+    @invariant CrashSafe
+        -- An interrupted persist leaves the previous valid state intact; a half
+        -- written sidecar is never observed.
+
+    @invariant SerialisedWithCommits
+        -- Sidecar writes go through the single write transaction, so on-disk
+        -- state never reflects a half-applied revision.
+
+    @invariant NonInvasive
+        -- The sidecar requires no modification to source files. Its presence or
+        -- absence never changes program behaviour for collaborators who do not
+        -- use TyO3 — it is inert data they may ignore.
+
+    @invariant MergeableByContent
+        -- Durable records are keyed by stable identity (DurableId) and the cache
+        -- by content hash, both order-independent, so a version-control merge of
+        -- divergent sidecars is a content merge, not a positional one.
+}
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity Sidecar {
+    root_path: String
+    format_version: Integer
+    -- Lives beside the project (conventionally ".tyo3/"). Travels with the repo
+    -- through version control.
+}
+
+entity SidecarStore {
+    role: StoreRole
+    durability: Durability
+    backend: BackendType
+    gitignored: Boolean
+    -- A durable store must not be gitignored (it carries knowledge that cannot be
+    -- recomputed). A cache store may be, since it is regenerable.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    sidecar_format_version: Integer = 1
+    cache_gitignored_default: Boolean = true
+    cache_backend: BackendType = fs
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule InitialiseSidecar {
+    when: SessionStarted(project)
+    ensures:
+        let sidecar = Sidecar.created(
+            root_path: project.root_path
+            format_version: config.sidecar_format_version
+        )
+        SidecarStore.created(role: identity, durability: durable, backend: fs, gitignored: false)
+        SidecarStore.created(role: authored, durability: durable, backend: fs, gitignored: false)
+        SidecarStore.created(role: cache, durability: regenerable, backend: config.cache_backend, gitignored: config.cache_gitignored_default)
+    @guidance
+        -- Created on first use beside the project root. identity and authored are
+        -- durable and committed; cache is regenerable and may be gitignored.
+        -- Source files are never modified.
+}
+
+rule LoadAndReconcile {
+    when: SessionLoaded(project)
+    ensures: SidecarLoaded(project: project)
+    @guidance
+        -- On open, durable state (identity registry, authored records) is loaded
+        -- and then reconciled against the freshly-built code layer
+        -- (Reconciliation in tyo3-spine.allium). Records whose entity changed are
+        -- flagged needs_review; records whose entity vanished are orphaned; none
+        -- are dropped. Derived artifacts are served lazily from the cache and
+        -- recomputed on miss. This is the load half of the round-trip guarantee.
+}
+
+rule PersistOnCommit {
+    when: commit: spine/Commit.created
+    ensures: DurableStatePersisted(revision: commit.revision)
+    @guidance
+        -- After each committed write, the identity registry and any authored
+        -- records are persisted within the same write transaction, so the on-disk
+        -- durable state never lags or races the in-memory state. The cache is
+        -- written content-addressed and is safe to lose.
+}
+
+rule RejectNewerFormat {
+    when: ReadSidecarFile(path, found_version)
+    requires: found_version > config.sidecar_format_version
+    ensures: SidecarReadRejected(path: path)
+    @guidance
+        -- A sidecar written by a newer TyO3 is rejected with a typed, catchable
+        -- error — never silently misread. (FormatVersion error.)
+}
+
+rule DeleteCache {
+    when: DeleteCache(operator, store)
+    requires: store.durability = regenerable
+    ensures: not exists store
+    @guidance
+        -- The cache is disposable: deleting it loses no knowledge. It is rebuilt
+        -- lazily from source on the next read. A durable store cannot be deleted
+        -- this way (its precondition fails).
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant DurableStoresNotGitignored {
+    -- Durable knowledge must be committable, so it is never gitignored.
+    for s in SidecarStores:
+        s.durability = durable implies not s.gitignored
+}
+
+invariant KnowledgeStoresAreDurable {
+    -- Identity and authored knowledge cannot be recomputed from source, so they
+    -- are always durable.
+    for s in SidecarStores:
+        s.role in {identity, authored} implies s.durability = durable
+}
+
+invariant CacheStoreRegenerable {
+    -- The cache is always regenerable; nothing irreplaceable lives there.
+    for s in SidecarStores:
+        s.role = cache implies s.durability = regenerable
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface SidecarLifecycleSurface {
+    facing operator: spine/Participant
+
+    context store: SidecarStore
+
+    exposes:
+        store.role
+        store.durability
+        store.backend
+        store.gitignored
+
+    provides:
+        DeleteCache(operator, store)
+
+    contracts:
+        fulfils SidecarPersistence
+
+    @guarantee SourceNeverModified
+        -- No operation here writes to source files. All durable state lives in
+        -- the sidecar; identity lives in the registry, not in code markers.
+
+    @guarantee CacheSafeToDelete
+        -- Deleting the cache store never loses knowledge; durable stores cannot
+        -- be deleted through this surface.
+}
+
+------------------------------------------------------------
+-- Deferred Specifications
+------------------------------------------------------------
+
+-- The on-disk schema, atomic write protocol, and format-version negotiation for
+-- the identity registry and authored stores.
+deferred SidecarFormat.read           -- see: detailed/sidecar-format.allium
+deferred SidecarFormat.write          -- see: detailed/sidecar-format.allium
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should the sidecar support a gitignored secrets store for generator credentials, separate from the committed config?"
+
+open question "When a sidecar written by an OLDER format is encountered, should migration be attempted automatically, or surfaced for explicit opt-in?"
+
+open question "Should per-developer config overrides (a local, gitignored config) be supported alongside the committed sidecar config?"

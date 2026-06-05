@@ -1,0 +1,533 @@
+-- allium: 3
+-- tyo3-layers.allium
+
+-- Scope: The TyO3 layer model — everything known about the code, described from
+--   different angles and linked by durable identity, kept mutually consistent as
+--   the code changes underneath.
+-- Includes:
+--   - Code as layer 0: entities and their typed relationships (the structure)
+--   - Derived layers: content-addressed artifacts (embeddings, docstrings,
+--     descriptions) with a fresh/stale/failed lifecycle and serving policy
+--   - Authored layers: durable, deliberately-written records with a
+--     review/orphan lifecycle that never silently drops knowledge
+--   - Cross-layer consistency: one snapshot, one revision, every layer agreeing
+--   - The delegation contracts for artifact generation and vector search
+-- Excludes:
+--   - Identity, reconciliation, revisions, the delta (tyo3-spine.allium)
+--   - Where artifacts and records are persisted (tyo3-sidecar.allium)
+--   - When recomputation is scheduled, and delivery of change (tyo3-coordination.allium)
+-- Dependencies: tyo3-spine.allium (DurableId, ContentHash, Revision, CodeEntity,
+--   Snapshot, Participant).
+--
+-- Behavioural stance: a layer is defined by what a reader observes of it at a
+-- pinned revision and how it reacts to change — not by graph data structures,
+-- cache keying mechanics, or generator orchestration internals.
+
+use "./tyo3-spine.allium" as spine
+
+------------------------------------------------------------
+-- Given
+------------------------------------------------------------
+
+given {
+    project: spine/Project
+}
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value LayerName {
+    -- A layer's identifier, e.g. "embeddings", "docstrings", "intent". The code
+    -- layer is layer 0 and is always present; its name is "code".
+    value: String
+}
+
+value GeneratorVersion {
+    -- Identifies the generator (model + prompt) that produced a derived artifact.
+    -- Bumping it logically invalidates a layer's artifacts without touching code
+    -- or other layers — a new key space, with old keys retained for rollback.
+    value: String
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+contract ArtifactGenerator {
+    -- TyO3's delegation boundary to whatever produces derived knowledge. TyO3
+    -- orchestrates generators; it is not a model host.
+    generate: (entity: spine/CodeEntity, generator_version: GeneratorVersion) -> Any
+
+    @invariant FunctionOfContent
+        -- An artifact is a pure function of the entity's content and the
+        -- generator version. Identical content under the same version yields an
+        -- equivalent, reusable artifact — which is why unchanged entities are
+        -- never regenerated.
+
+    @guidance
+        -- Embeddings, descriptions, extracted docstrings, summaries. TyO3 calls
+        -- the generator; the model, prompt, and runtime are the generator's.
+}
+
+contract VectorIndex {
+    -- TyO3's delegation boundary for vector storage and nearest-neighbour search.
+    store: (content_hash: spine/ContentHash, vector: Any) -> Any
+    nearest: (snapshot: spine/Snapshot, query: Any, k: Integer) -> Any
+
+    @invariant ContentAddressed
+        -- A given content hash maps to one immutable vector, so the index needs
+        -- no revision awareness and is automatically consistent across revisions
+        -- and participants.
+
+    @invariant RevisionScopedSearch
+        -- A nearest-neighbour query made through a snapshot returns neighbours
+        -- consistent with that snapshot's revision.
+
+    @guidance
+        -- TyO3 holds the content-hash <-> artifact linkage; the storage layout
+        -- and the ANN algorithm are the index's.
+}
+
+contract CrossLayerConsistency {
+    -- The read contract the layer-read surface fulfils. These properties compare
+    -- layers and compare incremental to rebuilt state, so they are contract
+    -- invariants, not expression-bearing ones.
+    resolve: (snapshot: spine/Snapshot, layer: LayerName, entity: spine/CodeEntity) -> Any
+
+    @invariant OneRevisionAllLayers
+        -- For any entity read through a snapshot, its code structure, its derived
+        -- artifacts (resolved by that revision's content hash), and its authored
+        -- records all describe the snapshot's single revision.
+
+    @invariant StaleReportedNotHidden
+        -- A derived artifact that is stale at the snapshot's revision is reported
+        -- as stale (the last-good value for that content), never presented as
+        -- fresh.
+
+    @invariant IncrementalEqualsRebuild
+        -- The code-layer structure reached by applying deltas equals a full
+        -- rebuild over the same content. Incremental update is an optimisation,
+        -- never a different graph.
+
+    @invariant LinkedByIdentity
+        -- All layers join on the same DurableId. The embedding, description,
+        -- docstring, and authored intent for an entity share its identity.
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- The typed relationships the code layer (L0) exposes between entities. Derived
+-- from the analysis engine, never heuristically. `inherits`/`overrides` are
+-- multi-level and cross-file.
+enum RelationKind { contains | references | inherits | overrides | imports }
+
+-- A derived artifact's freshness against the entity it derives from.
+enum ArtifactStatus { fresh | stale | failed }
+
+-- An authored record's standing relative to the entity it describes. Mirrors the
+-- spine's identity lifecycle: a record is flagged when its entity changes and
+-- orphaned when its entity vanishes — never silently dropped.
+enum RecordStatus { active | needs_review | orphaned }
+
+-- What a layer serves when an artifact is stale.
+enum ServingPolicy { serve_stale | block_until_fresh }
+
+-- When a stale artifact is recomputed.
+enum RecomputePolicy { lazy | eager }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity DerivedLayer {
+    -- A layer that is a pure function of the code at a revision. Never
+    -- authoritative, always reproducible, invalidated automatically by the delta.
+    name: LayerName
+    generator_version: GeneratorVersion
+    serving_policy: ServingPolicy
+    recompute_policy: RecomputePolicy
+
+    depends_on_code: Boolean
+    depends_on_layer: DerivedLayer?
+    -- A derived layer derives from the code layer and/or another DERIVED layer.
+    -- It can never depend on an authored layer (enforced by this type): authored
+    -- layers are sinks for the derivation cascade, so reactions always terminate.
+}
+
+entity AuthoredLayer {
+    -- A layer written deliberately, with no upstream (design intent, curated
+    -- descriptions, review notes). Durable; survives code edits.
+    name: LayerName
+    review_on_change: Boolean
+    -- When true, a record whose entity changes is flagged needs_review.
+}
+
+entity CodeRelation {
+    -- One typed edge of the code layer (L0). Both ends are durable identities, so
+    -- a relation survives moves and renames of either endpoint.
+    source: spine/CodeEntity
+    target: spine/CodeEntity
+    kind: RelationKind
+}
+
+entity DerivedArtifact {
+    -- One layer's derived value for one entity at one content hash. The heavy
+    -- payload (vector, long text) lives in the delegated store; this record holds
+    -- the content-addressed linkage and the freshness status.
+    layer: DerivedLayer
+    entity_id: spine/DurableId
+    content_hash: spine/ContentHash
+    generator_version: GeneratorVersion
+    value_ref: String
+    -- An opaque handle to the artifact in the delegated store. Determined by the
+    -- (content_hash, generator_version) key.
+    status: ArtifactStatus
+
+    transitions status {
+        fresh -> stale
+        stale -> fresh
+        failed -> fresh
+        stale -> failed
+    }
+}
+
+entity AuthoredRecord {
+    -- One deliberately-authored value for one entity, durable and keyed by the
+    -- entity's DurableId.
+    layer: AuthoredLayer
+    entity_id: spine/DurableId
+    value: String
+    recorded_at: spine/Revision
+    status: RecordStatus
+
+    transitions status {
+        active -> needs_review
+        needs_review -> active
+        active -> orphaned
+        needs_review -> orphaned
+        orphaned -> active
+    }
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    serving_default: ServingPolicy = serve_stale
+    recompute_default: RecomputePolicy = lazy
+    generator_concurrency: Integer = 4
+    generator_batch_size: Integer = 128
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule RegisterDerivedLayer {
+    when: RegisterDerivedLayer(participant, name, version, on_code, on_layer)
+    ensures: DerivedLayer.created(
+        name: name
+        generator_version: version
+        serving_policy: config.serving_default
+        recompute_policy: config.recompute_default
+        depends_on_code: on_code
+        depends_on_layer: on_layer
+    )
+    @guidance
+        -- Dependencies form a DAG rooted at the code layer (L0). A registration
+        -- that would introduce a cycle is rejected (see the derivation DAG in
+        -- tyo3-coordination.allium). `on_layer` may only name a derived layer.
+}
+
+rule RegisterAuthoredLayer {
+    when: RegisterAuthoredLayer(participant, name, review_on_change)
+    ensures: AuthoredLayer.created(
+        name: name
+        review_on_change: review_on_change
+    )
+}
+
+rule MarkArtifactStale {
+    when: EntityContentChanged(artifact)
+    requires: artifact.status = fresh
+    ensures: artifact.status = stale
+    @guidance
+        -- The entity's content hash moved, so the cached artifact no longer
+        -- matches. It is marked stale and recomputation is scheduled (lazily or
+        -- eagerly per the layer's policy). An entity whose content hash is
+        -- UNCHANGED (including a pure move) keeps its fresh artifact: no recompute.
+}
+
+rule InvalidateOnGeneratorBump {
+    when: GeneratorVersionChanged(artifact)
+    requires: artifact.status = fresh
+    ensures: artifact.status = stale
+    @guidance
+        -- Bumping a layer's generator version opens a new key space; existing
+        -- artifacts are logically stale. Prior keys remain for rollback and for
+        -- time-travel to older revisions.
+}
+
+rule RecomputeArtifact {
+    when: RecomputeArtifact(layer, entity)
+    requires: ArtifactFor(layer, entity).status in {stale, failed}
+    ensures: ArtifactFor(layer, entity).status = fresh
+    @guidance
+        -- Regenerates the artifact via the ArtifactGenerator contract and stores
+        -- it via the VectorIndex contract, keyed by the entity's current content
+        -- hash. Idempotent: scheduling the same (layer, content hash) twice
+        -- computes it at most once.
+}
+
+rule RecomputeFailed {
+    when: GenerationFailed(layer, entity)
+    requires: ArtifactFor(layer, entity).status = stale
+    ensures: ArtifactFor(layer, entity).status = failed
+    @guidance
+        -- A generation failure leaves the prior artifact intact and marks the
+        -- target failed — never a partial artifact.
+}
+
+rule ServeStaleArtifact {
+    when: RequestArtifact(reader, artifact)
+    requires: artifact.status = stale and artifact.layer.serving_policy = serve_stale
+    ensures: StaleArtifactServed(artifact: artifact)
+    @guidance
+        -- Default policy: serve the last-good value tagged stale, recompute
+        -- asynchronously. The reader is never blocked and never misled.
+}
+
+rule BlockUntilFresh {
+    when: RequestArtifact(reader, artifact)
+    requires: artifact.status = stale and artifact.layer.serving_policy = block_until_fresh
+    ensures: RecomputeArtifact(layer: artifact.layer, entity: artifact.entity_id)
+    @guidance
+        -- Strict policy: block the read until a fresh artifact is recomputed.
+}
+
+rule AuthorRecord {
+    when: AuthorRecord(participant, layer, entity_id, value)
+    ensures: AuthoredRecord.created(
+        layer: layer
+        entity_id: entity_id
+        value: value
+        recorded_at: project.head
+        status: active
+    )
+    @guidance
+        -- Authoring is a write: it flows through a commit, advances the revision,
+        -- and produces a delta like any other change, so authored knowledge
+        -- participates fully in snapshot isolation and time-travel.
+}
+
+rule FlagAuthoredReview {
+    when: DescribedEntityChanged(record)
+    requires: record.status = active and record.layer.review_on_change
+    ensures: record.status = needs_review
+    @guidance
+        -- The entity a record describes changed. The record is not dropped — it
+        -- is flagged for a human or agent to confirm or update.
+}
+
+rule OrphanAuthoredRecord {
+    when: DescribedEntityVanished(record)
+    requires: record.status in {active, needs_review}
+    ensures: record.status = orphaned
+    @guidance
+        -- The described entity is gone. The record is retained as orphaned so it
+        -- reattaches if the entity returns. Silent loss of authored knowledge is
+        -- a correctness failure.
+}
+
+rule ConfirmAuthoredRecord {
+    when: ConfirmAuthoredRecord(participant, record)
+    requires: record.status = needs_review
+    ensures: record.status = active
+}
+
+rule UpdateAuthoredRecord {
+    when: UpdateAuthoredRecord(participant, record, new_value)
+    requires: record.status = needs_review
+    ensures:
+        record.value = new_value
+        record.status = active
+        record.recorded_at = spine/project.head
+}
+
+rule RestoreAuthoredRecord {
+    when: DescribedEntityReappeared(record)
+    requires: record.status = orphaned
+    ensures: record.status = active
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant DerivedArtifactsContentAddressed {
+    -- Two artifacts sharing layer, content hash, and generator version refer to
+    -- the same stored value. This is what makes moves and duplicates free and the
+    -- store revision-agnostic.
+    for a in DerivedArtifacts:
+        for b in DerivedArtifacts:
+            a != b
+                and a.layer = b.layer
+                and a.content_hash = b.content_hash
+                and a.generator_version = b.generator_version
+                implies a.value_ref = b.value_ref
+}
+
+invariant OneAuthoredRecordPerEntityPerLayer {
+    -- An entity has at most one authored record in a given authored layer.
+    for a in AuthoredRecords:
+        for b in AuthoredRecords:
+            a != b and a.layer = b.layer
+                implies a.entity_id != b.entity_id
+}
+
+invariant RelationsAreDirected {
+    -- A relation never links an entity to itself trivially as containment; the
+    -- structure is a directed graph between distinct endpoints for these kinds.
+    for r in CodeRelations:
+        r.kind in {contains, inherits, overrides, imports}
+            implies r.source != r.target
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface CodeLayerSurface {
+    facing reader: spine/Participant
+
+    context entity: spine/CodeEntity
+
+    let outgoing = CodeRelations where source = entity
+    let incoming = CodeRelations where target = entity
+
+    exposes:
+        entity.durable_id
+        entity.kind
+        for relation in outgoing:
+            relation.target
+            relation.kind
+        for relation in incoming:
+            relation.source
+            relation.kind
+
+    @guidance
+        -- The code layer answers structural queries — containment, references,
+        -- supertypes, overrides, importers — at the snapshot's revision. The
+        -- `incoming` relations are the reverse-dependency view the subscription
+        -- bus scopes notifications by (tyo3-coordination.allium). Parsing, type
+        -- analysis, and graph algorithms over this structure are delegated (the
+        -- SourceAnalysis contract in tyo3-spine.allium).
+}
+
+surface DerivedLayerReadSurface {
+    facing reader: spine/Participant
+
+    context artifact: DerivedArtifact
+
+    exposes:
+        artifact.entity_id
+        artifact.layer
+        artifact.status
+        artifact.value_ref
+
+    provides:
+        RequestArtifact(reader, artifact)
+
+    contracts:
+        demands VectorIndex
+        demands ArtifactGenerator
+
+    @guarantee StaleAlwaysTagged
+        -- A stale artifact is always served tagged stale, never as fresh. The
+        -- serving policy decides whether the read blocks for a recompute or
+        -- returns the last-good value immediately.
+}
+
+surface LayerRegistrationSurface {
+    facing operator: spine/Participant
+
+    provides:
+        RegisterDerivedLayer(operator, name: LayerName, version: GeneratorVersion, on_code: Boolean, on_layer: DerivedLayer)
+        RegisterAuthoredLayer(operator, name: LayerName, review_on_change: Boolean)
+
+    @guidance
+        -- Layers are registered once. Derived layers declare their dependencies,
+        -- forming the derivation DAG; authored layers declare whether changes to
+        -- a described entity flag its records for review.
+}
+
+surface AuthoredLayerSurface {
+    facing author: spine/Participant
+
+    context record: AuthoredRecord
+
+    exposes:
+        record.entity_id
+        record.layer
+        record.value
+        record.status
+        record.recorded_at
+
+    provides:
+        AuthorRecord(author, layer: AuthoredLayer, entity_id: spine/DurableId, value: String)
+        ConfirmAuthoredRecord(author, record)
+        UpdateAuthoredRecord(author, record, new_value: String)
+
+    contracts:
+        fulfils CrossLayerConsistency
+
+    @guarantee AuthoredKnowledgeDurable
+        -- An authored record survives edits, moves, and renames of its entity
+        -- (it is keyed by durable identity). It is flagged needs_review or
+        -- orphaned on change, and never silently dropped.
+}
+
+surface AuthoredReviewDashboard {
+    facing reviewer: spine/Participant
+
+    exposes:
+        for record in AuthoredRecords where status = needs_review:
+            record.entity_id
+            record.layer
+            record.value
+        for record in AuthoredRecords where status = orphaned:
+            record.entity_id
+            record.layer
+            record.value
+
+    @guidance
+        -- Surfaces every record awaiting confirmation or whose entity vanished,
+        -- so authored knowledge is acted on rather than lost.
+}
+
+------------------------------------------------------------
+-- Deferred Specifications
+------------------------------------------------------------
+
+-- Resolves the current derived artifact for a (layer, entity) pair by the
+-- entity's content hash at the snapshot's revision.
+deferred ArtifactFor                  -- see: detailed/artifact-cache.allium
+
+-- The two-pass, identity-keyed incremental construction of the code layer
+-- (materialise nodes, then references, then inheritance, then overrides), proven
+-- equal to a full rebuild.
+deferred CodeLayer.build              -- see: detailed/code-layer.allium
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should the derived cache have its own garbage-collection policy for artifacts whose content hash no longer matches any live entity, separate from revision retention?"
+
+open question "Can an authored layer opt into NOT flagging review on change (review_on_change = false), and what does silent staleness mean for authored knowledge then?"
+
+open question "Should layers be able to restrict which SymbolKinds they annotate (e.g. embeddings only for functions and methods)?"
