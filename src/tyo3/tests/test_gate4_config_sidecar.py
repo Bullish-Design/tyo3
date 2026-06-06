@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import tyo3.exceptions as exc
+from tyo3 import _native_impl
 from tyo3 import TyO3Session
 from tyo3.exceptions import (
     ConfigError,
@@ -166,6 +168,51 @@ schema_version = 999
     )
 
     with pytest.raises(FormatVersionError):
+        TyO3Session(tmp_path)
+
+
+def test_public_format_version_error_reexports_native_class() -> None:
+    assert exc.FormatVersionError is _native_impl.FormatVersionError
+
+
+def test_identity_newer_format_version_uses_same_format_error(tmp_path: Path) -> None:
+    _project(tmp_path)
+    sidecar = tmp_path / ".tyo3"
+    sidecar.mkdir()
+    (sidecar / "identity.db").write_text('{"format_version": 2, "anchors": []}')
+
+    with pytest.raises(FormatVersionError):
+        TyO3Session(tmp_path)
+
+
+def test_project_closed_error_is_caught_by_tyo3_base(tmp_path: Path) -> None:
+    _project(tmp_path)
+    session = TyO3Session(tmp_path)
+    session.close()
+
+    with pytest.raises(exc.TyO3Error):
+        session.files()
+
+
+def test_config_validation_failure_mentions_key(tmp_path: Path) -> None:
+    _project(tmp_path)
+    _write_config(
+        tmp_path,
+        """
+schema_version = 1
+[hashing.profiles.structure]
+[layers.bad]
+origin = "derived"
+generator = "missing"
+generator_version = "v1"
+store = "s"
+[stores.s]
+backend = "fs"
+path = "cache/s"
+""",
+    )
+
+    with pytest.raises(ConfigError, match="layers.bad.generator"):
         TyO3Session(tmp_path)
 
 

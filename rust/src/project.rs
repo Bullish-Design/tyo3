@@ -23,7 +23,7 @@ use crate::content::{ContentStore, Document, Generation, Revision};
 use crate::config::{self, RawConfig, ValidatedConfig};
 use crate::entity::{extract_entities, extract_entities_for};
 use crate::hash::HashPolicy;
-use crate::identity::{reconcile, reconcile_scoped, DurableId, IdentityRegistry};
+use crate::identity::{reconcile, reconcile_scoped, DurableId, FormatError, IdentityRegistry};
 use crate::overlay::OverlaySystem;
 use crate::sidecar::Sidecar;
 
@@ -1464,10 +1464,18 @@ impl PyTyProject {
             })?;
         }
         let registry = match fs::read(sidecar.identity_db_path()) {
-            Ok(bytes) => IdentityRegistry::from_bytes(&bytes).unwrap_or_else(|e| {
-                log::warn!("Failed to load identity registry: {} — starting fresh.", e);
-                IdentityRegistry::default()
-            }),
+            Ok(bytes) => match IdentityRegistry::from_bytes(&bytes) {
+                Ok(registry) => registry,
+                Err(FormatError::UnknownVersion(version)) => {
+                    return Err(FormatVersionError::new_err(format!(
+                        "unknown identity.db format_version: {version}"
+                    )));
+                }
+                Err(e) => {
+                    log::warn!("Failed to load identity registry: {} — starting fresh.", e);
+                    IdentityRegistry::default()
+                }
+            },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => IdentityRegistry::default(),
             Err(e) => {
                 log::warn!("Failed to read identity registry: {} — starting fresh.", e);

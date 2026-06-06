@@ -5,12 +5,13 @@ use pyo3::create_exception;
 // These become real Python exception classes importable from tyo3._native_impl.
 // They permit Python-side error handling via `except _NativeClosedError` instead
 // of fragile string-matching on exception messages.
-create_exception!(tyo3._native_impl, ProjectClosedError, pyo3::exceptions::PyRuntimeError);
-create_exception!(tyo3._native_impl, PathResolutionError, pyo3::exceptions::PyRuntimeError);
-create_exception!(tyo3._native_impl, PositionError, pyo3::exceptions::PyRuntimeError);
-create_exception!(tyo3._native_impl, RevisionEvictedError, pyo3::exceptions::PyValueError);
-create_exception!(tyo3._native_impl, ConfigError, pyo3::exceptions::PyValueError);
-create_exception!(tyo3._native_impl, FormatVersionError, pyo3::exceptions::PyValueError);
+create_exception!(tyo3._native_impl, TyO3Error, pyo3::exceptions::PyException);
+create_exception!(tyo3._native_impl, ProjectClosedError, TyO3Error);
+create_exception!(tyo3._native_impl, PathResolutionError, TyO3Error);
+create_exception!(tyo3._native_impl, PositionError, TyO3Error);
+create_exception!(tyo3._native_impl, RevisionEvictedError, TyO3Error);
+create_exception!(tyo3._native_impl, ConfigError, TyO3Error);
+create_exception!(tyo3._native_impl, FormatVersionError, TyO3Error);
 
 mod hash;
 mod config;
@@ -35,6 +36,7 @@ fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<project::PySnapshot>()?;
 
     // Exception types
+    m.add("TyO3Error", m.py().get_type::<TyO3Error>())?;
     m.add("ProjectClosedError", m.py().get_type::<ProjectClosedError>())?;
     m.add("PathResolutionError", m.py().get_type::<PathResolutionError>())?;
     m.add("PositionError", m.py().get_type::<PositionError>())?;
