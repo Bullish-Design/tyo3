@@ -231,17 +231,19 @@ class TestResolveExternal:
         monkeypatch.setattr("tyo3.graph.dependency.CACHE_DIR", tmp_path / "tyo3_deps")
 
         g = rx.PyDiGraph()
+        # The cached node carries richer (but still slim, §6.2.2) data than the
+        # bare stub — here a real content_hash and a resolved file. resolve_external
+        # must return this cached node, not the stub.
         rich_node = SymbolNode(
             durable_id="stdlib::pathlib.Path",
             name="Path",
             qualified_name="pathlib.Path",
             kind=SymbolKind.CLASS,
-            file="<external>",
+            file="stdlib/pathlib.pyi",
             range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
             external=True,
             package="stdlib",
-            documentation="Represents a filesystem path.",
-            signature="class Path(*args, **kwargs)",
+            content_hash="cafebabe",
         )
         idx = g.add_node(rich_node)
         id_to_index = {"stdlib::pathlib.Path": idx}
@@ -259,8 +261,9 @@ class TestResolveExternal:
 
         resolved = graph.resolve_external("stdlib::pathlib.Path")
         assert resolved is not None
-        assert resolved.documentation == "Represents a filesystem path."
-        assert resolved.signature == "class Path(*args, **kwargs)"
+        # Came from the cache (richer fields), not the bare stub.
+        assert resolved.content_hash == "cafebabe"
+        assert resolved.file == "stdlib/pathlib.pyi"
 
 
 class TestInferPackage:

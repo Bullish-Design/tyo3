@@ -608,7 +608,31 @@ class CodeGraph:
             # Ensure the target node exists — create a stub if external
             if target_did is None:
                 if target_file in project_files:
-                    # Project-local but not found — identity mismatch, skip
+                    # Same-file local variables and parameters are valid
+                    # occurrence targets but are not graph nodes. Cross-file
+                    # misses, however, indicate path or identity drift.
+                    if target_file != file_str:
+                        msg = (
+                            "project-local occurrence target did not map to a graph node: "
+                            f"{file_str} -> {target_file}::{target_qn or target_name}"
+                        )
+                        logger.warning(msg)
+                        if report is not None:
+                            report.failures.append(
+                                GraphBuildFailure(
+                                    file=file_str,
+                                    phase="references",
+                                    error_type="ProjectLocalTargetMismatch",
+                                    message=msg,
+                                )
+                            )
+                    else:
+                        logger.debug(
+                            "Skipping non-graph local occurrence target %s in %s",
+                            target_qn or target_name,
+                            target_file,
+                        )
+                    # Project-local but not found — identity mismatch, skip.
                     continue
                 # External: create a stub node
                 target_did = self._ensure_target_node_simple(
@@ -631,6 +655,15 @@ class CodeGraph:
 
             role = occ.role  # Already a ReferenceRole
 
+            # An import binding (`from models import User`) is a module-level
+            # dependency, not a reference from the enclosing symbol to the
+            # imported entity. Emit only the IMPORTS edge — never a REFERENCES
+            # edge that would attach the imported symbol to the module node.
+            if role == ReferenceRole.IMPORT:
+                if target_file and target_file != file_str:
+                    self._add_import_edge(file_str, target_file, occ.range, project_files)
+                continue
+
             edge = EdgeData(
                 kind=EdgeKind.REFERENCES,
                 file=file_str,
@@ -639,11 +672,8 @@ class CodeGraph:
             )
             self._add_edge(enclosing_id, target_did, edge, file_str)
 
-            # Add module-level IMPORTS edge for any cross-file reference.
-            # The Rust file_occurrences API reports import role occurrences
-            # but does not yet resolve their targets (target_file is None).
-            # As a pragmatic bridge, every resolved cross-file reference
-            # implies a module-level import dependency.
+            # A resolved cross-file reference implies a module-level import
+            # dependency; record it so the dependency graph is complete.
             if target_file and target_file != file_str:
                 self._add_import_edge(file_str, target_file, occ.range, project_files)
 

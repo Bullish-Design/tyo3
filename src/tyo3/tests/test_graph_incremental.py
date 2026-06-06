@@ -110,10 +110,14 @@ def test_apply_delta_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> 
         g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
-        # explicit: app.py still imports models.py after the change
+        # explicit: app.py still imports models.py after the change.
+        # Module nodes are keyed `<module><file>` (see make_module_durable_id);
+        # strip that prefix to recover the file for the edge endpoints.
+        def _file(did: str) -> str:
+            return did.removeprefix("<module>").split("::")[0]
+
         assert ("app.py", "models.py") in {
-            (a.split("::")[0], b.split("::")[0])
-            for a, b in edges_of_kind(g, EdgeKind.IMPORTS)
+            (_file(a), _file(b)) for a, b in edges_of_kind(g, EdgeKind.IMPORTS)
         }
 
 

@@ -283,12 +283,13 @@ class TestImportCyclesIntegration:
         graph = get_graph("circular_imports")
         cycles = graph.import_cycles()
         assert cycles, "Expected at least one import cycle in circular_imports fixture"
-        # Verify the cycle contains both modules
+        # Verify the cycle contains both modules. Module nodes are keyed
+        # `<module><file>` (see make_module_durable_id), so match on the file.
         all_sids_in_cycles = {sid for cycle in cycles for sid in cycle}
-        assert any(sid.endswith("module_a.py::<module>") for sid in all_sids_in_cycles), (
+        assert any(sid.endswith("module_a.py") for sid in all_sids_in_cycles), (
             f"Cycle(s) missing module_a: {cycles}"
         )
-        assert any(sid.endswith("module_b.py::<module>") for sid in all_sids_in_cycles), (
+        assert any(sid.endswith("module_b.py") for sid in all_sids_in_cycles), (
             f"Cycle(s) missing module_b: {cycles}"
         )
 
