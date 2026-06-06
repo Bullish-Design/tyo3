@@ -1,15 +1,31 @@
-# TyO3 — `.tyo3/config.toml` Schema (Proposal)
+# TyO3 — `.tyo3/config.toml` Schema
 
-> **Status: proposal for review.** Not yet normative. This drafts the schema for
+> **Status: normative as of Gate 4.** This defines the schema for
 > the sidecar configuration file referenced throughout `REFINED_ARCHITECTURE.md`
 > (§6) and `REFINED_SPEC.md` (§11.2). It defines the spine settings, hashing
 > profiles, layer definitions, generators, artifact stores, coordination, and the
-> sidecar policy. Open questions are collected at the end.
+> sidecar policy.
 
 `config.toml` lives at `.tyo3/config.toml`, is committed to version control, and is
 the declarative description of the layers a project maintains and how they are
 derived, hashed, stored, and served. It changes program behaviour only for
 participants running TyO3 (SPEC §11.3.6).
+
+Config is loaded from `.tyo3/config.toml`, then optionally overlaid by
+`.tyo3/config.local.toml` when present. The local file is not committed and
+shallow-merges over the committed config at table granularity: local scalar keys
+replace committed scalar keys, and local sub-tables replace the same committed
+sub-table. Local values win; absent local keys leave committed values intact.
+
+String values may reference environment variables with `${VAR}` syntax. References
+are expanded at load time from the process environment plus optional local values in
+`.tyo3/secrets.toml`; an undefined reference is a load error. Committed config holds
+no secrets. `.tyo3/config.local.toml` and `.tyo3/secrets.toml` are local developer
+files and should be gitignored.
+
+Format version policy: every sidecar format carries an explicit version and readers
+reject newer versions with `FormatVersionError`. For this schema, the version field
+is `schema_version`.
 
 ---
 
@@ -117,6 +133,7 @@ concurrency = 2
 backend = "lancedb"                # "lancedb" | "qdrant" | "sqlite-vec" | "fs"
 path    = "cache/embeddings"       # relative to .tyo3/
 metric  = "cosine"                 # "cosine" | "l2" | "dot"
+gc      = "never"                  # "orphans" | "never"; actual orphan GC deferred
 
 [stores.kv_docstrings]
 backend = "fs"
@@ -188,7 +205,7 @@ Defines what a "meaningful" change is for entities keyed under this profile
 | `store` | derived | string | — (required) | Names a `[stores.*]`. |
 | `serving` | derived | `"stale"` \| `"block"` | `"stale"` | On staleness, serve last-good tagged `stale`, or block until recompute (SPEC §8.2.5). |
 | `recompute` | derived | `"lazy"` \| `"eager"` | `"lazy"` | Recompute on first read, or eagerly on delta. |
-| `entity_kinds` | derived | string[] | all | Restrict which symbol kinds this layer annotates. |
+| `entity_kinds` | derived | string[] | all | Restrict which symbol kinds this layer annotates. Values must be one of the Gate 2 `SymbolKind` variants: `module`, `class`, `function`, `method`, `constructor`, `variable`, `constant`, `field`, `parameter`, `property`, `type_parameter`, `import`. |
 | `history` | authored | bool | true | Keep prior versions of each authored record. |
 | `review_on_change` | authored | bool | true | Mark `needs-review` when the described entity changes (SPEC §5.5.3). |
 
@@ -205,9 +222,10 @@ Defines what a "meaningful" change is for entities keyed under this profile
 | `concurrency` | int | Max concurrent generator calls. |
 | `timeout_ms` | int | Per-call timeout; a timeout is a recompute failure (SPEC §9.2.6 — prior artifact retained). |
 
-> Credentials are **not** stored here. Generators read secrets from the environment
-> or a host-provided callback. `config.toml` is committed; it must contain no
-> secrets (see Open Questions).
+> Credentials are **not** stored here. Generators read secrets from environment
+> variables named with `${VAR}` references, optionally supplied for local development
+> by `.tyo3/secrets.toml`. `config.toml` is committed; it must contain no secrets.
+> Inline credentials such as API keys are rejected by the load-time secrets lint.
 
 ### 2.7 `[stores.<name>]`
 | Key | Type | Notes |
@@ -216,6 +234,7 @@ Defines what a "meaningful" change is for entities keyed under this profile
 | `path` | string | Local backends; relative to `.tyo3/`. |
 | `url` | string | Remote backends (e.g. Qdrant). |
 | `metric` | `"cosine"` \| `"l2"` \| `"dot"` | Vector backends. |
+| `gc` | `"orphans"` \| `"never"` | Default `"never"`. Gate 4 parses and validates the policy; the actual orphan-eviction pass is deferred to Gate 5/9. |
 
 ### 2.8 `[coordination.bus]`
 | Key | Type | Default | Notes |
@@ -253,6 +272,7 @@ session opens:
 7. A vector `generator.dim` (if set) matches its bound store's expectation.
 8. No secrets appear in any value (best-effort lint; see Open Questions).
 9. Layer names are unique and do not collide with the reserved name `code`.
+10. Every `entity_kinds` entry is one of the Gate 2 `SymbolKind` variants.
 
 ---
 
@@ -271,22 +291,25 @@ defaults.
 
 ---
 
-## 5. Open questions (for review)
+## 5. Gate 4 decisions
 
-1. **Secrets for generators.** Confirmed they don't belong in committed config.
-   Proposal: generators resolve credentials from environment variables named in a
-   non-committed `.tyo3/secrets.toml` (gitignored) or via a host callback. Which?
-2. **Per-layer `retain_cap` / store retention.** Should derived stores have their
-   own GC policy (e.g. evict artifacts whose hash no entity references), separate
-   from the spine's revision retention? Likely yes — propose a `[stores.<name>]
-   gc = "orphans" | "never"` knob.
-3. **`generator_version` ergonomics.** Should a model/prompt change auto-derive the
-   version (hash of generator config) so users can't forget to bump it, instead of a
-   manual string? Auto is safer but less legible in diffs.
-4. **Profile inheritance.** Do we want `extends = "structure"` on profiles to avoid
-   repetition, or keep profiles flat and explicit?
-5. **Environment overlays.** Should a non-committed `config.local.toml` override
-   committed config (e.g. point `stores.vectors` at a local path) for per-developer
-   setup? Common need; adds merge complexity.
-6. **Entity kinds vocabulary.** `entity_kinds` values should be pinned to a defined
-   enum (function/method/class/module/variable/...) — needs a canonical list.
+1. **Secrets.** Config holds no secrets. String values may reference environment
+   variables with `${VAR}` syntax. An optional, gitignored `.tyo3/secrets.toml` may
+   supply local development values. The load-time secrets lint rejects inline
+   credentials, including long high-entropy strings, `sk-...` keys, and `AKIA...`
+   access keys.
+2. **Per-store GC.** `[stores.<name>] gc = "orphans" | "never"` is part of the
+   schema and defaults to `"never"`. Gate 4 parses and validates the knob; actual
+   orphan eviction is deferred to Gate 5/9.
+3. **`generator_version` ergonomics.** `generator_version` remains a manual,
+   required string for derived layers so invalidation is legible in diffs. Automatic
+   derivation is out of scope.
+4. **Profile inheritance.** Hashing profiles are flat and explicit. There is no
+   `extends` key.
+5. **Environment overlays.** `.tyo3/config.local.toml` is optional, non-committed,
+   and shallow-merges over `.tyo3/config.toml` at table granularity. Local values
+   win; committed values are otherwise preserved.
+6. **`entity_kinds` vocabulary.** The canonical vocabulary is the Gate 2
+   `SymbolKind` enum: `module`, `class`, `function`, `method`, `constructor`,
+   `variable`, `constant`, `field`, `parameter`, `property`, `type_parameter`,
+   `import`. Validation rejects any other value.
