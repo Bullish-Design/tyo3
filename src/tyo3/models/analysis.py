@@ -79,6 +79,57 @@ class DiagnosticSeverity(StrEnum):
 # ── Entities ─────────────────────────────────────────────────────────────
 
 
+# ── Code-layer delta (Gate 3N wire contract) ─────────────────────────────
+
+
+class SymbolNodeDelta(BaseModel):
+    """One materialised graph node in a CodeDelta. Mirrors the Rust
+    ``SymbolNodeDto`` field-for-field (pythonize round-trips by name)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    durable_id: str
+    kind: str
+    qualified_name: str
+    file: str
+    range: Range
+    content_hash: str | None = None
+
+
+class EdgeDelta(BaseModel):
+    """One typed edge in a CodeDelta. Mirrors the Rust ``EdgeDto``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    src_id: str
+    dst_id: str
+    kind: str  # containment|references|imports|inherits|overrides
+    role: str | None = None
+    # Edge payload location: the occurrence's file/range for reference & import
+    # edges; ``None`` for structural edges (containment/inherits/overrides).
+    # Carried so the replica edge is byte-equal to the read-surface build.
+    file: str | None = None
+    range: Range | None = None
+
+
+class CodeDelta(BaseModel):
+    """The code-layer delta produced inside the native commit (Gate 3N).
+
+    Applied purely by ``CodeGraph.apply_code_delta`` — never derived from the
+    read surface. Mirrors the Rust ``CodeDelta`` so the replica is a 1:1 apply.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    revision: int = 0
+    rescan: bool = False
+    nodes_upserted: list[SymbolNodeDelta] = Field(default_factory=list)
+    nodes_removed: list[str] = Field(default_factory=list)
+    nodes_moved: list[tuple[str, str, Range]] = Field(default_factory=list)
+    edges_added: list[EdgeDelta] = Field(default_factory=list)
+    edges_removed: list[EdgeDelta] = Field(default_factory=list)
+
+
 class SyncResult(BaseModel):
     """Delta produced by a write to the head."""
 
@@ -96,6 +147,7 @@ class SyncResult(BaseModel):
     project_changed: bool = False
     custom_stdlib_changed: bool = False
     rescan: bool = False
+    code_delta: CodeDelta | None = None
 
 
 class Diagnostic(BaseModel):
@@ -117,6 +169,9 @@ __all__ = [
     "FileRange",
     "CheckResult",
     "SyncResult",
+    "SymbolNodeDelta",
+    "EdgeDelta",
+    "CodeDelta",
     "DiagnosticSeverity",
     "Diagnostic",
 ]

@@ -21,7 +21,7 @@ from tyo3.graph.models import (
     SymbolNode,
 )
 from tyo3.models.advanced import SemanticTokenModifier, SemanticTokenType
-from tyo3.models.analysis import Diagnostic, Range, SyncResult
+from tyo3.models.analysis import CodeDelta, Diagnostic, EdgeDelta, Range, SymbolNodeDelta, SyncResult
 from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import Symbol, SymbolKind
 
@@ -1918,6 +1918,187 @@ class CodeGraph:
             report=report,
             native_by_graph=native_by_graph,
         )
+
+    # ── Pure CodeDelta application (Gate 3N) ──────────────────
+
+    def apply_code_delta(self, delta: CodeDelta) -> None:
+        """Apply a native ``CodeDelta`` to the rustworkx replica — purely.
+
+        A pure function of ``(self, delta)``: it reads nothing from the session
+        or snapshot read surface. Order within an apply matches the delta's
+        phased structure — removals, then upserts, then moves, then edge churn —
+        so a node always exists before an edge references it (§6.3.2).
+
+        ``rescan`` clears the replica and applies the delta as a full build.
+        """
+        self._assert_mutable()
+
+        if delta.rescan:
+            self._clear_all()
+
+        # 1. Node removals — rustworkx drops incident edges automatically; a
+        #    bulk removal invalidates stored indices, so rebuild them.
+        if delta.nodes_removed:
+            doomed = [
+                self._id_to_index[i]
+                for i in delta.nodes_removed
+                if i in self._id_to_index
+            ]
+            if doomed:
+                self._graph.remove_nodes_from(doomed)
+                self._rebuild_indexes()
+
+        # 2. Explicit edge removals (edges no longer holding whose nodes survive).
+        for e in delta.edges_removed:
+            self._remove_delta_edge(e)
+
+        # 3. Node upserts — add new, update payload of existing (stable index).
+        for nd in delta.nodes_upserted:
+            self._upsert_delta_node(nd)
+
+        # 4. Moves — location-only payload update; never re-add, never churn edges.
+        for node_id, new_file, new_range in delta.nodes_moved:
+            self._move_delta_node(node_id, new_file, new_range)
+
+        # 5. Edge additions — both endpoints exist by now.
+        for e in delta.edges_added:
+            self._add_delta_edge(e)
+
+        self._semantic_subgraph_cache.clear()
+        self._revision = delta.revision
+
+    def _clear_all(self) -> None:
+        """Reset the graph and every secondary index (rescan / full replace)."""
+        self._graph = rx.PyDiGraph()
+        self._id_to_index.clear()
+        self._file_to_nodes = defaultdict(list)
+        self._file_to_edges = defaultdict(list)
+        self._file_importers = defaultdict(set)
+        self._file_node_ranges.clear()
+        self._name_to_id.clear()
+        self._name_prefix_index.clear()
+        self._semantic_subgraph_cache.clear()
+
+    @staticmethod
+    def _node_from_delta(nd: SymbolNodeDelta) -> SymbolNode:
+        """Reconstruct a ``SymbolNode`` payload from a delta node entry."""
+        kind = SymbolKind(nd.kind)
+        qn = nd.qualified_name
+        if kind == SymbolKind.MODULE:
+            name = PurePosixPath(nd.file).stem if nd.file else qn
+            external, package = False, None
+        elif nd.durable_id.startswith("<external>"):
+            name = qn.rsplit("::", 1)[-1] if qn else nd.durable_id
+            package = qn.split("::", 1)[0] if "::" in qn else None
+            external = True
+        else:
+            name = qn.rsplit("::", 1)[-1] if qn else nd.durable_id
+            external, package = False, None
+        return SymbolNode(
+            durable_id=nd.durable_id,
+            name=name,
+            qualified_name=qn,
+            kind=kind,
+            file=nd.file,
+            range=nd.range,
+            content_hash=nd.content_hash,
+            external=external,
+            package=package,
+        )
+
+    def _upsert_delta_node(self, nd: SymbolNodeDelta) -> None:
+        """Add a new node or replace an existing node's payload in place."""
+        node = self._node_from_delta(nd)
+        idx = self._id_to_index.get(node.durable_id)
+        if idx is None:
+            self._add_node(node)
+            return
+        old: SymbolNode = self._graph[idx]
+        if old.file != node.file:
+            try:
+                self._file_to_nodes[old.file].remove(idx)
+            except ValueError:
+                pass
+            self._file_to_nodes[node.file].append(idx)
+        self._graph[idx] = node
+        if node.qualified_name:
+            self._name_to_id[(node.file, node.qualified_name)] = node.durable_id
+        self._semantic_subgraph_cache.clear()
+
+    def _move_delta_node(self, node_id: str, new_file: str, new_range: Range) -> None:
+        """Update a node's file/range only — no edge churn (§5.5.1 / §6.6)."""
+        idx = self._id_to_index.get(node_id)
+        if idx is None:
+            return
+        old: SymbolNode = self._graph[idx]
+        moved = old.model_copy(update={"file": new_file, "range": new_range})
+        if old.file != new_file:
+            try:
+                self._file_to_nodes[old.file].remove(idx)
+            except ValueError:
+                pass
+            self._file_to_nodes[new_file].append(idx)
+        self._graph[idx] = moved
+
+    def _edge_kind_from_delta(self, kind_str: str, src_id: str) -> EdgeKind:
+        """Map a delta edge kind string to an ``EdgeKind``.
+
+        ``containment`` resolves to DEFINES from a module node and CONTAINS
+        otherwise, matching ``_add_containment_edges_for_file``.
+        """
+        if kind_str == "containment":
+            src = self.symbol(src_id)
+            if src is not None and src.kind == SymbolKind.MODULE:
+                return EdgeKind.DEFINES
+            return EdgeKind.CONTAINS
+        return {
+            "references": EdgeKind.REFERENCES,
+            "imports": EdgeKind.IMPORTS,
+            "inherits": EdgeKind.INHERITS,
+            "overrides": EdgeKind.OVERRIDES,
+        }[kind_str]
+
+    def _add_delta_edge(self, e: EdgeDelta) -> None:
+        """Add one typed edge from a delta entry, updating the reverse-dep index."""
+        kind = self._edge_kind_from_delta(e.kind, e.src_id)
+        src = self.symbol(e.src_id)
+        if src is None or e.dst_id not in self._id_to_index:
+            return
+        role = ReferenceRole(e.role) if e.role else None
+        # Edge payload (file/range) comes from the delta verbatim: reference and
+        # import edges carry the occurrence location; structural edges carry
+        # None. This makes the replica edge byte-equal to the read-surface build.
+        data = EdgeData(kind=kind, file=e.file, range=e.range, role=role)
+        self._add_edge(e.src_id, e.dst_id, data, e.file or src.file)
+        if kind == EdgeKind.IMPORTS:
+            tgt = self._graph[self._id_to_index[e.dst_id]]
+            if (
+                tgt.file != "<external>"
+                and src.file != "<external>"
+                and tgt.file != src.file
+            ):
+                self._file_importers[tgt.file].add(src.file)
+
+    def _remove_delta_edge(self, e: EdgeDelta) -> None:
+        """Remove edges matching (src, dst, kind) between surviving nodes."""
+        si = self._id_to_index.get(e.src_id)
+        ti = self._id_to_index.get(e.dst_id)
+        if si is None or ti is None:
+            return
+        kind = self._edge_kind_from_delta(e.kind, e.src_id)
+        doomed = [
+            ei
+            for ei in self._graph.edge_indices()
+            if self._graph.get_edge_endpoints_by_index(ei) == (si, ti)
+            and self._graph.get_edge_data_by_index(ei).kind == kind
+        ]
+        for ei in doomed:
+            self._graph.remove_edge_from_index(ei)
+        if kind == EdgeKind.IMPORTS:
+            src_file = self._graph[si].file
+            tgt_file = self._graph[ti].file
+            self._file_importers.get(tgt_file, set()).discard(src_file)
+        self._semantic_subgraph_cache.clear()
 
     def apply_delta(
         self,

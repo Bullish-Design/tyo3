@@ -28,6 +28,22 @@ their rationale, not prior states.
    the new pieces — with failure modes and acceptance tests. The contract
    implementation is held to.
 
+## Implementation guides (per-gate, with per-step validations)
+
+Each `GATE_*_GUIDE.md` walks an engineer through one gate, step by step, with a
+validation that must pass before moving on. `CONFIG_SCHEMA.md` is the normative
+config schema; `GATES_1-3_REFACTORING_GUIDE.md` is the remediation pass over the
+first three gates.
+
+- **GATE_1_CONTENT_STORE_GUIDE.md** — authoritative per-revision content store (§1).
+- **GATE_2_IDENTITY_GUIDE.md** — durable ids, content hashing, reconciliation (§5, §7).
+- **GATE_3_CODE_LAYER_GUIDE.md** — DurableId-keyed incremental code layer (§6).
+- **GATE_3N_NATIVE_CODE_DELTA_GUIDE.md** — re-homes the code-layer delta into the
+  native commit so the graph updates in-lock and ordered (§3.3.1/§3.3.3); retires the
+  Python write lock and the snapshot identity-priming workaround. Do before Gate 8.
+- **GATE_4_CONFIG_SIDECAR_GUIDE.md** — `.tyo3/` sidecar, config, store interface (§11).
+- **GATE_5–8** — derived layers, authored layers, read surface, subscription bus.
+
 ## The one-paragraph model
 
 TyO3 is a **spine** — stable identity, revisioned snapshot-isolated content, and an

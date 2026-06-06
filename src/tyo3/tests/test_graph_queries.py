@@ -27,9 +27,14 @@ class TestGraphQueries:
     def test_children(self) -> None:
         graph = get_graph("classes")
         modules = graph.symbols_of_kind(SymbolKind.MODULE)
-        if modules:
-            kids = graph.children(modules[0].durable_id)
-            assert len(kids) > 0
+        assert modules, "expected at least one module node"
+        # `children()` returns the symbols a module contains. Don't assume the
+        # first module in enumeration order has children: the fixture's
+        # __init__.py is a real but empty module (0 children), and module
+        # ordering is not specified (it follows file-discovery order, which is
+        # deterministically sorted under a frozen snapshot). Assert the intent:
+        # some module reports the symbols it contains.
+        assert any(graph.children(m.durable_id) for m in modules)
 
     def test_transitive_dependencies_returns_set(self) -> None:
         graph = get_graph("imports")

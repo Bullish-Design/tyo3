@@ -72,6 +72,21 @@ pub struct Entity {
     pub content_hash: ContentHash,
     pub container: Option<String>,
     pub name: String,
+    /// Defining file (absolute system path, as `File::path(...).as_str()`).
+    /// Carried so the code-layer producer can build a `NodeData`/`SymbolNodeDto`
+    /// without a second pass (Gate 3N Step 1).
+    pub file: String,
+    /// Display/location range (1-based), for the node payload.
+    pub range: crate::dto::RangeDto,
+    /// The name (selection) range (1-based). Used to query type-hierarchy
+    /// supertypes at the class-name position, as the read-surface builder does
+    /// (`symbol.selection_range`), since the full range may start on a decorator.
+    pub selection_range: crate::dto::RangeDto,
+    /// The engine "display" qualified name: dotted, no file prefix, `None` for
+    /// top-level entities (e.g. `User.save`). Mirrors `document_symbols`'
+    /// `qualified_name` (`convert/symbols.rs`) so the code-layer node's
+    /// `qualified_name` is byte-equal to the read-surface graph (§6.3.1).
+    pub qualified_name: Option<String>,
 }
 
 // ── Extraction ──────────────────────────────────────────────────────────
@@ -158,6 +173,7 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
                 &line_index,
                 &file_path,
                 None,
+                None,
                 &policy,
                 &mut entities,
                 &mut visited,
@@ -174,9 +190,10 @@ fn collect_entities_recursive(
     id: ty_ide::SymbolId,
     info: &ty_ide::SymbolInfo,
     source_str: &str,
-    _line_index: &LineIndex,
+    line_index: &LineIndex,
     file_path: &str,
     parent_qualified: Option<&str>,
+    parent_display: Option<&str>,
     policy: &HashPolicy,
     entities: &mut Vec<Entity>,
     visited: &mut HashSet<ty_ide::SymbolId>,
@@ -190,6 +207,10 @@ fn collect_entities_recursive(
         None => format!("{}::{}", file_path, name),
     };
     let container = parent_qualified.map(|s| s.to_string());
+    // Engine "display" qualified name (dotted, no file prefix): `None` at the
+    // top level, `{parent}.{name}` nested — matches `collect_symbols_recursive`.
+    let display_qualified: Option<String> =
+        parent_display.map(|p| format!("{}.{}", p, name));
 
     // Extract the entity's source text from its full_range.
     let entity_source = extract_range(source_str, info.full_range);
@@ -198,13 +219,24 @@ fn collect_entities_recursive(
     let normal_form = normalise_entity_source(&entity_source, policy);
     let content_hash = hash_entity(&normal_form);
 
+    let range = crate::coordinates::range_to_dto_with_index(source_str, line_index, info.full_range);
+    let selection_range =
+        crate::coordinates::range_to_dto_with_index(source_str, line_index, info.name_range);
+
     entities.push(Entity {
         qualified_path: qualified_name.clone(),
         kind,
         content_hash,
         container,
         name: name.to_string(),
+        file: file_path.to_string(),
+        range,
+        selection_range,
+        qualified_name: display_qualified.clone(),
     });
+
+    // The display name children chain off of: own dotted name, else the leaf.
+    let own_display = display_qualified.as_deref().unwrap_or(&name);
 
     // Recurse into children.
     let children: Vec<_> = hierarchical.children(id).collect();
@@ -217,9 +249,10 @@ fn collect_entities_recursive(
             child_id,
             &child_info,
             source_str,
-            _line_index,
+            line_index,
             file_path,
             Some(&qualified_name),
+            Some(own_display),
             policy,
             entities,
             visited,

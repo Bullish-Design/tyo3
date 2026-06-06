@@ -847,6 +847,13 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    fn test_range() -> crate::dto::RangeDto {
+        crate::dto::RangeDto {
+            start: crate::dto::PositionDto { line: 1, column: 1 },
+            end: crate::dto::PositionDto { line: 1, column: 1 },
+        }
+    }
+
     fn entity(path: &str, name: &str, kind: SymbolKind, hash: ContentHash, container: Option<&str>) -> Entity {
         Entity {
             qualified_path: format!("{}::{}", path, name),
@@ -854,6 +861,10 @@ mod tests {
             content_hash: hash,
             container: container.map(|s| s.to_string()),
             name: name.to_string(),
+            file: path.to_string(),
+            range: test_range(),
+            selection_range: test_range(),
+            qualified_name: None,
         }
     }
 
@@ -1058,6 +1069,10 @@ mod tests {
             content_hash: hash(60),
             container: Some("a.py::Outer".into()),
             name: "helper".into(),
+            file: "some/other/a.py".into(),
+            range: test_range(),
+            selection_range: test_range(),
+            qualified_name: Some("Outer.helper".into()),
         };
         let entities = vec![e];
         let recon = reconcile(&mut reg, &entities, Revision(2));

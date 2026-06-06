@@ -21,7 +21,7 @@ use ty_project::{ProjectDatabase, ProjectMetadata};
 
 use crate::content::{ContentStore, Document, Generation, Revision};
 use crate::config::{self, RawConfig, ValidatedConfig};
-use crate::entity::{extract_entities, extract_entities_for};
+use crate::entity::{extract_entities, extract_entities_for, SymbolKind};
 use crate::hash::HashPolicy;
 use crate::identity::{reconcile, reconcile_scoped, DurableId, FormatError, IdentityRegistry};
 use crate::overlay::OverlaySystem;
@@ -100,6 +100,10 @@ struct HeadState {
     config: ValidatedConfig,
     /// Canonical owner for all sidecar paths and durable writes.
     sidecar: Sidecar,
+    /// Authoritative structural code layer (Gate 3N §6.2.2). Rebuilt from
+    /// source, never persisted (REFINED_ARCH §8). Mutated only here, under the
+    /// inner Mutex, by the code-delta producer in `commit_head`.
+    code_layer: crate::code_layer::CodeLayer,
 }
 
 /// Anything that can produce the cheap, GIL-releasable read clone.
@@ -903,6 +907,7 @@ fn build_head_with_config(
         registry,
         hash_policy: config.hash_policy_for("code"),
         config,
+        code_layer: crate::code_layer::CodeLayer::new(),
     }
 }
 
@@ -1200,6 +1205,501 @@ fn run_identity_reconciliation(
     }
 }
 
+/// Resolve a project file `File` + source + line index for an absolute path.
+fn file_source_for(state: &TyProjectState, abs: &str) -> Option<(File, String)> {
+    let project = state.db.project();
+    for f in project.files(&state.db).iter() {
+        if f.path(&state.db).as_str() == abs {
+            let src = source_text(&state.db, *f).as_str().to_string();
+            return Some((*f, src));
+        }
+    }
+    None
+}
+
+/// True if position `a` (1-based line,col) is at or before `b`.
+fn pos_le(a: &dto::PositionDto, b: &dto::PositionDto) -> bool {
+    (a.line, a.column) <= (b.line, b.column)
+}
+
+/// Produce the full-build `CodeDelta` for the current head and install it as the
+/// authoritative `CodeLayer` (Gate 3N Steps 1–4). Runs inside `commit_head`,
+/// under the inner lock, after identity reconciliation — so every entity's
+/// `DurableId` is already reconciled in `head.registry`.
+///
+/// Emitted as a `rescan` delta. The incremental refinement (Step 5) narrows
+/// this to the dirty set; this full producer is the correct baseline and the
+/// cold-start / snapshot path.
+fn produce_full_code_delta(head: &mut HeadState) -> crate::dto::CodeDelta {
+    use crate::code_layer::{kind_str, Edge, NodeData};
+    use crate::dto::{PositionDto, RangeDto};
+    use std::collections::VecDeque;
+
+    let state = TyProjectState {
+        db: head.db.clone(),
+        root: head.root.clone(),
+        registry: None,
+        hash_policy: head.hash_policy,
+    };
+    let root = head.root.clone();
+    let revision = head.store.revision().0;
+
+    let rel = |abs: &str| -> String {
+        match SystemPath::new(abs).strip_prefix(&root) {
+            Ok(p) => p.as_str().to_string(),
+            Err(_) => abs.to_string(),
+        }
+    };
+    let did_of = |head: &HeadState, qpath: &str| -> Option<String> {
+        head.registry.by_path(qpath).map(|d| d.0.clone())
+    };
+
+    let module_range = RangeDto {
+        start: PositionDto { line: 1, column: 1 },
+        end: PositionDto { line: 1, column: 1 },
+    };
+
+    // The project's Python source files (abs paths), sorted for determinism.
+    // Every such file gets a module node — even a symbol-less one — matching the
+    // read-surface builder (`_materialize_file_nodes` always creates one).
+    let mut source_files_abs: Vec<String> = {
+        let project = state.db.project();
+        project
+            .files(&state.db)
+            .iter()
+            .filter(|f: &&File| {
+                f.path(&state.db)
+                    .extension()
+                    .and_then(ruff_python_ast::PySourceType::try_from_extension)
+                    .is_some()
+            })
+            .map(|f| f.path(&state.db).as_str().to_string())
+            .collect()
+    };
+    source_files_abs.sort();
+
+    // Project-relative file set: a target is "project-local" iff its normalised
+    // path is in here (mirrors `_normalize_result_path`). These are exactly the
+    // files that own a module node.
+    let project_files_rel: HashSet<String> = source_files_abs.iter().map(|a| rel(a)).collect();
+    let normalize = |abs: &str| -> String {
+        let r = rel(abs);
+        if project_files_rel.contains(&r) {
+            r
+        } else {
+            abs.to_string()
+        }
+    };
+
+    let entities = extract_entities(&state);
+
+    let mut nodes: Vec<NodeData> = Vec::new();
+    let mut edges: Vec<Edge> = Vec::new();
+    let mut emitted: HashSet<String> = HashSet::new();
+
+    // ── Module nodes (one per project source file). ──────────────────────
+    for abs in &source_files_abs {
+        let file_rel = rel(abs);
+        let module_id = format!("<module>{}", file_rel);
+        if emitted.insert(module_id.clone()) {
+            nodes.push(NodeData {
+                durable_id: module_id,
+                kind: "module".to_string(),
+                qualified_name: "<module>".to_string(),
+                file: file_rel,
+                range: module_range.clone(),
+                content_hash: None,
+            });
+        }
+    }
+
+    // Resolution indices.
+    //   (file_rel, name) -> durable_id; "" marks a short-name collision.
+    let mut name_index: HashMap<(String, String), String> = HashMap::new();
+    //   (file_rel, short_name) -> first durable_id (document order): the
+    //   collision fallback the read-surface scan picks.
+    let mut short_first: HashMap<(String, String), String> = HashMap::new();
+    //   file_rel -> [(durable_id, full_range, kind)] for enclosing-entity lookup
+    let mut file_entities: HashMap<String, Vec<(String, RangeDto, SymbolKind)>> = HashMap::new();
+    //   (class_did, file_rel, short_name, qualified_path-abs)
+    let mut classes: Vec<(String, String, String, String)> = Vec::new();
+    //   class_qualified_path(abs) -> [(method_did, method_name)] (method/ctor only)
+    let mut methods_by_class: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    //   class durable_id -> (abs file, name line, name col) for the supertype query
+    let mut class_pos: HashMap<String, (String, u32, u32)> = HashMap::new();
+
+    // ── Entity nodes + containment + bookkeeping. ────────────────────────
+    for e in &entities {
+        let did = match did_of(head, &e.qualified_path) {
+            Some(d) => d,
+            None => continue,
+        };
+        let file_rel = rel(&e.file);
+        let module_id = format!("<module>{}", file_rel);
+        // Engine display qualified name (dotted, no file prefix); top-level falls
+        // back to the bare name — matches `symbol.qualified_name or name`.
+        let display_qn = e.qualified_name.clone().unwrap_or_else(|| e.name.clone());
+        if emitted.insert(did.clone()) {
+            nodes.push(NodeData {
+                durable_id: did.clone(),
+                kind: kind_str(e.kind).to_string(),
+                qualified_name: display_qn.clone(),
+                file: file_rel.clone(),
+                range: e.range.clone(),
+                content_hash: Some(e.content_hash.0.to_string()),
+            });
+        }
+
+        // Name index: qualified name is unique; short name collision-marked.
+        name_index.insert((file_rel.clone(), display_qn.clone()), did.clone());
+        let short_key = (file_rel.clone(), e.name.clone());
+        name_index
+            .entry(short_key.clone())
+            .and_modify(|v| *v = String::new())
+            .or_insert_with(|| did.clone());
+        short_first.entry(short_key).or_insert_with(|| did.clone());
+
+        file_entities
+            .entry(file_rel.clone())
+            .or_default()
+            .push((did.clone(), e.range.clone(), e.kind));
+
+        // Containment edge (structural — no file/range/role).
+        let parent_id = match &e.container {
+            Some(c) => did_of(head, c).unwrap_or_else(|| module_id.clone()),
+            None => module_id.clone(),
+        };
+        edges.push(Edge {
+            src: parent_id,
+            dst: did.clone(),
+            kind: "containment".to_string(),
+            role: None,
+            file: None,
+            range: None,
+        });
+
+        // Class / method bookkeeping for inheritance.
+        if e.kind == SymbolKind::Class {
+            classes.push((did.clone(), file_rel.clone(), e.name.clone(), e.qualified_path.clone()));
+            class_pos.insert(
+                did.clone(),
+                (e.file.clone(), e.selection_range.start.line, e.selection_range.start.column),
+            );
+        }
+        // OVERRIDES considers only methods/constructors (read-surface _METHOD_KINDS).
+        if matches!(e.kind, SymbolKind::Method | SymbolKind::Constructor) {
+            if let Some(container) = &e.container {
+                methods_by_class
+                    .entry(container.clone())
+                    .or_default()
+                    .push((did.clone(), e.name.clone()));
+            }
+        }
+    }
+
+    // Short-name resolver: prefers the unique mapping, falls back to the first
+    // entity in document order on a collision (matches `_find_symbol_in_file`).
+    let resolve_name = |file_rel: &str, name: &str| -> Option<String> {
+        match name_index.get(&(file_rel.to_string(), name.to_string())) {
+            Some(d) if !d.is_empty() => Some(d.clone()),
+            Some(_) => short_first.get(&(file_rel.to_string(), name.to_string())).cloned(),
+            None => None,
+        }
+    };
+
+    // ── References / imports (§6.2.3) via the native occurrence engine. ──
+    for abs in &source_files_abs {
+        let (file, source) = match file_source_for(&state, abs) {
+            Some(fs) => fs,
+            None => continue,
+        };
+        let line_index = LineIndex::from_source_text(&source);
+        let occs = convert::occurrences::convert_file_occurrences(&state.db, file, &source, &line_index);
+        let file_rel = rel(abs);
+        let module_id = format!("<module>{}", file_rel);
+        let local = file_entities.get(&file_rel).cloned().unwrap_or_default();
+        for occ in &occs {
+            match occ.role {
+                crate::dto::ReferenceRoleDto::Definition => continue,
+                crate::dto::ReferenceRoleDto::Import => {
+                    // A `from x import y` binding is a module-level dependency.
+                    // `import x` (no resolved target) is left to a later pass.
+                    let tfile = match &occ.target_file {
+                        Some(t) => t,
+                        None => continue,
+                    };
+                    let tnorm = normalize(tfile);
+                    if tnorm == file_rel {
+                        continue;
+                    }
+                    add_import_edge(
+                        &mut nodes, &mut emitted, &mut edges,
+                        &file_rel, &tnorm, &project_files_rel, &occ.range, &module_range,
+                    );
+                }
+                role_dto => {
+                    let role = match role_dto {
+                        crate::dto::ReferenceRoleDto::Write => "write",
+                        crate::dto::ReferenceRoleDto::Other => "other",
+                        _ => "read",
+                    };
+                    let tfile = match &occ.target_file {
+                        Some(t) => t,
+                        None => continue,
+                    };
+                    let tname = match &occ.target_name {
+                        Some(n) => n,
+                        None => continue,
+                    };
+                    let tnorm = normalize(tfile);
+                    // Resolve the target by short name only (the occurrence
+                    // engine never carries target_qualified_name).
+                    let dst_id = match resolve_name(&tnorm, tname) {
+                        Some(d) => d,
+                        None => {
+                            if project_files_rel.contains(&tnorm) {
+                                // Project-local miss (e.g. a local variable that
+                                // is not a graph node) — skip, never stub.
+                                continue;
+                            }
+                            // External target → stub keyed by inferred package.
+                            let pkg = infer_package(&tnorm);
+                            let ext_did = match &pkg {
+                                Some(p) => format!("{}::{}", p, tname),
+                                None => format!("{}::{}", tnorm, tname),
+                            };
+                            if emitted.insert(ext_did.clone()) {
+                                nodes.push(NodeData {
+                                    durable_id: ext_did.clone(),
+                                    kind: "unknown".to_string(),
+                                    qualified_name: tname.clone(),
+                                    file: "<external>".to_string(),
+                                    range: module_range.clone(),
+                                    content_hash: None,
+                                });
+                            }
+                            ext_did
+                        }
+                    };
+                    let src_id = enclosing_id(&local, &occ.range).unwrap_or_else(|| module_id.clone());
+                    if dst_id == src_id {
+                        continue;
+                    }
+                    edges.push(Edge {
+                        src: src_id,
+                        dst: dst_id,
+                        kind: "references".to_string(),
+                        role: Some(role.to_string()),
+                        file: Some(file_rel.clone()),
+                        range: Some(occ.range.clone()),
+                    });
+                    // A resolved cross-file reference implies a module import dep.
+                    if tnorm != file_rel {
+                        add_import_edge(
+                            &mut nodes, &mut emitted, &mut edges,
+                            &file_rel, &tnorm, &project_files_rel, &occ.range, &module_range,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Two-pass inheritance (§6.4). ─────────────────────────────────────
+    // Pass I — INHERITS for every class, before any OVERRIDES.
+    let mut inherits_adj: HashMap<String, Vec<String>> = HashMap::new();
+    for (class_did, _file_rel, _name, _qpath) in &classes {
+        let (abs, line, column) = match class_pos.get(class_did) {
+            Some(p) => p.clone(),
+            None => continue,
+        };
+        let supers = match compute_supertypes(&state, &abs, line, column) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        for base in &supers {
+            let super_norm = normalize(&base.path);
+            let base_did = match resolve_name(&super_norm, &base.name) {
+                Some(d) => d,
+                None => {
+                    // External / unresolved base → stub keyed by package, as
+                    // `_inherits_pass_I` does (`{package}::{name}`, package else
+                    // "unknown" when the file has no project node).
+                    let pkg = match infer_package(&super_norm) {
+                        Some(p) => Some(p),
+                        None if !project_files_rel.contains(&super_norm) => {
+                            Some("unknown".to_string())
+                        }
+                        None => None,
+                    };
+                    let pkg = match pkg {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let stub = format!("{}::{}", pkg, base.name);
+                    if emitted.insert(stub.clone()) {
+                        nodes.push(NodeData {
+                            durable_id: stub.clone(),
+                            kind: "class_".to_string(),
+                            qualified_name: format!("{}.{}", pkg, base.name),
+                            file: "<external>".to_string(),
+                            range: module_range.clone(),
+                            content_hash: None,
+                        });
+                    }
+                    stub
+                }
+            };
+            inherits_adj.entry(class_did.clone()).or_default().push(base_did.clone());
+            edges.push(Edge {
+                src: class_did.clone(),
+                dst: base_did,
+                kind: "inherits".to_string(),
+                role: None,
+                file: None,
+                range: None,
+            });
+        }
+    }
+    // Pass II — OVERRIDES, only after Pass I is complete for the whole set.
+    // BFS the now-complete INHERITS chain (matches `_overrides_pass_II`).
+    for (class_did, _file_rel, _name, qpath) in &classes {
+        let mut ancestor_methods: HashMap<String, String> = HashMap::new();
+        let mut visited: HashSet<String> = HashSet::new();
+        visited.insert(class_did.clone());
+        let mut queue: VecDeque<String> = VecDeque::new();
+        queue.push_back(class_did.clone());
+        while let Some(current) = queue.pop_front() {
+            if let Some(parents) = inherits_adj.get(&current) {
+                for parent in parents {
+                    if visited.insert(parent.clone()) {
+                        queue.push_back(parent.clone());
+                    }
+                    if let Some(anc_qpath) = classes.iter().find(|c| &c.0 == parent).map(|c| c.3.clone()) {
+                        if let Some(ms) = methods_by_class.get(&anc_qpath) {
+                            for (mid, mname) in ms {
+                                ancestor_methods.entry(mname.clone()).or_insert_with(|| mid.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(ms) = methods_by_class.get(qpath) {
+            for (child_mid, child_name) in ms {
+                if let Some(parent_mid) = ancestor_methods.get(child_name) {
+                    edges.push(Edge {
+                        src: child_mid.clone(),
+                        dst: parent_mid.clone(),
+                        kind: "overrides".to_string(),
+                        role: None,
+                        file: None,
+                        range: None,
+                    });
+                }
+            }
+        }
+    }
+
+    head.code_layer.full_build(nodes, edges, revision)
+}
+
+/// Innermost entity whose full_range contains `target` (the occurrence range).
+/// Tie-breaking matches the read-surface `_range_size` order: smallest
+/// `(line_span, end_column)`, then first in document order.
+fn enclosing_id(
+    local: &[(String, crate::dto::RangeDto, crate::entity::SymbolKind)],
+    target: &crate::dto::RangeDto,
+) -> Option<String> {
+    let mut best: Option<(&String, (u32, u32))> = None;
+    for (did, range, kind) in local {
+        if *kind == crate::entity::SymbolKind::Module {
+            continue;
+        }
+        if pos_le(&range.start, &target.start) && pos_le(&target.end, &range.end) {
+            let key = (range.end.line - range.start.line, range.end.column);
+            if best.map_or(true, |(_, b)| key < b) {
+                best = Some((did, key));
+            }
+        }
+    }
+    best.map(|(d, _)| d.clone())
+}
+
+/// Add a module→module IMPORTS edge for a cross-file dependency, creating a
+/// `{package}::<module>` stub for external targets. Mirrors `_add_import_edge`.
+fn add_import_edge(
+    nodes: &mut Vec<crate::code_layer::NodeData>,
+    emitted: &mut HashSet<String>,
+    edges: &mut Vec<crate::code_layer::Edge>,
+    source_rel: &str,
+    target_norm: &str,
+    project_files_rel: &HashSet<String>,
+    range: &crate::dto::RangeDto,
+    module_range: &crate::dto::RangeDto,
+) {
+    use crate::code_layer::{Edge, NodeData};
+    let source_module = format!("<module>{}", source_rel);
+    let target_module = if project_files_rel.contains(target_norm) {
+        // Project file: its module node already exists.
+        format!("<module>{}", target_norm)
+    } else {
+        // External module dependency → `{package}::<module>` stub.
+        let pkg = infer_package(target_norm).unwrap_or_else(|| "unknown".to_string());
+        let stub = format!("{}::<module>", pkg);
+        if emitted.insert(stub.clone()) {
+            nodes.push(NodeData {
+                durable_id: stub.clone(),
+                kind: "module".to_string(),
+                qualified_name: "<module>".to_string(),
+                file: "<external>".to_string(),
+                range: module_range.clone(),
+                content_hash: None,
+            });
+        }
+        stub
+    };
+    edges.push(Edge {
+        src: source_module,
+        dst: target_module,
+        kind: "imports".to_string(),
+        role: None,
+        file: Some(source_rel.to_string()),
+        range: Some(range.clone()),
+    });
+}
+
+/// Infer the package name for an external file path. Mirrors the read-surface
+/// `_infer_package` heuristic exactly so external-stub keys match.
+fn infer_package(file_path: &str) -> Option<String> {
+    if file_path.contains("site-packages/") {
+        if let Some(after) = file_path.split("site-packages/").nth(1) {
+            if let Some(first) = after.split('/').next() {
+                if !first.is_empty() {
+                    return Some(first.to_string());
+                }
+            }
+        }
+    }
+    if file_path.contains("/lib/python") || file_path.contains("typeshed") {
+        return Some("stdlib".to_string());
+    }
+    if file_path.contains("/.venv/") || file_path.contains("/venv/") {
+        let sep = if file_path.contains("/.venv/") { "/.venv/" } else { "/venv/" };
+        if let Some(after) = file_path.split(sep).nth(1) {
+            let parts: Vec<&str> = after.split('/').collect();
+            if parts.len() > 2 && parts[0] == "lib" {
+                for (i, part) in parts.iter().enumerate() {
+                    if *part == "site-packages" && i + 1 < parts.len() {
+                        return Some(parts[i + 1].to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Publish the captured store generation, apply `events` to the db, run
 /// reconciliation against the identity registry, and build the SyncResult.
 ///
@@ -1221,7 +1721,11 @@ fn commit_head(
     let scope = if rescan { None } else { identity_scope_from_events(events) };
     let identity = run_identity_reconciliation(head, scope.as_ref());
 
-    // 5. Build result.
+    // 5. Produce the code-layer delta in-lock (Gate 3N §3.3.1 step 5): structural
+    //    state is updated as the last in-lock step, ordered with content/identity.
+    let code_delta = produce_full_code_delta(head);
+
+    // 6. Build result.
     dto::SyncResultDto {
         revision: head.store.revision().0,
         created,
@@ -1235,6 +1739,7 @@ fn commit_head(
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan,
+        code_delta: Some(code_delta),
     }
 }
 
@@ -1292,6 +1797,7 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
+        code_delta: None,
     }
 }
 
@@ -1338,6 +1844,7 @@ fn apply_watch_events(
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
+            code_delta: None,
         });
     }
 
@@ -1428,6 +1935,7 @@ fn apply_watch_events(
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
+        code_delta: None,
     })
 }
 
@@ -1484,12 +1992,30 @@ impl PyTyProject {
         };
 
         let retain_cap = config.raw.spine.retain_cap;
-        let head = build_head_with_config(
+        let mut head = build_head_with_config(
             system_root,
             ContentStore::with_retain_cap(retain_cap),
             registry,
             config,
         );
+
+        // Prime the identity registry over the full project at open so the
+        // code-layer producer (Gate 3N) finds a reconciled `DurableId` for every
+        // entity — not just those in a later commit's scope. This replaces the
+        // Python `_prime_identity_registry` workaround the read-surface builder
+        // relied on. Done in-memory only: the registry is persisted on the first
+        // commit, so opening a project without a sidecar creates no files
+        // (Gate 4: open touches no source files / writes no sidecar).
+        {
+            let prime_state = TyProjectState {
+                db: head.db.clone(),
+                root: head.root.clone(),
+                registry: None,
+                hash_policy: head.hash_policy,
+            };
+            let entities = extract_entities(&prime_state);
+            reconcile(&mut head.registry, &entities, head.store.revision());
+        }
 
         Ok(PyTyProject {
             inner: Arc::new(Mutex::new(Some(head))),
@@ -1709,6 +2235,7 @@ impl PyTyProject {
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
+            code_delta: None,
         };
         drop(guard);
         pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))

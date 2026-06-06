@@ -2,7 +2,7 @@ use crate::dto::RangeDto;
 
 /// Reference role classification matching Python-side `ReferenceRole` StrEnum.
 /// Serde `rename_all = "snake_case"` makes `Definition` → `"definition"` etc.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReferenceRoleDto {
     Read,

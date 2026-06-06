@@ -17,6 +17,7 @@ mod hash;
 mod config;
 mod content;
 mod entity;
+mod code_layer;
 mod identity;
 mod sidecar;
 mod convert;

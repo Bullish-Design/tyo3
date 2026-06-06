@@ -30,4 +30,9 @@ pub struct SyncResultDto {
     pub project_changed: bool,
     pub custom_stdlib_changed: bool,
     pub rescan: bool,
+    /// The code-layer delta produced inside the native commit (Gate 3N). `None`
+    /// until the producer is wired (Steps 1–5); `#[serde(default)]` keeps old
+    /// callers and tests unaffected while the migration is in flight.
+    #[serde(default)]
+    pub code_delta: Option<crate::dto::CodeDelta>,
 }

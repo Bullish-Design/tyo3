@@ -31,8 +31,8 @@ use arc_swap::ArcSwap;
 use ruff_db::file_revision::FileRevision;
 use ruff_db::system::walk_directory::WalkDirectoryBuilder;
 use ruff_db::system::{
-    CaseSensitivity, DirectoryEntry, FileType, Metadata, OsSystem, System, SystemPath,
-    SystemPathBuf, SystemVirtualPath, WhichResult, WritableSystem,
+    CaseSensitivity, DirectoryEntry, FileType, MemoryFileSystem, Metadata, OsSystem, System,
+    SystemPath, SystemPathBuf, SystemVirtualPath, WhichResult, WritableSystem,
 };
 use ruff_python_ast::PySourceType;
 
@@ -70,11 +70,7 @@ impl OverlaySystem {
     /// revision `rev` (pre-populated by the snapshot builder in Step 8).
     /// Files not in the generation are invisible to this system — there is
     /// no disk fallback on a frozen view (§1.3.1).
-    pub fn frozen(
-        root: SystemPathBuf,
-        generation: Generation,
-        rev: Revision,
-    ) -> Self {
+    pub fn frozen(root: SystemPathBuf, generation: Generation, rev: Revision) -> Self {
         Self {
             content: Arc::new(ArcSwap::new(generation)),
             native: Arc::new(OsSystem::new(root)),
@@ -88,10 +84,7 @@ impl OverlaySystem {
     /// store is lock-free, so readers see the new generation instantly once
     /// the lock is released.
     pub fn publish(&self, generation: Generation) {
-        debug_assert!(
-            self.frozen.is_none(),
-            "must not republish a frozen overlay"
-        );
+        debug_assert!(self.frozen.is_none(), "must not republish a frozen overlay");
         self.content.store(generation);
     }
 
@@ -104,11 +97,7 @@ impl OverlaySystem {
 
     /// Look up the overlay document for `path`, if any.
     fn document(&self, path: &SystemPath) -> Option<Document> {
-        self.content
-            .load()
-            .system
-            .get(&path.to_path_buf())
-            .cloned()
+        self.content.load().system.get(&path.to_path_buf()).cloned()
     }
 
     /// Look up an overlay virtual document for `path`, if any.
@@ -123,12 +112,7 @@ impl OverlaySystem {
     /// Iterate over all system-path keys in the content map.  Used by frozen
     /// directory enumeration (Step 6).
     fn system_keys(&self) -> Vec<SystemPathBuf> {
-        self.content
-            .load()
-            .system
-            .keys()
-            .cloned()
-            .collect()
+        self.content.load().system.keys().cloned().collect()
     }
 
     /// True if `path` is a directory implied by the generation: some `Text`
@@ -147,6 +131,50 @@ impl OverlaySystem {
         self.system_keys()
             .iter()
             .any(|key| key.as_path() != path && key.starts_with(path))
+    }
+}
+
+// ── GenerationWalker: recursive walk over generation keys ──────────
+
+/// A recursive walker over generation keys instead of disk. Used for frozen
+/// views where disk access is forbidden (Design A, §1.3.1).
+///
+/// The walker enumerates all `Document::Text` entries whose paths are
+/// descendants of the requested root, synthesising intermediate
+/// [`FileType::Directory`] entries through Ruff's `MemoryFileSystem`.
+struct GenerationWalker {
+    fs: MemoryFileSystem,
+}
+
+impl GenerationWalker {
+    fn new(content: &ContentMap) -> Self {
+        let fs = MemoryFileSystem::new();
+        for (path, doc) in content.system.iter() {
+            // Only `Document::Text` entries are visible; tombstones (Deleted)
+            // are omitted so they never appear in the walk. The walk consumes
+            // path structure only — never file bytes — so intern each file with
+            // empty content rather than copying its (potentially large) text
+            // into this throwaway filesystem.
+            if matches!(doc, Document::Text { .. }) {
+                fs.write_file_all(path, b"")
+                    .expect("generation-backed memory walk must accept absolute paths");
+            }
+        }
+        Self { fs }
+    }
+
+    fn walk_directory(&self, path: &SystemPath) -> WalkDirectoryBuilder {
+        // Ensure the walk root itself exists as a directory. When the
+        // generation has no keys under `path` (e.g. an empty project, or a
+        // project whose only files live elsewhere), the memory filesystem
+        // would otherwise have no entry for the root and `walk_directory`
+        // would emit a `NotFound` IO error — surfacing to ty's project
+        // discovery as a spurious "No such file or directory" diagnostic.
+        // A frozen project root is a real (if empty) directory, so we
+        // synthesise it; the walk then yields the root with no children,
+        // matching a native walk over an empty directory.
+        let _ = self.fs.create_directory_all(path);
+        self.fs.walk_directory(path)
     }
 }
 
@@ -205,10 +233,7 @@ impl System for OverlaySystem {
         self.native.read_to_notebook(path)
     }
 
-    fn read_virtual_path_to_string(
-        &self,
-        path: &SystemVirtualPath,
-    ) -> std::io::Result<String> {
+    fn read_virtual_path_to_string(&self, path: &SystemVirtualPath) -> std::io::Result<String> {
         match self.virtual_document(path) {
             Some(Document::Text { text, .. }) => Ok(text.to_string()),
             Some(Document::Deleted { .. }) => Err(virtual_not_found(path)),
@@ -330,22 +355,21 @@ impl System for OverlaySystem {
     }
 
     fn walk_directory(&self, path: &SystemPath) -> WalkDirectoryBuilder {
-        // NOTE: walk_directory currently delegates to native even for frozen
-        // views, because ruff_db's walk_directory::DirectoryEntry is not
-        // publicly constructible from outside the ruff_db crate.  This is
-        // acceptable under Design A because any file discovered by the walk
-        // that is not in the frozen generation will fail on read_to_string
-        // (returning not_found).  If full generation-based walking becomes
-        // necessary, this is the trigger to either (a) upstream a public
-        // constructor for walk_directory::DirectoryEntry, or (b) switch to
-        // Design B with shared-generation intern.
-        self.native.walk_directory(path)
+        if self.frozen.is_some() {
+            // Frozen view: walk the generation, never live disk.
+            // Uses GenerationWalker (defined above) which loads Text
+            // documents into Ruff's in-memory filesystem and delegates
+            // recursive walking there. Tombstones are omitted from the
+            // memory filesystem, so they are absent from the walk.
+            let walker = GenerationWalker::new(&self.content.load());
+            walker.walk_directory(path)
+        } else {
+            // Live head — delegate to native disk.
+            self.native.walk_directory(path)
+        }
     }
 
-    fn env_var(
-        &self,
-        name: &str,
-    ) -> std::result::Result<String, std::env::VarError> {
+    fn env_var(&self, name: &str) -> std::result::Result<String, std::env::VarError> {
         self.native.env_var(name)
     }
 
@@ -384,8 +408,8 @@ fn virtual_not_found(path: &SystemVirtualPath) -> std::io::Error {
 mod tests {
     use super::*;
     use crate::content::ContentStore;
-    use std::io::Write;
     use ruff_python_ast::name::Name;
+    use std::io::Write;
     use ty_project::{ProjectDatabase, ProjectMetadata};
 
     /// A temp dir with one file `a.py` containing `disk_contents`, plus the
@@ -548,11 +572,19 @@ mod tests {
 
         let paths: Vec<&str> = entries.iter().map(|e| e.path().as_str()).collect();
         // a.py is a direct child file
-        assert!(paths.iter().any(|p| p.ends_with("/a.py") || *p == "/a.py" || p.ends_with("a.py")),
-            "expected a.py in listing, got {paths:?}");
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.ends_with("/a.py") || *p == "/a.py" || p.ends_with("a.py")),
+            "expected a.py in listing, got {paths:?}"
+        );
         // sub/ is a synthesised directory
-        assert!(paths.iter().any(|p| p.contains("/sub") || p.ends_with("sub")),
-            "expected sub/ directory in listing, got {paths:?}");
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.contains("/sub") || p.ends_with("sub")),
+            "expected sub/ directory in listing, got {paths:?}"
+        );
     }
 
     /// A tombstoned path does NOT appear in frozen directory enumeration.
@@ -564,7 +596,9 @@ mod tests {
         let b_path = root.join("b.py");
         map.system = map.system.insert(a_path.clone(), Document::text("x", 1));
         // b.py is tombstoned.
-        map.system = map.system.insert(b_path.clone(), Document::Deleted { version: 2 });
+        map.system = map
+            .system
+            .insert(b_path.clone(), Document::Deleted { version: 2 });
         let gen = Arc::new(map);
 
         let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
@@ -576,11 +610,15 @@ mod tests {
 
         let paths: Vec<&str> = entries.iter().map(|e| e.path().as_str()).collect();
         // b.py should NOT appear — it's a tombstone.
-        assert!(!paths.iter().any(|p| p.contains("b.py")),
-            "tombstoned b.py must not appear in listing, got {paths:?}");
+        assert!(
+            !paths.iter().any(|p| p.contains("b.py")),
+            "tombstoned b.py must not appear in listing, got {paths:?}"
+        );
         // a.py SHOULD appear.
-        assert!(paths.iter().any(|p| p.contains("a.py")),
-            "Text a.py must appear in listing, got {paths:?}");
+        assert!(
+            paths.iter().any(|p| p.contains("a.py")),
+            "Text a.py must appear in listing, got {paths:?}"
+        );
     }
 
     /// The gate: a file created on disk AFTER building a frozen view does NOT
@@ -591,7 +629,9 @@ mod tests {
         // Pre-populate only a.py in the frozen generation.
         let mut map = ContentMap::new();
         let a_path = root.join("a.py");
-        map.system = map.system.insert(a_path.clone(), Document::text("X = 1\n", 1));
+        map.system = map
+            .system
+            .insert(a_path.clone(), Document::text("X = 1\n", 1));
         let gen = Arc::new(map);
 
         let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
@@ -606,8 +646,10 @@ mod tests {
             .map(|r| r.unwrap())
             .collect();
         let frozen_names: Vec<&str> = frozen_entries.iter().map(|e| e.path().as_str()).collect();
-        assert!(!frozen_names.iter().any(|p| p.contains("c.py")),
-            "c.py must NOT appear in frozen enumeration, got {frozen_names:?}");
+        assert!(
+            !frozen_names.iter().any(|p| p.contains("c.py")),
+            "c.py must NOT appear in frozen enumeration, got {frozen_names:?}"
+        );
 
         // Live view DOES include c.py (via native disk).
         let live = OverlaySystem::live(root, Arc::new(ContentMap::new()));
@@ -618,7 +660,277 @@ mod tests {
             .map(|r| r.unwrap())
             .collect();
         let live_names: Vec<&str> = live_entries.iter().map(|e| e.path().as_str()).collect();
-        assert!(live_names.iter().any(|p| p.contains("c.py")),
-            "c.py must appear in live enumeration, got {live_names:?}");
+        assert!(
+            live_names.iter().any(|p| p.contains("c.py")),
+            "c.py must appear in live enumeration, got {live_names:?}"
+        );
+    }
+
+    // ── Step 9: Frozen walk_directory from generation ─────────────
+
+    /// A frozen generation containing files at root and in a subdirectory
+    /// walks all descendants via `walk_directory`.
+    #[test]
+    fn frozen_walk_directory_from_generation() {
+        let (_dir, root, _a) = fixture("X = 1\n");
+        let mut map = ContentMap::new();
+        let a_path = root.join("a.py");
+        let sub_b = root.join("sub/b.py");
+        let sub_c = root.join("sub/c.py");
+        map.system = map.system.insert(a_path.clone(), Document::text("x", 1));
+        map.system = map.system.insert(sub_b.clone(), Document::text("y", 2));
+        map.system = map.system.insert(sub_c.clone(), Document::text("z", 3));
+        let gen = Arc::new(map);
+
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        // Collect all entries from the walk.
+        let entries: Vec<(String, FileType, usize)> = {
+            let walker = frozen.walk_directory(&root);
+            let results = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let r = Arc::clone(&results);
+            walker.run(move || {
+                let r = Arc::clone(&r);
+                Box::new(
+                    move |entry: std::result::Result<
+                        ruff_db::system::walk_directory::DirectoryEntry,
+                        ruff_db::system::walk_directory::Error,
+                    >| {
+                        if let Ok(e) = entry {
+                            if let Ok(mut v) = r.lock() {
+                                v.push((e.path().as_str().to_string(), e.file_type(), e.depth()));
+                            }
+                        }
+                        ruff_db::system::walk_directory::WalkState::Continue
+                    },
+                )
+            });
+            Arc::try_unwrap(results).unwrap().into_inner().unwrap()
+        };
+
+        // We expect: root (dir, depth 0), a.py (file, depth 1),
+        // sub/ (dir, depth 1), sub/b.py (file, depth 2), sub/c.py (file, depth 2).
+        let has_root_dir = entries
+            .iter()
+            .any(|(p, ft, d)| p == root.as_str() && *ft == FileType::Directory && *d == 0);
+        assert!(
+            has_root_dir,
+            "root directory not found in walk, got {entries:?}"
+        );
+
+        let has_a = entries
+            .iter()
+            .any(|(p, ft, _d)| p.contains("a.py") && !p.contains("sub") && *ft == FileType::File);
+        assert!(has_a, "a.py not found in walk, got {entries:?}");
+
+        let has_sub_dir = entries
+            .iter()
+            .any(|(p, ft, _d)| p.contains("/sub") && *ft == FileType::Directory);
+        assert!(
+            has_sub_dir,
+            "sub/ directory not found in walk, got {entries:?}"
+        );
+
+        let has_b = entries
+            .iter()
+            .any(|(p, ft, _d)| p.contains("sub/b.py") && *ft == FileType::File);
+        assert!(has_b, "sub/b.py not found in walk, got {entries:?}");
+
+        let has_c = entries
+            .iter()
+            .any(|(p, ft, _d)| p.contains("sub/c.py") && *ft == FileType::File);
+        assert!(has_c, "sub/c.py not found in walk, got {entries:?}");
+    }
+
+    /// A tombstoned path does NOT appear in frozen `walk_directory`.
+    #[test]
+    fn tombstoned_path_absent_from_frozen_walk() {
+        let (_dir, root, _a) = fixture("X = 1\n");
+        let mut map = ContentMap::new();
+        let a_path = root.join("a.py");
+        let b_path = root.join("b.py");
+        map.system = map.system.insert(a_path.clone(), Document::text("x", 1));
+        // b.py is tombstoned.
+        map.system = map
+            .system
+            .insert(b_path.clone(), Document::Deleted { version: 2 });
+        let gen = Arc::new(map);
+
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        let entries: Vec<String> = {
+            let walker = frozen.walk_directory(&root);
+            let results = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let r = Arc::clone(&results);
+            walker.run(move || {
+                let r = Arc::clone(&r);
+                Box::new(
+                    move |entry: std::result::Result<
+                        ruff_db::system::walk_directory::DirectoryEntry,
+                        ruff_db::system::walk_directory::Error,
+                    >| {
+                        if let Ok(e) = entry {
+                            if let Ok(mut v) = r.lock() {
+                                v.push(e.path().as_str().to_string());
+                            }
+                        }
+                        ruff_db::system::walk_directory::WalkState::Continue
+                    },
+                )
+            });
+            Arc::try_unwrap(results).unwrap().into_inner().unwrap()
+        };
+
+        // b.py should NOT appear — it's a tombstone.
+        assert!(
+            !entries.iter().any(|p| p.contains("b.py")),
+            "tombstoned b.py must not appear in walk, got {entries:?}"
+        );
+        // a.py SHOULD appear.
+        assert!(
+            entries.iter().any(|p| p.contains("a.py")),
+            "Text a.py must appear in walk, got {entries:?}"
+        );
+    }
+
+    /// The gate: a file created on disk AFTER building a frozen view does
+    /// NOT appear in the frozen `walk_directory`, but DOES appear in a
+    /// live `walk_directory`.
+    #[test]
+    fn new_disk_file_absent_from_frozen_walk_present_in_live_walk() {
+        let (_dir, root, _a) = fixture("X = 1\n");
+        // Pre-populate only a.py in the frozen generation.
+        let mut map = ContentMap::new();
+        let a_path = root.join("a.py");
+        map.system = map
+            .system
+            .insert(a_path.clone(), Document::text("X = 1\n", 1));
+        let gen = Arc::new(map);
+
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        // Create c.py on disk AFTER the frozen view is built.
+        std::fs::write(_dir.path().join("c.py"), b"Y = 2\n").unwrap();
+
+        // Frozen walk does NOT include c.py.
+        let frozen_entries: Vec<String> = {
+            let walker = frozen.walk_directory(&root);
+            let results = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let r = Arc::clone(&results);
+            walker.run(move || {
+                let r = Arc::clone(&r);
+                Box::new(
+                    move |entry: std::result::Result<
+                        ruff_db::system::walk_directory::DirectoryEntry,
+                        ruff_db::system::walk_directory::Error,
+                    >| {
+                        if let Ok(e) = entry {
+                            if let Ok(mut v) = r.lock() {
+                                v.push(e.path().as_str().to_string());
+                            }
+                        }
+                        ruff_db::system::walk_directory::WalkState::Continue
+                    },
+                )
+            });
+            Arc::try_unwrap(results).unwrap().into_inner().unwrap()
+        };
+        assert!(
+            !frozen_entries.iter().any(|p| p.contains("c.py")),
+            "c.py must NOT appear in frozen walk_directory, got {frozen_entries:?}"
+        );
+
+        // a.py SHOULD still appear.
+        assert!(
+            frozen_entries.iter().any(|p| p.contains("a.py")),
+            "a.py must appear in frozen walk_directory, got {frozen_entries:?}"
+        );
+
+        // Live walk DOES include c.py (via native disk).
+        let live = OverlaySystem::live(root.clone(), Arc::new(ContentMap::new()));
+        let live_entries: Vec<String> = {
+            let walker = live.walk_directory(&root);
+            let results = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let r = Arc::clone(&results);
+            walker.run(move || {
+                let r = Arc::clone(&r);
+                Box::new(
+                    move |entry: std::result::Result<
+                        ruff_db::system::walk_directory::DirectoryEntry,
+                        ruff_db::system::walk_directory::Error,
+                    >| {
+                        if let Ok(e) = entry {
+                            if let Ok(mut v) = r.lock() {
+                                v.push(e.path().as_str().to_string());
+                            }
+                        }
+                        ruff_db::system::walk_directory::WalkState::Continue
+                    },
+                )
+            });
+            Arc::try_unwrap(results).unwrap().into_inner().unwrap()
+        };
+        assert!(
+            live_entries.iter().any(|p| p.contains("c.py")),
+            "c.py must appear in live walk_directory, got {live_entries:?}"
+        );
+    }
+
+    /// A frozen view over an EMPTY generation must not emit an IO error from
+    /// `walk_directory` — ty's project discovery would otherwise surface it as
+    /// a spurious "No such file or directory" diagnostic (regression guard).
+    /// The walk yields the root directory and nothing else.
+    #[test]
+    fn empty_generation_frozen_walk_yields_no_error() {
+        let (_dir, root, _a) = fixture("X = 1\n");
+        // Empty generation — no keys at all.
+        let gen = Arc::new(ContentMap::new());
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        let (oks, errs): (Vec<String>, usize) = {
+            let walker = frozen.walk_directory(&root);
+            let oks = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let errs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let o = Arc::clone(&oks);
+            let e = Arc::clone(&errs);
+            walker.run(move || {
+                let o = Arc::clone(&o);
+                let e = Arc::clone(&e);
+                Box::new(
+                    move |entry: std::result::Result<
+                        ruff_db::system::walk_directory::DirectoryEntry,
+                        ruff_db::system::walk_directory::Error,
+                    >| {
+                        match entry {
+                            Ok(en) => {
+                                if let Ok(mut v) = o.lock() {
+                                    v.push(en.path().as_str().to_string());
+                                }
+                            }
+                            Err(_) => {
+                                e.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            }
+                        }
+                        ruff_db::system::walk_directory::WalkState::Continue
+                    },
+                )
+            });
+            let n = errs.load(std::sync::atomic::Ordering::SeqCst);
+            (
+                Arc::try_unwrap(oks).unwrap().into_inner().unwrap(),
+                n,
+            )
+        };
+
+        assert_eq!(errs, 0, "empty frozen walk must not emit IO errors");
+        // The root directory itself is yielded; no file children.
+        assert!(
+            oks.iter().any(|p| p == root.as_str()),
+            "root dir should be present in empty walk, got {oks:?}"
+        );
+        assert!(
+            !oks.iter().any(|p| p.ends_with(".py")),
+            "no files should appear in an empty generation walk, got {oks:?}"
+        );
     }
 }

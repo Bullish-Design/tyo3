@@ -734,6 +734,18 @@ class TyO3Session(_ReadOps):
         """Pin an explicit MVCC snapshot. ``at=None`` pins the current
         revision; ``at=r`` time-travels to a still-retained revision."""
         self._check_open()
+        # Prime the identity registry before capturing the snapshot. A snapshot
+        # clones the head registry at capture time (project.rs::snapshot), and a
+        # graph built over the snapshot requires every entity's DurableId. Since
+        # priming reconciles by committing — advancing the revision past any
+        # snapshot taken afterward — it cannot be deferred to ``Snapshot.graph``;
+        # the registry must already be populated when the native snapshot is
+        # captured. This is the snapshot-path analogue of the priming that
+        # ``CodeGraph.build`` already does for the live HEAD graph, and it is a
+        # once-per-session no-op after the first call.
+        from tyo3.graph.graph import _prime_identity_registry
+
+        _prime_identity_registry(self)
         try:
             native_snapshot = self._inner.snapshot(at)
         except _NativeClosedError as e:
@@ -909,12 +921,28 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in _inject_changes(): {e}") from e
 
     def _apply_graph_delta(self, result: SyncResult) -> None:
-        """Apply a write delta to the materialized HEAD graph, if any."""
-        if self._head_graph is None:
+        """Apply the native ``CodeDelta`` to the materialized HEAD graph (Gate 3N).
+
+        The delta is produced inside the native commit, ordered by revision. No
+        Python write lock is needed: the native commit is serialized (revisions
+        are monotonic), and the revision gate below means concurrent partitioned
+        writers either apply in order or trip the gate and rebuild — never tear
+        the replica.
+        """
+        if self._head_graph is None or result.code_delta is None:
             return
-        # Pass self (TyO3Session) as the source so id_for/locate are available.
-        # After the write, the session's head snapshot is already at result.revision.
-        self._head_graph.apply_delta(self, result)
+        g = self._head_graph
+        delta = result.code_delta
+        # Rescan replaces wholesale; no ordering constraint.
+        if delta.rescan:
+            g.apply_code_delta(delta)
+            return
+        # Revision gate: deltas MUST apply in order. A gap means a missed delta →
+        # rebuild defensively on next access.
+        if g.revision is not None and delta.revision != g.revision + 1:
+            self._head_graph = None
+            return
+        g.apply_code_delta(delta)
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
