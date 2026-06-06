@@ -1453,6 +1453,16 @@ impl PyTyProject {
         let sidecar = Sidecar::new(&absolute);
         let raw_config = RawConfig::load(&sidecar).map_err(config_error_to_pyerr)?;
         let config = config::validate(raw_config).map_err(config_error_to_pyerr)?;
+        if sidecar.exists() {
+            if config.raw.sidecar.gitignore_cache {
+                sidecar.ensure_gitignore_cache_policy().map_err(|e| {
+                    PyConfigError::new_err(format!("failed to update sidecar .gitignore: {e}"))
+                })?;
+            }
+            sidecar.ensure_layout_marker().map_err(|e| {
+                PyConfigError::new_err(format!("failed to update sidecar layout marker: {e}"))
+            })?;
+        }
         let registry = match fs::read(sidecar.identity_db_path()) {
             Ok(bytes) => IdentityRegistry::from_bytes(&bytes).unwrap_or_else(|e| {
                 log::warn!("Failed to load identity registry: {} — starting fresh.", e);

@@ -26,6 +26,12 @@ class Sidecar:
     def authored_dir(self, layer: str) -> Path:
         return self.root / "authored" / layer
 
+    def record_path(self, layer: str, durable_id: str) -> Path:
+        return self.authored_dir(layer) / f"{durable_id}.json"
+
+    def history_dir(self, layer: str, durable_id: str) -> Path:
+        return self.authored_dir(layer) / f"{durable_id}.history"
+
     def cache_dir(self, layer: str) -> Path:
         return self.root / "cache" / layer
 

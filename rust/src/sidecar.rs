@@ -46,12 +46,24 @@ impl Sidecar {
         self.root.join("authored").join(layer)
     }
 
+    pub fn record_path(&self, layer: &str, durable_id: &str) -> PathBuf {
+        self.authored_dir(layer).join(format!("{durable_id}.json"))
+    }
+
+    pub fn history_dir(&self, layer: &str, durable_id: &str) -> PathBuf {
+        self.authored_dir(layer).join(format!("{durable_id}.history"))
+    }
+
     pub fn cache_dir(&self, layer: &str) -> PathBuf {
         self.root.join("cache").join(layer)
     }
 
     pub fn gitignore_path(&self) -> PathBuf {
         self.root.join(".gitignore")
+    }
+
+    pub fn layout_marker_path(&self) -> PathBuf {
+        self.root.join("LAYOUT.md")
     }
 
     /// Ensure a directory under the sidecar exists (created lazily before a write).
@@ -73,6 +85,39 @@ impl Sidecar {
             f.sync_all()?;
         }
         fs::rename(&tmp, path)
+    }
+
+    pub fn ensure_gitignore_cache_policy(&self) -> io::Result<()> {
+        let path = self.gitignore_path();
+        let existing = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(e),
+        };
+        if existing.contains("# managed by tyo3")
+            && existing.contains("cache/")
+            && existing.contains("config.local.toml")
+            && existing.contains("secrets.toml")
+        {
+            return Ok(());
+        }
+        let mut next = existing;
+        if !next.is_empty() && !next.ends_with('\n') {
+            next.push('\n');
+        }
+        next.push_str("# managed by tyo3\ncache/\nconfig.local.toml\nsecrets.toml\n");
+        self.write_atomic(&path, next.as_bytes())
+    }
+
+    pub fn ensure_layout_marker(&self) -> io::Result<()> {
+        let path = self.layout_marker_path();
+        if path.exists() {
+            return Ok(());
+        }
+        self.write_atomic(
+            &path,
+            b"# TyO3 sidecar\n\nThis directory contains inert TyO3 tool data: identity.db, authored records, and regenerable cache artifacts.\n",
+        )
     }
 }
 
@@ -110,5 +155,37 @@ mod tests {
         std::fs::write(path.with_extension("tmp"), b"interrupted").unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"prior");
+    }
+
+    #[test]
+    fn authored_record_paths_are_documented() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = Sidecar::new(dir.path());
+
+        assert_eq!(
+            sidecar.record_path("intent", "01ABC"),
+            dir.path().join(".tyo3").join("authored").join("intent").join("01ABC.json")
+        );
+        assert_eq!(
+            sidecar.history_dir("intent", "01ABC"),
+            dir.path().join(".tyo3").join("authored").join("intent").join("01ABC.history")
+        );
+    }
+
+    #[test]
+    fn managed_gitignore_block_preserves_user_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = Sidecar::new(dir.path());
+        std::fs::create_dir_all(dir.path().join(".tyo3")).unwrap();
+        std::fs::write(sidecar.gitignore_path(), "user.log\n").unwrap();
+
+        sidecar.ensure_gitignore_cache_policy().unwrap();
+        let text = std::fs::read_to_string(sidecar.gitignore_path()).unwrap();
+
+        assert!(text.contains("user.log"));
+        assert!(text.contains("# managed by tyo3"));
+        assert!(text.contains("cache/"));
+        assert!(text.contains("config.local.toml"));
+        assert!(text.contains("secrets.toml"));
     }
 }

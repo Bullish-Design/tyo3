@@ -212,3 +212,35 @@ def test_python_sidecar_layout_matches_rust_contract(tmp_path: Path) -> None:
     assert sidecar.identity_db_path() == tmp_path / ".tyo3" / "identity.db"
     assert sidecar.cache_dir("x") == tmp_path / ".tyo3" / "cache" / "x"
     assert sidecar.authored_dir("x") == tmp_path / ".tyo3" / "authored" / "x"
+    assert sidecar.record_path("x", "id1") == tmp_path / ".tyo3" / "authored" / "x" / "id1.json"
+    assert sidecar.history_dir("x", "id1") == tmp_path / ".tyo3" / "authored" / "x" / "id1.history"
+
+
+def test_open_with_sidecar_writes_managed_gitignore_preserving_user_lines(tmp_path: Path) -> None:
+    _project(tmp_path)
+    sidecar = tmp_path / ".tyo3"
+    sidecar.mkdir()
+    (sidecar / ".gitignore").write_text("user.log\n")
+
+    with TyO3Session(tmp_path):
+        pass
+
+    text = (sidecar / ".gitignore").read_text()
+    assert "user.log" in text
+    assert "# managed by tyo3" in text
+    assert "cache/" in text
+    assert "config.local.toml" in text
+    assert "secrets.toml" in text
+    assert (sidecar / "LAYOUT.md").exists()
+
+
+def test_open_without_sidecar_touches_no_source_files(tmp_path: Path) -> None:
+    _project(tmp_path)
+    before = {path: path.read_text() for path in tmp_path.rglob("*") if path.is_file()}
+
+    with TyO3Session(tmp_path):
+        pass
+
+    after = {path: path.read_text() for path in tmp_path.rglob("*") if path.is_file()}
+    assert before == after
+    assert not (tmp_path / ".tyo3").exists()
