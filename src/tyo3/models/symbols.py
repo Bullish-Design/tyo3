@@ -47,6 +47,8 @@ class Symbol(BaseModel):
     selection_range: Range | None = None
     container_name: str | None = None
     deprecated: bool = False
+    durable_id: str | None = None
+    content_hash: str | None = None
 
 
 __all__ = [

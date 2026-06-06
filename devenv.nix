@@ -95,23 +95,36 @@ in
     ${detailPreludePerTest}
     echo "═══ Running all tests ═══"
     cd "$DEVENV_ROOT"
+    echo "═══ Rust: cargo test --all-targets ═══"
+    cargo test --manifest-path rust/Cargo.toml --all-targets
+    _rust_rc=$?
+    echo ""
+    echo "═══ Python: pytest ═══"
     # -ra adds pytest's "short test summary info" block listing every failure.
     # Tee the run so we can print a friendly pass/fail banner afterward, and
     # preserve pytest's own exit code (PIPESTATUS[0]) for CI.
     _out="$(mktemp)"
     PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS -ra ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing "$@" 2>&1 | tee "$_out"
-    _rc=''${PIPESTATUS[0]}
+    _pytest_rc=''${PIPESTATUS[0]}
     echo ""
-    if [ "$_rc" -eq 0 ]; then
+    if [ "$_rust_rc" -eq 0 ] && [ "$_pytest_rc" -eq 0 ]; then
       _passed="$(grep -oE '[0-9]+ passed' "$_out" | tail -1 | grep -oE '^[0-9]+')"
-      echo "═══ ✅ ''${_passed:-0} of ''${_passed:-0} tests pass ═══"
+      echo "═══ ✅ Rust and Python tests pass; pytest: ''${_passed:-0} passed ═══"
     else
       echo "═══ ❌ Failures ═══"
-      grep -E '^(FAILED|ERROR) ' "$_out" || true
-      grep -E '^=+ .*(failed|error).* =+$' "$_out" | tail -1
+      if [ "$_rust_rc" -ne 0 ]; then
+        echo "Rust cargo tests failed with exit code $_rust_rc"
+      fi
+      if [ "$_pytest_rc" -ne 0 ]; then
+        grep -E '^(FAILED|ERROR) ' "$_out" || true
+        grep -E '^=+ .*(failed|error).* =+$' "$_out" | tail -1
+      fi
     fi
     rm -f "$_out"
-    exit "$_rc"
+    if [ "$_rust_rc" -ne 0 ]; then
+      exit "$_rust_rc"
+    fi
+    exit "$_pytest_rc"
   '';
 
   scripts.test-quick.exec = ''

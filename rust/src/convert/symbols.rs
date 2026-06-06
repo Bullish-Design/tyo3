@@ -3,6 +3,7 @@ use ruff_source_file::LineIndex;
 use crate::coordinates;
 use crate::dto::{FileRangeDto, SymbolDto, SymbolKindDto};
 use crate::dto;
+use crate::identity::IdentityRegistry;
 
 /// Map a ty_ide SymbolKind to a SymbolKindDto.
 fn symbol_kind_to_dto(kind: &ty_ide::SymbolKind) -> SymbolKindDto {
@@ -38,6 +39,8 @@ pub fn convert_symbol(
     full_range: ruff_text_size::TextRange,
     container_name: Option<&str>,
     qualified_name: Option<String>,
+    durable_id: Option<String>,
+    content_hash: Option<String>,
 ) -> SymbolDto {
     let name_range_dto = coordinates::range_to_dto_with_index(source, line_index, name_range);
     let full_range_dto = coordinates::range_to_dto_with_index(source, line_index, full_range);
@@ -53,6 +56,8 @@ pub fn convert_symbol(
         selection_range: Some(name_range_dto),
         container_name: container_name.map(|s| s.to_string()),
         deprecated,
+        durable_id,
+        content_hash,
     }
 }
 
@@ -65,12 +70,19 @@ pub fn collect_symbols_recursive(
     line_index: &ruff_source_file::LineIndex,
     file_path: &str,
     parent_name: Option<&str>,
+    parent_identity_path: Option<&str>,
+    registry: Option<&IdentityRegistry>,
     symbols: &mut Vec<dto::SymbolDto>,
 ) {
     let qualified = match parent_name {
         Some(p) => Some(format!("{}.{}", p, info.name)),
         None => None,
     };
+    let identity_path = match parent_identity_path {
+        Some(p) => format!("{}::{}", p, info.name),
+        None => format!("{}::{}", file_path, info.name),
+    };
+    let anchor = registry.and_then(|r| r.by_path(&identity_path).and_then(|id| r.get(id)));
 
     let sym = convert_symbol(
         source,
@@ -83,6 +95,8 @@ pub fn collect_symbols_recursive(
         info.full_range,
         parent_name,
         qualified.clone(),
+        anchor.map(|a| a.id.0.clone()),
+        anchor.map(|a| a.content_hash.0.to_string()),
     );
     symbols.push(sym);
 
@@ -100,6 +114,8 @@ pub fn collect_symbols_recursive(
             line_index,
             file_path,
             Some(own_name),
+            Some(&identity_path),
+            registry,
             symbols,
         );
     }

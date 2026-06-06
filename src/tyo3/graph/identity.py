@@ -1,9 +1,9 @@
 """Symbol identity construction for the code graph.
 
-Node identity is the DurableId (SPEC §6.2.1). Top-level entities get their
+Node identity is the DurableId (SPEC §6.2.1). Entity nodes get their
 DurableId from the session's identity system (Gate 2). Nested entities
-(methods, inner classes) derive compound ids from the parent DurableId —
-stable across parent moves and renames.
+(methods, inner classes) use their innermost registry id as the stable
+prefix for a compound graph key.
 """
 
 from __future__ import annotations
@@ -28,22 +28,23 @@ def derive_durable_id(
     identity system via ``session.id_for(path, line, col)``.  The returned
     ULID survives moves, renames, and cosmetic edits (Gate 2 §5).
 
-    For nested entities (methods, inner classes), the session returns the
-    enclosing class's DurableId (not a method-level id), so we derive a
-    compound id: ``parent_durable_id::qualified_name``.  This is stable
-    across parent moves because the parent's DurableId is stable.
+    For nested entities (methods, inner classes), ``session.id_for`` returns
+    the innermost symbol's DurableId. The graph stores a compound key
+    ``durable_id::qualified_name`` so nested nodes remain distinct while the
+    stable registry id remains the key prefix.
 
     Returns a string that is valid as a graph node key.
     """
     start = (symbol.selection_range or symbol.location.range).start
     durable_id = session.id_for(file, start.line, start.column)
     if durable_id is None:
-        # No identity registered yet — fall back to a qualified-name-based
-        # key. This happens for freshly-created entities before the
-        # reconciliation pass runs.
-        if symbol.qualified_name:
-            return f"{file}::{symbol.qualified_name}"
-        return f"{file}::{symbol.name}@{symbol.location.range.start.line}"
+        # Defensive cold-path fallback. CodeGraph.build primes the identity
+        # registry for mutable sessions, so this should only be needed for
+        # read surfaces that cannot reconcile. Keep it location-free.
+        qn = symbol.qualified_name or symbol.name
+        if parent_durable_id is not None:
+            return f"{parent_durable_id}::{qn}"
+        return f"{file}::{qn}"
 
     if parent_durable_id is None:
         # Top-level entity: use the session's DurableId directly.

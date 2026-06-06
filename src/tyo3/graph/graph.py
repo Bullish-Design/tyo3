@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import rustworkx as rx
 
 from tyo3.graph.dependency import DependencyGraph
-from tyo3.graph.identity import derive_durable_id, file_from_durable_id, make_module_durable_id
+from tyo3.graph.identity import file_from_durable_id, make_module_durable_id
 from tyo3.graph.models import (
     EdgeData,
     EdgeDiff,
@@ -29,6 +29,20 @@ if TYPE_CHECKING:
     from tyo3.session import TyO3Session
 
 logger = logging.getLogger(__name__)
+
+
+def _prime_identity_registry(session: Any) -> None:
+    """Ensure mutable sessions have reconciled identity before graph build."""
+    if getattr(session, "_graph_identity_primed", False):
+        return
+    sync_all = getattr(session, "sync_all", None)
+    if sync_all is None:
+        return
+    sync_all()
+    try:
+        setattr(session, "_graph_identity_primed", True)
+    except Exception:
+        pass
 
 
 def _to_relative(root: Path, path: str) -> str:
@@ -118,7 +132,8 @@ class CodeGraph:
         # to resolve engine-returned names (which lack DurableIds) to graph nodes.
         self._name_to_id: dict[tuple[str, str], str] = {}
 
-        # Secondary index for fast name@line lookups (B4)
+        # Legacy secondary index for old payloads that used a name suffix
+        # before Gate 2 §5.6 disallowed location-derived graph keys.
         #   (file, name_prefix) -> durable_id
         self._name_prefix_index: dict[tuple[str, str], str] = {}
 
@@ -166,6 +181,7 @@ class CodeGraph:
         callers can programmatically inspect whether the graph is
         complete.
         """
+        _prime_identity_registry(session)
         graph = cls()
         if root is not None:
             root_resolved = root
@@ -292,9 +308,8 @@ class CodeGraph:
     ) -> None:
         """Create module and symbol nodes for one file in the graph.
 
-        Two sub-passes: first top-level entities get their DurableId from
-        ``session.id_for()``, then nested entities derive compound ids from
-        the parent's DurableId — stable across moves and renames.
+        Entity symbols must carry their registry DurableId and content hash
+        from the Rust DTO. Graph construction does not re-derive identity.
         """
         self._assert_mutable()
         module_id = make_module_durable_id(file_str)
@@ -317,16 +332,8 @@ class CodeGraph:
             new_nodes.append(module_node)
             self._name_to_id[(file_str, "<module>")] = module_id
 
-        # ── Sub-pass A: top-level entities (no container_name) ─────
-        # Use session.id_for() to get the real DurableId from Gate 2.
-        local_name_to_did: dict[str, str] = {}
         for symbol in symbols:
-            if symbol.container_name:
-                continue  # nested — deferred to pass B
-            did = derive_durable_id(session, file_str, symbol)
-            if did is None:
-                continue
-            local_name_to_did[symbol.name] = did
+            did = self._require_symbol_durable_id(file_str, symbol)
             if did not in self._id_to_index:
                 qn = symbol.qualified_name or symbol.name
                 node = SymbolNode(
@@ -337,31 +344,7 @@ class CodeGraph:
                     file=file_str,
                     range=symbol.location.range,
                     selection_range=symbol.selection_range,
-                )
-                new_nodes.append(node)
-                self._name_to_id[(file_str, qn)] = did
-                self._name_to_id[(file_str, symbol.name)] = did
-
-        # ── Sub-pass B: nested entities (methods, inner classes) ───
-        # Compound id: parent_durable_id::qualified_name
-        for symbol in symbols:
-            if not symbol.container_name:
-                continue  # already handled in pass A
-            parent_did = local_name_to_did.get(symbol.container_name)
-            if parent_did is None:
-                # Parent not in this file — try cross-file lookup
-                parent_did = self._find_symbol_in_file(file_str, symbol.container_name)
-            did = derive_durable_id(session, file_str, symbol, parent_durable_id=parent_did)
-            if did is not None and did not in self._id_to_index:
-                qn = symbol.qualified_name or symbol.name
-                node = SymbolNode(
-                    durable_id=did,
-                    name=symbol.name,
-                    qualified_name=qn,
-                    kind=symbol.kind,
-                    file=file_str,
-                    range=symbol.location.range,
-                    selection_range=symbol.selection_range,
+                    content_hash=symbol.content_hash,
                 )
                 new_nodes.append(node)
                 self._name_to_id[(file_str, qn)] = did
@@ -373,6 +356,20 @@ class CodeGraph:
                 self._id_to_index[node.durable_id] = idx
                 self._file_to_nodes[node.file].append(idx)
 
+    def _require_symbol_durable_id(self, file_str: str, symbol: Symbol) -> str:
+        """Return the symbol's registry DurableId or fail the build contract."""
+        if symbol.durable_id is None:
+            raise RuntimeError(
+                f"symbol DTO for {file_str}::{symbol.qualified_name or symbol.name} "
+                "is missing durable_id"
+            )
+        if symbol.content_hash is None:
+            raise RuntimeError(
+                f"symbol DTO for {file_str}::{symbol.qualified_name or symbol.name} "
+                "is missing content_hash"
+            )
+        return symbol.durable_id
+
     def _add_containment_edges_for_file(
         self,
         session,
@@ -382,14 +379,7 @@ class CodeGraph:
         """Add DEFINES/CONTAINS edges for all symbols in one file."""
         module_id = make_module_durable_id(file_str)
         for symbol in symbols:
-            # For nested symbols, derive the compound id (parent::qualified_name)
-            # to match the DurableId assigned in _materialize_file_nodes.
-            parent_did = None
-            if symbol.container_name:
-                parent_did = self._find_symbol_in_file(file_str, symbol.container_name)
-            did = derive_durable_id(session, file_str, symbol, parent_durable_id=parent_did)
-            if did is None:
-                continue
+            did = self._require_symbol_durable_id(file_str, symbol)
             parent_id = self._resolve_parent_id(file_str, symbol, module_id)
             if parent_id and parent_id in self._id_to_index:
                 edge_kind = EdgeKind.DEFINES if parent_id == module_id else EdgeKind.CONTAINS
@@ -873,11 +863,11 @@ class CodeGraph:
                     target_did = self._find_symbol_in_file(target_file, target.symbol.name)
 
             if target_did is None:
-                # No symbol info or not found — try legacy format
+                # No symbol info or not found: use a location-free key.
                 if target.symbol and target.symbol.qualified_name:
                     target_did = f"{target_file}::{target.symbol.qualified_name}"
                 elif target.symbol:
-                    target_did = f"{target_file}::{target.symbol.name}@{target.range.start.line}"
+                    target_did = f"{target_file}::{target.symbol.name}"
                 else:
                     continue
 
@@ -1007,7 +997,7 @@ class CodeGraph:
                         )
                     continue
 
-                did = derive_durable_id(session, file_str, symbol)
+                did = self._require_symbol_durable_id(file_str, symbol)
 
                 for supertype in supertypes:
                     super_file_raw = str(supertype.path)
@@ -1099,9 +1089,7 @@ class CodeGraph:
 
                 for method in child_methods:
                     if method.name in ancestor_methods:
-                        # Compound id: class_durable_id::qualified_name
-                        qn = method.qualified_name or method.name
-                        method_did = f"{did}::{qn}"
+                        method_did = self._require_symbol_durable_id(file_str, method)
                         parent_method_did = ancestor_methods[method.name]
                         edge = EdgeData(kind=EdgeKind.OVERRIDES)
                         self._add_edge(method_did, parent_method_did, edge, file_str)
@@ -1146,7 +1134,7 @@ class CodeGraph:
         if node.qualified_name:
             self._name_to_id[(node.file, node.qualified_name)] = node.durable_id
         self._name_to_id[(node.file, node.name)] = node.durable_id
-        # Index for fast name@line lookups (B4)
+        # Legacy lookup for payloads that predate Gate 2 §5.6.
         if "@" in node.durable_id:
             parts = node.durable_id.split("::", 1)
             if len(parts) == 2:
@@ -1196,7 +1184,7 @@ class CodeGraph:
             if node.qualified_name:
                 self._name_to_id[(node.file, node.qualified_name)] = node.durable_id
             self._name_to_id[(node.file, node.name)] = node.durable_id
-            # Rebuild name_prefix_index (B4)
+            # Rebuild legacy suffix lookup for old payloads only.
             if "@" in node.durable_id:
                 parts = node.durable_id.split("::", 1)
                 if len(parts) == 2:
@@ -1818,11 +1806,7 @@ class CodeGraph:
             except Exception:
                 continue
             for symbol in symbols:
-                start = (symbol.selection_range or symbol.location.range).start
-                # Resolve the DurableId for this entity
-                durable_id = source.id_for(native_path, start.line, start.column) if hasattr(source, 'id_for') else None
-                if durable_id is None:
-                    continue
+                durable_id = self._require_symbol_durable_id(file_str, symbol)
                 # Find the existing node by DurableId
                 idx = self._id_to_index.get(durable_id)
                 if idx is None:
@@ -1840,6 +1824,7 @@ class CodeGraph:
                     file=file_str,
                     range=symbol.location.range,
                     selection_range=symbol.selection_range,
+                    content_hash=symbol.content_hash,
                     external=node.external,
                     package=node.package,
                 )

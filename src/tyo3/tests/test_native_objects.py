@@ -204,6 +204,8 @@ class TestPythonizeEdgeCases:
             "ProjectClosedError",
             "PathResolutionError",
             "PositionError",
+            # Gate 1 §1.3.6: typed error for reading an evicted revision.
+            "RevisionEvictedError",
         }
         for name in dir(_native):
             if name.startswith("_"):

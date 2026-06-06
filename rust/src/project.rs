@@ -67,6 +67,7 @@ impl AnalysisError {
 pub(crate) struct TyProjectState {
     pub(crate) db: ProjectDatabase,
     pub(crate) root: SystemPathBuf,
+    pub(crate) registry: Option<IdentityRegistry>,
 }
 
 /// The live, mutable HEAD of a session. Owns the database plus the content
@@ -99,17 +100,19 @@ impl ReadCloneSource for TyProjectState {
         TyProjectState {
             db: self.db.clone(),
             root: self.root.clone(),
+            registry: self.registry.clone(),
         }
     }
 }
 
 impl ReadCloneSource for HeadState {
     fn read_clone(&self) -> TyProjectState {
-        // Clone *only* db + root. store/system stay in the head; the read clone
-        // (and any snapshot built from it) never sees them.
+        // Clone db + root + registry. store/system stay in the head; the read
+        // clone (and any snapshot built from it) never sees them.
         TyProjectState {
             db: self.db.clone(),
             root: self.root.clone(),
+            registry: Some(self.registry.clone()),
         }
     }
 }
@@ -272,6 +275,8 @@ fn compute_document_symbols(
             &line_index,
             &file_path,
             None,
+            None,
+            state.registry.as_ref(),
             &mut symbols,
         );
     }
@@ -315,6 +320,8 @@ fn compute_workspace_symbols(
                 .imported_from
                 .as_ref()
                 .map(|i| i.module_name().as_str()),
+            None,
+            None,
             None,
         );
         symbols.push(sym);
@@ -989,7 +996,11 @@ fn build_frozen(root: SystemPathBuf, generation: Generation, rev: Revision) -> T
         }
     };
 
-    TyProjectState { db, root }
+    TyProjectState {
+        db,
+        root,
+        registry: None,
+    }
 }
 
 // ── Sync-path resolver & event synthesis (Phase 3) ──────────────────────
@@ -1097,6 +1108,7 @@ fn commit_head(
         let state = TyProjectState {
             db: head.db.clone(),
             root: head.root.clone(),
+            registry: None,
         };
 
         // Extract all entities from the new revision.
@@ -1178,7 +1190,11 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
     // Run reconciliation after the event is applied.
     let mut extra = dto::SyncResultDto::default();
     {
-        let state = TyProjectState { db: head.db.clone(), root: head.root.clone() };
+        let state = TyProjectState {
+            db: head.db.clone(),
+            root: head.root.clone(),
+            registry: None,
+        };
         let entities = extract_entities(&state);
         let recon = reconcile(&mut head.registry, &entities, head.store.revision());
         extra.moved = recon.moved().iter().map(|id| {
@@ -1210,6 +1226,7 @@ fn run_identity_reconciliation(head: &mut HeadState) -> (Vec<String>, Vec<String
     let state = TyProjectState {
         db: head.db.clone(),
         root: head.root.clone(),
+        registry: None,
     };
     let entities = extract_entities(&state);
     let recon = reconcile(&mut head.registry, &entities, head.store.revision());
@@ -1754,6 +1771,7 @@ impl PyTyProject {
         let head = guard.as_ref().unwrap();
         let root = head.root.clone();
 
+        let registry = head.registry.clone();
         let (generation, rev) = match at {
             None => (head.store.capture(), head.store.revision()),
             Some(r) => {
@@ -1770,7 +1788,8 @@ impl PyTyProject {
         };
         drop(guard); // release the head lock BEFORE the (cold) db build
 
-        let state = build_frozen(root, generation, rev);
+        let mut state = build_frozen(root, generation, rev);
+        state.registry = Some(registry);
         Ok(PySnapshot {
             inner: Mutex::new(Some(state)),
             revision: rev.0,
@@ -1805,6 +1824,7 @@ impl PyTyProject {
         let state = TyProjectState {
             db: head.db.clone(),
             root: head.root.clone(),
+            registry: Some(head.registry.clone()),
         };
 
         // Resolve the file.
@@ -3344,7 +3364,11 @@ mod phase5_concurrency_tests {
 
         for _ in 0..reader_count {
             let snap_clone =
-                TyProjectState { db: snap.db.clone(), root: snap.root.clone() };
+                TyProjectState {
+                    db: snap.db.clone(),
+                    root: snap.root.clone(),
+                    registry: None,
+                };
             let barrier = Arc::clone(&barrier);
             let tx = tx.clone();
             let a = a.clone();

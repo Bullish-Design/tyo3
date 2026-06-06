@@ -83,7 +83,7 @@ pub enum IdentityStatus {
 ///   - `by_id`: the authoritative store
 ///   - `by_path`: qualified_path → id (EXACT match index)
 ///   - `by_hash`: content_hash → list of ids (HASH match index)
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct IdentityRegistry {
     by_id: HashMap<DurableId, Anchor>,
     by_path: HashMap<String, DurableId>,

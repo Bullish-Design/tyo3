@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path as StdPath
 from unittest.mock import MagicMock
 
+from tyo3 import TyO3Session
 from tyo3.graph import (
     CodeGraph,
     GraphBuildReport,
@@ -55,6 +57,94 @@ class TestGraphConstruction:
         assert isinstance(all_diags, list)
         has_bug_diag = any("bug.py" in (d.file or "") for d in all_diags)
         assert has_bug_diag, f"Expected diagnostics for bug.py, got {len(all_diags)} total"
+
+    def test_build_primes_identity_for_created_file(self, tmp_path: StdPath) -> None:
+        ulid_prefix = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}(::|$)")
+
+        with TyO3Session(str(tmp_path)) as session:
+            session.edit(
+                "created.py",
+                "class Created:\n"
+                "    def method(self):\n"
+                "        return 1\n\n"
+                "def helper():\n"
+                "    return Created().method()\n",
+            )
+
+            graph = CodeGraph.build(session)
+
+        for idx in graph.graph.node_indices():
+            durable_id = graph.graph[idx].durable_id
+            assert not re.search(r"@\d+", durable_id), f"location-derived node id: {durable_id}"
+            if durable_id.startswith(("<module>", "<external>")):
+                continue
+            assert ulid_prefix.match(durable_id), f"entity node id is not registry-backed: {durable_id}"
+            assert graph.graph[idx].content_hash is not None
+
+    def test_entity_node_content_hash_matches_symbol_dto(self, tmp_path: StdPath) -> None:
+        (tmp_path / "models.py").write_text(
+            "class User:\n"
+            "    def save(self):\n"
+            "        return 1\n"
+        )
+        with TyO3Session(str(tmp_path)) as session:
+            session.sync_all()
+            graph = CodeGraph.build(session)
+            symbols = {
+                sym.durable_id: sym
+                for sym in session.document_symbols("models.py")
+                if sym.durable_id is not None
+            }
+
+        entity_nodes = [
+            graph.graph[idx]
+            for idx in graph.graph.node_indices()
+            if graph.graph[idx].kind != SymbolKind.MODULE and not graph.graph[idx].external
+        ]
+        assert entity_nodes
+        for node in entity_nodes:
+            assert node.content_hash is not None
+            assert node.durable_id in symbols
+            assert node.content_hash == symbols[node.durable_id].content_hash
+
+    def test_content_hash_updates_incrementally_by_semantic_body(self, tmp_path: StdPath) -> None:
+        original = (
+            "class User:\n"
+            "    def save(self):\n"
+            "        return 1\n"
+        )
+        cosmetic = (
+            "class User:\n"
+            "\n"
+            "    def save(self):\n"
+            "        return 1\n"
+        )
+        body_change = (
+            "class User:\n"
+            "\n"
+            "    def save(self):\n"
+            "        return 2\n"
+        )
+
+        with TyO3Session(str(tmp_path)) as session:
+            (tmp_path / "models.py").write_text(original)
+            session.sync_all()
+            graph = CodeGraph.build(session)
+            save = next(n for n in graph.symbols_of_kind(SymbolKind.METHOD) if n.name == "save")
+            initial_hash = save.content_hash
+
+            cosmetic_delta = session.edit("models.py", cosmetic)
+            graph.apply_delta(session.snapshot(), cosmetic_delta)
+            save_after_cosmetic = next(n for n in graph.symbols_of_kind(SymbolKind.METHOD) if n.name == "save")
+            assert save_after_cosmetic.durable_id == save.durable_id
+            assert save_after_cosmetic.content_hash == initial_hash
+
+            body_delta = session.edit("models.py", body_change)
+            graph.apply_delta(session.snapshot(), body_delta)
+            save_after_body = next(n for n in graph.symbols_of_kind(SymbolKind.METHOD) if n.name == "save")
+            assert save_after_body.durable_id == save.durable_id
+            assert save_after_body.content_hash is not None
+            assert save_after_body.content_hash != initial_hash
 
 
 @needs_native
@@ -179,6 +269,8 @@ class TestBuildReports:
                 range=class_range,
             ),
             deprecated=False,
+            durable_id="01KTCTESTTESTTESTTESTTES01",
+            content_hash="123",
         )
 
         mock_session = MagicMock()

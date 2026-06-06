@@ -19,10 +19,8 @@ class SymbolNode(BaseModel):
     """A symbol in the code graph. Stored as a RustworkX node payload.
 
     Node identity is the ``durable_id`` (a ULID from the Gate 2 identity
-    system). For top-level entities (classes, functions) this is the DurableId
-    assigned by the session. For nested entities (methods, inner classes) it is
-    a compound id ``parent_durable_id::qualified_name`` that remains stable
-    across parent moves/renames.
+    system). Entity nodes copy the DurableId and content hash from the native
+    symbol DTO; module and external nodes use stable synthetic ids.
 
     Payloads are small (§6.2.2): id, kind, location, content hash, structural
     fields only. No vectors or large text.

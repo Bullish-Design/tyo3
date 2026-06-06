@@ -34,4 +34,6 @@ pub struct SymbolDto {
     pub selection_range: Option<RangeDto>,
     pub container_name: Option<String>,
     pub deprecated: bool,
+    pub durable_id: Option<String>,
+    pub content_hash: Option<String>,
 }

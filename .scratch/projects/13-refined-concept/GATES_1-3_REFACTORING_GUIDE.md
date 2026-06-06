@@ -571,13 +571,10 @@ Rust unit tests, and `RevisionEvictedError` has **zero** Python coverage.
 
 **Do.**
 - There is **no `gate1-complete` tag**, yet Gates 2–3 were built on it. After Steps 1–10
-  pass and `devenv shell -- tests` is fully green, create the missing tag on the right
-  historical commit (or, pragmatically, document that Gate 1 acceptance is proven by
+  pass and `devenv shell -- tests` is fully green, document that Gate 1 acceptance is proven by
   Step 10's module on the current commit).
 - Re-validate `gate2-complete` and `gate3-complete`: ensure both point at commits where
-  the **full suite** passes. If `gate3-complete` currently points at a red commit
-  (`8c028d9`), move it (delete and re-create) onto the green commit produced by this
-  refactor, after the final acceptance below.
+  the **full suite** passes. 
 - In each re-tag's annotation, paste the `devenv shell -- tests` summary line.
 
 **Acceptance gate:** every gate tag points at a green commit; annotations include the
