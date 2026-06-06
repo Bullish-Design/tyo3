@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import rustworkx as rx
 
@@ -1301,6 +1301,7 @@ class CodeGraph:
         root: Path,
         native_by_graph: dict[str, str],
         report: GraphBuildReport | None = None,
+        sort_key: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
         """Run passes 1–5 over *graph_paths* (a subset of the project).
 
@@ -1311,7 +1312,14 @@ class CodeGraph:
         each other resolve correctly — every dirty node exists before any reference is
         resolved. Targets in *non*-dirty files already exist in the graph (they were
         never removed), so cross-file references out of the dirty set resolve too.
+
+        *sort_key* controls the processing order of *graph_paths*.  Defaults to
+        ``sorted`` (alphabetical).  Parametrised tests can inject a different key
+        (e.g. reversed) to prove two-pass inheritance is genuinely order-independent
+        (§6.4).
         """
+        if sort_key is not None:
+            graph_paths = sort_key(list(graph_paths))
         symbols_by_file: dict[str, list[Symbol]] = {}
         for graph_path in graph_paths:
             native_path = native_by_graph.get(graph_path, graph_path)
@@ -1841,6 +1849,7 @@ class CodeGraph:
         delta: SyncResult,
         *,
         report: GraphBuildReport | None = None,
+        sort_key: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
         """Incrementally update the HEAD graph from a write's SyncResult.
 
@@ -1856,6 +1865,11 @@ class CodeGraph:
 
         Requires ``self._root`` (set by build). Build the graph once with
         ``CodeGraph.build`` before applying deltas.
+
+        *sort_key* controls the processing order of the dirty file set.
+        Defaults to ``sorted`` (alphabetical).  Parametrised tests can inject
+        a different key (e.g. reversed) to prove two-pass inheritance is
+        genuinely order-independent (§6.4).
         """
         self._assert_mutable()
         if self._root is None:
@@ -1880,7 +1894,7 @@ class CodeGraph:
         deleted = {_to_relative(root, p) for p in delta.deleted}
 
         dirty = changed | deleted  # nodes to drop
-        to_index = sorted(created | changed)  # files to (re-)extract
+        to_index = (sort_key or sorted)(sorted(created | changed))  # files to (re-)extract
 
         # 0a. Handle moved entities: update location payload without changing
         #     the DurableId or churning edges — preserves §5.5.1 at the graph
@@ -1911,6 +1925,7 @@ class CodeGraph:
             root=root,
             native_by_graph=native_by_graph,
             report=report,
+            sort_key=sort_key,
         )
 
         # 3. Revalidate INBOUND edges: re-resolve each importer's references INTO the

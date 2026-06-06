@@ -273,7 +273,7 @@ mod tests {
 
         db.check();
 
-        (dir, crate::project::TyProjectState { db, root })
+        (dir, crate::project::TyProjectState { db, root, registry: None })
     }
 
     /// The core cross-file requirement: a use of an imported symbol resolves to
