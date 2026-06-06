@@ -347,8 +347,21 @@ class CodeGraph:
                     content_hash=symbol.content_hash,
                 )
                 new_nodes.append(node)
+                # Only register short-name → id when there is no collision.
+                # Qualified names are always unique within a file, but short
+                # names can collide (e.g. two classes each define a ``save``
+                # method).  A definitive short-name lookup that silently
+                # overwrites a prior entry would make reference resolution
+                # non-deterministic — the incremental and rebuild paths
+                # could pick different colliding symbols.
+                short_key = (file_str, symbol.name)
+                if short_key not in self._name_to_id:
+                    self._name_to_id[short_key] = did
+                else:
+                    # Collision: mark the short name as ambiguous so
+                    # callers fall back to qualified-name-only lookup.
+                    self._name_to_id[short_key] = ""
                 self._name_to_id[(file_str, qn)] = did
-                self._name_to_id[(file_str, symbol.name)] = did
 
         if new_nodes:
             indices = self._graph.add_nodes_from(new_nodes)
@@ -492,9 +505,11 @@ class CodeGraph:
         the DurableId. Falls back to node-name scan for pre-existing nodes
         from earlier builds.
         """
-        # Primary: name_to_id map (populated during materialisation)
+        # Primary: name_to_id map (populated during materialisation).
+        # An empty string signals a short-name collision — the caller
+        # must use a qualified name to disambiguate.
         cached = self._name_to_id.get((file_path, name))
-        if cached is not None:
+        if cached:
             return cached
         # Secondary: name_prefix_index (legacy, for @line ids)
         cached = self._name_prefix_index.get((file_path, name))
@@ -1130,10 +1145,14 @@ class CodeGraph:
         idx = self._graph.add_node(node)
         self._id_to_index[node.durable_id] = idx
         self._file_to_nodes[node.file].append(idx)
-        # Name→id map for cross-reference resolution
+        # Name→id map for cross-reference resolution (collision-safe).
         if node.qualified_name:
             self._name_to_id[(node.file, node.qualified_name)] = node.durable_id
-        self._name_to_id[(node.file, node.name)] = node.durable_id
+        short_key = (node.file, node.name)
+        if short_key not in self._name_to_id:
+            self._name_to_id[short_key] = node.durable_id
+        else:
+            self._name_to_id[short_key] = ""
         # Legacy lookup for payloads that predate Gate 2 §5.6.
         if "@" in node.durable_id:
             parts = node.durable_id.split("::", 1)
@@ -1180,10 +1199,14 @@ class CodeGraph:
             node: SymbolNode = self._graph[idx]
             self._id_to_index[node.durable_id] = idx
             self._file_to_nodes[node.file].append(idx)
-            # Rebuild name→id map
+            # Rebuild name→id map (collision-safe).
             if node.qualified_name:
                 self._name_to_id[(node.file, node.qualified_name)] = node.durable_id
-            self._name_to_id[(node.file, node.name)] = node.durable_id
+            short_key = (node.file, node.name)
+            if short_key not in self._name_to_id:
+                self._name_to_id[short_key] = node.durable_id
+            else:
+                self._name_to_id[short_key] = ""
             # Rebuild legacy suffix lookup for old payloads only.
             if "@" in node.durable_id:
                 parts = node.durable_id.split("::", 1)
@@ -1843,6 +1866,59 @@ class CodeGraph:
                     self._file_to_nodes[old_file].remove(idx)
                 self._file_to_nodes[file_str].append(idx)
 
+    def _revalidate_inbound_inheritance(
+        self,
+        source,
+        importers: set[str],
+        *,
+        native_by_graph: dict[str, str],
+        project_files: set[str],
+        root: Path,
+        report: GraphBuildReport | None = None,
+    ) -> None:
+        """Re-run inheritance passes for importer files after dirty nodes are
+        re-materialised.
+
+        When a base class file is edited, the derived classes in importer files
+        lose their INHERITS edges (the base-class nodes were dropped and
+        re-created in step 1).  This method re-runs Pass I (INHERITS) and
+        Pass II (OVERRIDES) for the importer files so they rediscover their
+        supertypes among the re-materialised dirty nodes.
+
+        Only processes classes whose supertypes map into *project_files* that
+        overlap the dirty set — a class inheriting only from non-dirty files
+        was unaffected by the drop.
+        """
+        importers_list = sorted(importers)
+        symbols_by_file: dict[str, list[Symbol]] = {}
+        for file_str in importers_list:
+            native_path = native_by_graph.get(file_str, file_str)
+            try:
+                symbols = source.document_symbols(native_path)
+            except Exception:
+                continue
+            if symbols:
+                symbols_by_file[file_str] = symbols
+
+        if not symbols_by_file:
+            return
+
+        # Pass I: re-add INHERITS edges for importer classes.
+        self._inherits_pass_I(
+            source,
+            symbols_by_file,
+            report=report,
+            root=root,
+            native_by_graph=native_by_graph,
+            project_files=project_files,
+        )
+        # Pass II: re-add OVERRIDES edges now that INHERITS chains are rebuilt.
+        self._overrides_pass_II(
+            symbols_by_file,
+            report=report,
+            native_by_graph=native_by_graph,
+        )
+
     def apply_delta(
         self,
         source,
@@ -1928,8 +2004,9 @@ class CodeGraph:
             sort_key=sort_key,
         )
 
-        # 3. Revalidate INBOUND edges: re-resolve each importer's references INTO the
-        #    dirty set only (its edges into non-dirty files survived step 1 untouched).
+        # 3. Revalidate INBOUND edges: re-resolve each importer's references
+        #    and inheritance INTO the dirty set (edges into non-dirty files
+        #    survived step 1 untouched).
         for importer in sorted(importers):
             self._resolve_references_via_occurrences(
                 source,
@@ -1939,6 +2016,21 @@ class CodeGraph:
                 root=root,
                 native_by_graph=native_by_graph,
                 restrict_targets=dirty,
+            )
+
+        # 3b. Revalidate inbound INHERITS edges for importers of dirty files.
+        #     When a base class file changes, its derived classes in importers
+        #     lose their INHERITS edges (the base-class nodes were dropped in
+        #     step 1).  Re-run _inherits_pass_I for the importer files so they
+        #     rediscover their supertypes among the re-materialised dirty nodes.
+        if importers:
+            self._revalidate_inbound_inheritance(
+                source,
+                importers,
+                native_by_graph=native_by_graph,
+                project_files=project_files,
+                root=root,
+                report=report,
             )
 
         # 4. Diagnostics: one project-wide check(), redistributed. A change in one file
