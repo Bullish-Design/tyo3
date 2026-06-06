@@ -19,6 +19,10 @@ class FormatVersionError(TyO3Error):
     """Raised when a config or sidecar format version is newer than supported."""
 
 
+class StoreBackendUnavailable(TyO3Error):
+    """Raised when an optional store backend dependency is not installed."""
+
+
 class ProjectClosedError(TyO3Error):
     """Raised when an operation is attempted on a closed project."""
 
@@ -47,6 +51,7 @@ __all__ = [
     "TyO3Error",
     "ConfigError",
     "FormatVersionError",
+    "StoreBackendUnavailable",
     "ProjectOpenError",
     "ProjectClosedError",
     "PathResolutionError",

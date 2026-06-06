@@ -7,7 +7,14 @@ from pathlib import Path
 import pytest
 
 from tyo3 import TyO3Session
-from tyo3.exceptions import ConfigError, FormatVersionError, RevisionEvictedError
+from tyo3.exceptions import (
+    ConfigError,
+    FormatVersionError,
+    RevisionEvictedError,
+    StoreBackendUnavailable,
+)
+from tyo3.sidecar import Sidecar
+from tyo3.stores import FsStore, open_store
 
 
 def _project(root: Path) -> None:
@@ -160,3 +167,48 @@ schema_version = 999
 
     with pytest.raises(FormatVersionError):
         TyO3Session(tmp_path)
+
+
+def test_fs_store_round_trips_and_uses_atomic_tmp(tmp_path: Path) -> None:
+    store = FsStore(tmp_path / "cache")
+
+    assert store.get("missing@v1") is None
+    store.put("hash@v1", b"artifact")
+    assert store.has("hash@v1")
+    assert store.get("hash@v1") == b"artifact"
+    assert not list((tmp_path / "cache").rglob("*.tmp"))
+    store.delete("hash@v1")
+    assert store.get("hash@v1") is None
+
+
+def test_open_store_fs_uses_sidecar_cache_dir_lazily(tmp_path: Path) -> None:
+    sidecar = Sidecar(tmp_path)
+    store = open_store({"backend": "fs"}, sidecar, layer="descriptions")
+
+    assert isinstance(store, FsStore)
+    assert not sidecar.cache_dir("descriptions").exists()
+    store.put("hash@v1", b"artifact")
+    assert sidecar.cache_dir("descriptions").exists()
+
+
+def test_lazy_vector_backend_missing_dependency(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def fail_import(name: str):
+        if name == "lancedb":
+            raise ImportError("missing")
+        return __import__(name)
+
+    monkeypatch.setattr("importlib.import_module", fail_import)
+
+    with pytest.raises(StoreBackendUnavailable, match="lancedb"):
+        open_store({"backend": "lancedb"}, Sidecar(tmp_path), layer="vectors")
+
+
+def test_python_sidecar_layout_matches_rust_contract(tmp_path: Path) -> None:
+    sidecar = Sidecar(tmp_path)
+
+    assert sidecar.config_path() == tmp_path / ".tyo3" / "config.toml"
+    assert sidecar.config_local_path() == tmp_path / ".tyo3" / "config.local.toml"
+    assert sidecar.secrets_path() == tmp_path / ".tyo3" / "secrets.toml"
+    assert sidecar.identity_db_path() == tmp_path / ".tyo3" / "identity.db"
+    assert sidecar.cache_dir("x") == tmp_path / ".tyo3" / "cache" / "x"
+    assert sidecar.authored_dir("x") == tmp_path / ".tyo3" / "authored" / "x"
