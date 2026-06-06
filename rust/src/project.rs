@@ -1227,22 +1227,66 @@ fn pos_le(a: &dto::PositionDto, b: &dto::PositionDto) -> bool {
 /// under the inner lock, after identity reconciliation — so every entity's
 /// `DurableId` is already reconciled in `head.registry`.
 ///
-/// Emitted as a `rescan` delta. The incremental refinement (Step 5) narrows
-/// this to the dirty set; this full producer is the correct baseline and the
-/// cold-start / snapshot path.
+/// Emitted as a `rescan` delta — the baseline used for `sync_all`/rescan commits,
+/// cold-start, and snapshots. Normal commits use `produce_incremental_code_delta`,
+/// which re-resolves the same full set and diffs it against the layer.
 fn produce_full_code_delta(head: &mut HeadState) -> crate::dto::CodeDelta {
-    use crate::code_layer::{kind_str, Edge, NodeData};
-    use crate::dto::{PositionDto, RangeDto};
-    use std::collections::VecDeque;
+    let (nodes, edges) =
+        compute_full_nodes_edges(&head.db, &head.root, &head.registry, head.hash_policy);
+    let revision = head.store.revision().0;
+    head.code_layer.full_build(nodes, edges, revision)
+}
 
-    let state = TyProjectState {
+/// Produce an incremental `CodeDelta` for the current head (Gate 3N Step 5). The
+/// full node/edge set is re-resolved (cheap: salsa memoises unchanged files) and
+/// diffed against the authoritative `CodeLayer`, so the emitted delta is bounded
+/// to what actually changed while remaining parity-exact with a full rebuild.
+/// Inbound revalidation is implicit in the diff — a reference that no longer
+/// resolves is simply absent from the new set.
+fn produce_incremental_code_delta(head: &mut HeadState) -> crate::dto::CodeDelta {
+    let (nodes, edges) =
+        compute_full_nodes_edges(&head.db, &head.root, &head.registry, head.hash_policy);
+    let revision = head.store.revision().0;
+    head.code_layer.incremental_from_full(nodes, edges, revision)
+}
+
+/// Reconcile identity over the full project and (re)build the authoritative
+/// `CodeLayer` so a freshly opened or reloaded head has its derived structural
+/// state ready, and the next commit emits a bounded incremental delta. In-memory
+/// only — the registry is persisted on the first commit (Gate 4: open writes no
+/// sidecar).
+fn prime_head_derived(head: &mut HeadState) {
+    let prime_state = TyProjectState {
         db: head.db.clone(),
         root: head.root.clone(),
         registry: None,
         hash_policy: head.hash_policy,
     };
-    let root = head.root.clone();
-    let revision = head.store.revision().0;
+    let entities = extract_entities(&prime_state);
+    reconcile(&mut head.registry, &entities, head.store.revision());
+    let _ = produce_full_code_delta(head);
+}
+
+/// Resolve the complete code-layer node/edge set for a project state (Gate 3N
+/// Steps 1–4). Shared by the head producer, cold-start, and snapshot builds.
+/// `registry` supplies the reconciled `DurableId` for every entity.
+fn compute_full_nodes_edges(
+    db: &ProjectDatabase,
+    root: &SystemPath,
+    registry: &IdentityRegistry,
+    hash_policy: HashPolicy,
+) -> (Vec<crate::code_layer::NodeData>, Vec<crate::code_layer::Edge>) {
+    use crate::code_layer::{kind_str, Edge, NodeData};
+    use crate::dto::{PositionDto, RangeDto};
+    use std::collections::VecDeque;
+
+    let state = TyProjectState {
+        db: db.clone(),
+        root: root.to_path_buf(),
+        registry: None,
+        hash_policy,
+    };
+    let root = root.to_path_buf();
 
     let rel = |abs: &str| -> String {
         match SystemPath::new(abs).strip_prefix(&root) {
@@ -1250,8 +1294,8 @@ fn produce_full_code_delta(head: &mut HeadState) -> crate::dto::CodeDelta {
             Err(_) => abs.to_string(),
         }
     };
-    let did_of = |head: &HeadState, qpath: &str| -> Option<String> {
-        head.registry.by_path(qpath).map(|d| d.0.clone())
+    let did_of = |qpath: &str| -> Option<String> {
+        registry.by_path(qpath).map(|d| d.0.clone())
     };
 
     let module_range = RangeDto {
@@ -1330,7 +1374,7 @@ fn produce_full_code_delta(head: &mut HeadState) -> crate::dto::CodeDelta {
 
     // ── Entity nodes + containment + bookkeeping. ────────────────────────
     for e in &entities {
-        let did = match did_of(head, &e.qualified_path) {
+        let did = match did_of(&e.qualified_path) {
             Some(d) => d,
             None => continue,
         };
@@ -1366,7 +1410,7 @@ fn produce_full_code_delta(head: &mut HeadState) -> crate::dto::CodeDelta {
 
         // Containment edge (structural — no file/range/role).
         let parent_id = match &e.container {
-            Some(c) => did_of(head, c).unwrap_or_else(|| module_id.clone()),
+            Some(c) => did_of(c).unwrap_or_else(|| module_id.clone()),
             None => module_id.clone(),
         };
         edges.push(Edge {
@@ -1601,7 +1645,7 @@ fn produce_full_code_delta(head: &mut HeadState) -> crate::dto::CodeDelta {
         }
     }
 
-    head.code_layer.full_build(nodes, edges, revision)
+    (nodes, edges)
 }
 
 /// Innermost entity whose full_range contains `target` (the occurrence range).
@@ -1723,7 +1767,13 @@ fn commit_head(
 
     // 5. Produce the code-layer delta in-lock (Gate 3N §3.3.1 step 5): structural
     //    state is updated as the last in-lock step, ordered with content/identity.
-    let code_delta = produce_full_code_delta(head);
+    //    A rescan replaces the layer wholesale; a normal commit emits a bounded
+    //    incremental diff against it (Step 5).
+    let code_delta = if rescan {
+        produce_full_code_delta(head)
+    } else {
+        produce_incremental_code_delta(head)
+    };
 
     // 6. Build result.
     dto::SyncResultDto {
@@ -1999,23 +2049,14 @@ impl PyTyProject {
             config,
         );
 
-        // Prime the identity registry over the full project at open so the
-        // code-layer producer (Gate 3N) finds a reconciled `DurableId` for every
-        // entity — not just those in a later commit's scope. This replaces the
-        // Python `_prime_identity_registry` workaround the read-surface builder
-        // relied on. Done in-memory only: the registry is persisted on the first
-        // commit, so opening a project without a sidecar creates no files
-        // (Gate 4: open touches no source files / writes no sidecar).
-        {
-            let prime_state = TyProjectState {
-                db: head.db.clone(),
-                root: head.root.clone(),
-                registry: None,
-                hash_policy: head.hash_policy,
-            };
-            let entities = extract_entities(&prime_state);
-            reconcile(&mut head.registry, &entities, head.store.revision());
-        }
+        // Reconcile identity AND build the authoritative CodeLayer over the full
+        // project at open (Gate 3N), so the code-layer producer finds a reconciled
+        // `DurableId` for every entity and the next commit emits a bounded
+        // incremental delta. This replaces the Python `_prime_identity_registry`
+        // workaround the read-surface builder relied on. In-memory only: the
+        // registry is persisted on the first commit, so opening a project without
+        // a sidecar creates no files (Gate 4: open touches no source files).
+        prime_head_derived(&mut head);
 
         Ok(PyTyProject {
             inner: Arc::new(Mutex::new(Some(head))),
@@ -2049,8 +2090,11 @@ impl PyTyProject {
         let registry = std::mem::replace(&mut head.registry, IdentityRegistry::default());
         let config = head.config.clone();
 
-        // Rebuild while still holding the lock, then swap atomically.
-        *guard = Some(build_head_with_config(root, store, registry, config));
+        // Rebuild while still holding the lock, then swap atomically. Re-prime
+        // identity + CodeLayer over the reloaded db so derived state is current.
+        let mut new_head = build_head_with_config(root, store, registry, config);
+        prime_head_derived(&mut new_head);
+        *guard = Some(new_head);
         drop(guard);
 
         // If a watcher is running, update its watched paths (the head db
@@ -2419,6 +2463,18 @@ impl PyTyProject {
         })
     }
 
+    /// Produce a full `CodeDelta` describing the current HEAD code layer (Gate 3N
+    /// cold-start path). The `CodeLayer` is authoritative and already populated,
+    /// so this is O(nodes) with no re-resolution. Marked `rescan` so the replica
+    /// replaces wholesale.
+    fn code_delta_full<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let guard = lock_state(&self.inner, "code_delta_full")?;
+        let head = guard.as_ref().unwrap();
+        let delta = head.code_layer.full_delta();
+        drop(guard);
+        pythonize(py, &delta).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     // ── Floating warm fast path (Phase 9) ─────────────────────────────
 
     /// A floating, warm view of the live HEAD (architecture §6 "floating latest
@@ -2579,6 +2635,27 @@ impl PySnapshot {
             .map_err(AnalysisError::into_pyerr)?;
         pythonize(py, &dto)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    // ── Code layer (Gate 3N) ─────────────────────────────────────
+
+    /// Produce a full `CodeDelta` over the snapshot's own frozen database at its
+    /// pinned revision (Gate 3N Step 7). No live-head reads; the identity registry
+    /// was cloned at capture time. Marked `rescan` so a fresh replica is built.
+    fn code_delta_full<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "code_delta_full")?;
+        let revision = self.revision;
+        let delta = py.detach(move || {
+            let registry = state
+                .registry
+                .as_ref()
+                .expect("snapshot state carries a cloned identity registry");
+            let (nodes, edges) =
+                compute_full_nodes_edges(&state.db, &state.root, registry, state.hash_policy);
+            let mut layer = crate::code_layer::CodeLayer::new();
+            layer.full_build(nodes, edges, revision)
+        });
+        pythonize(py, &delta).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     // ── Document Symbols ─────────────────────────────────────────

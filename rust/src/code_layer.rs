@@ -173,18 +173,6 @@ impl CodeLayer {
         self.edges.insert(e);
     }
 
-    fn remove_edge_internal(&mut self, e: &Edge) {
-        if e.kind == "references" || e.kind == "imports" {
-            if let Some(srcs) = self.reverse_deps.get_mut(&e.dst) {
-                srcs.remove(&e.src);
-                if srcs.is_empty() {
-                    self.reverse_deps.remove(&e.dst);
-                }
-            }
-        }
-        self.edges.remove(e);
-    }
-
     /// Replace the whole layer with a freshly produced full build and emit a
     /// `rescan` delta carrying every node and edge (Steps 1–4, full build).
     pub fn full_build(&mut self, nodes: Vec<NodeData>, edges: Vec<Edge>, revision: u64) -> CodeDelta {
@@ -217,60 +205,77 @@ impl CodeLayer {
         }
     }
 
-    /// Apply a freshly produced node/edge set for the *affected* files and emit
-    /// an incremental `CodeDelta` (§6.3). `removed_ids` are nodes owned by the
-    /// dirty set that no longer exist; their incident edges are dropped too.
-    pub fn incremental(
+    /// Diff a freshly resolved *full* node/edge set against the current layer and
+    /// emit a minimal incremental `CodeDelta` (§6.3). The producer re-resolves the
+    /// whole project each commit (cheap — salsa memoises unchanged files), so the
+    /// new set is parity-exact with a full rebuild; the diff bounds the wire delta
+    /// and the replica's in-place update.
+    ///
+    /// This is correct by construction: `nodes_upserted`/`edges_added` are exactly
+    /// what the new state adds or changes, `nodes_removed`/`edges_removed` exactly
+    /// what it drops. Inbound revalidation is implicit — a reference that no longer
+    /// resolves simply is not in `new_edges`, so it is diffed out. Unchanged
+    /// structural edges (no range) never churn.
+    pub fn incremental_from_full(
         &mut self,
-        removed_ids: HashSet<String>,
         new_nodes: Vec<NodeData>,
         new_edges: Vec<Edge>,
-        moved: Vec<(String, String, RangeDto)>,
         revision: u64,
     ) -> CodeDelta {
-        let mut nodes_removed: BTreeSet<String> = BTreeSet::new();
-        let mut edges_removed: BTreeSet<Edge> = BTreeSet::new();
-        let mut nodes_upserted: BTreeMap<(String, String, String), SymbolNodeDto> = BTreeMap::new();
-        let mut edges_added: BTreeSet<Edge> = BTreeSet::new();
-
-        // 1. Remove dirty nodes and their incident edges.
-        let removed_set: HashSet<String> = removed_ids;
-        for id in &removed_set {
-            self.nodes.remove(id);
-            nodes_removed.insert(id.clone());
-        }
-        let incident: Vec<Edge> = self
-            .edges
-            .iter()
-            .filter(|e| removed_set.contains(&e.src) || removed_set.contains(&e.dst))
-            .cloned()
+        let new_node_map: HashMap<String, NodeData> = new_nodes
+            .into_iter()
+            .map(|n| (n.durable_id.clone(), n))
             .collect();
-        for e in incident {
-            self.remove_edge_internal(&e);
-            edges_removed.insert(e);
-        }
+        let new_edge_set: HashSet<Edge> = new_edges.into_iter().collect();
 
-        // 2. Upsert re-extracted nodes (skip pure no-ops).
-        for n in new_nodes {
-            let changed = match self.nodes.get(&n.durable_id) {
-                Some(prev) => !prev.payload_eq(&n),
+        // ── Node diff ────────────────────────────────────────────────────
+        let mut nodes_removed: BTreeSet<String> = BTreeSet::new();
+        for id in self.nodes.keys() {
+            if !new_node_map.contains_key(id) {
+                nodes_removed.insert(id.clone());
+            }
+        }
+        let mut nodes_upserted: BTreeMap<(String, String, String), SymbolNodeDto> = BTreeMap::new();
+        for (id, n) in &new_node_map {
+            // Range is included here (unlike `payload_eq`) so a cosmetic move
+            // keeps the replica's location fresh; it is not a remove+add and the
+            // parity comparator ignores node range either way.
+            let changed = match self.nodes.get(id) {
+                Some(prev) => !prev.payload_eq(n) || prev.range != n.range,
                 None => true,
             };
-            self.nodes.insert(n.durable_id.clone(), n.clone());
             if changed {
                 let key = (n.file.clone(), n.qualified_name.clone(), n.kind.clone());
                 nodes_upserted.insert(key, n.to_dto());
             }
         }
 
-        // 3. Add fresh edges (dedup against survivors).
-        for e in new_edges {
-            if !self.edges.contains(&e) {
+        // ── Edge diff ────────────────────────────────────────────────────
+        let mut edges_removed: BTreeSet<Edge> = BTreeSet::new();
+        for e in &self.edges {
+            if !new_edge_set.contains(e) {
+                edges_removed.insert(e.clone());
+            }
+        }
+        let mut edges_added: BTreeSet<Edge> = BTreeSet::new();
+        for e in &new_edge_set {
+            if !self.edges.contains(e) {
                 edges_added.insert(e.clone());
             }
-            self.add_edge_internal(e);
         }
 
+        // ── Install the new authoritative state ──────────────────────────
+        self.nodes = new_node_map;
+        self.edges = new_edge_set;
+        self.reverse_deps.clear();
+        for e in &self.edges {
+            if e.kind == "references" || e.kind == "imports" {
+                self.reverse_deps
+                    .entry(e.dst.clone())
+                    .or_default()
+                    .insert(e.src.clone());
+            }
+        }
         self.revision = revision;
 
         CodeDelta {
@@ -278,7 +283,7 @@ impl CodeLayer {
             rescan: false,
             nodes_upserted: nodes_upserted.into_values().collect(),
             nodes_removed: nodes_removed.into_iter().collect(),
-            nodes_moved: moved,
+            nodes_moved: Vec::new(),
             edges_added: edges_added.iter().map(Edge::to_dto).collect(),
             edges_removed: edges_removed.iter().map(Edge::to_dto).collect(),
         }
