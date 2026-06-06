@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -214,6 +215,108 @@ path = "cache/s"
 
     with pytest.raises(ConfigError, match="layers.bad.generator"):
         TyO3Session(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("config_text", "pattern"),
+    [
+        (
+            """
+schema_version = 1
+[hashing.profiles.structure]
+[layers.code]
+origin = "authored"
+""",
+            "reserved layer name",
+        ),
+        (
+            """
+schema_version = 1
+[hashing.profiles.structure]
+[layers.bad]
+origin = "derived"
+generator = "g"
+generator_version = "v1"
+store = "s"
+entity_kinds = ["wizard"]
+[generators.g]
+type = "python"
+callable = "pkg:g"
+[stores.s]
+backend = "fs"
+path = "cache/s"
+""",
+            "wizard",
+        ),
+        (
+            """
+schema_version = 1
+[hashing.profiles.structure]
+[generators.g]
+type = "http"
+endpoint = "sk-livesecret1234567890"
+""",
+            "inline secret",
+        ),
+    ],
+)
+def test_invalid_configs_rejected_with_config_error(
+    tmp_path: Path, config_text: str, pattern: str
+) -> None:
+    _project(tmp_path)
+    _write_config(tmp_path, config_text)
+
+    with pytest.raises(ConfigError, match=pattern):
+        TyO3Session(tmp_path)
+
+
+def test_sidecar_is_sole_path_owner_in_source() -> None:
+    repo = Path(__file__).parents[3]
+    allowed = {
+        repo / "rust" / "src" / "sidecar.rs",
+        repo / "src" / "tyo3" / "sidecar.py",
+    }
+    offenders: list[Path] = []
+    for base in (repo / "rust" / "src", repo / "src" / "tyo3"):
+        for path in base.rglob("*"):
+            if path.is_file() and path.suffix in {".rs", ".py"} and path not in allowed:
+                if ".tyo3" in path.read_text():
+                    offenders.append(path.relative_to(repo))
+    assert offenders == []
+
+
+def test_identity_write_is_crash_safe_against_leftover_tmp(tmp_path: Path) -> None:
+    _project(tmp_path)
+    with TyO3Session(tmp_path) as session:
+        session.sync_all()
+
+    identity_path = tmp_path / ".tyo3" / "identity.db"
+    original = json.loads(identity_path.read_text())
+    identity_path.with_suffix(".tmp").write_text("not valid json")
+
+    with TyO3Session(tmp_path) as session:
+        session.sync_all()
+
+    assert json.loads(identity_path.read_text()) == original
+
+
+def test_deleting_sidecar_returns_to_defaults(tmp_path: Path) -> None:
+    _project(tmp_path)
+    _write_config(
+        tmp_path,
+        """
+schema_version = 1
+[spine]
+retain_cap = 4
+[hashing.profiles.structure]
+""",
+    )
+    for path in (tmp_path / ".tyo3").iterdir():
+        path.unlink()
+    (tmp_path / ".tyo3").rmdir()
+
+    with TyO3Session(tmp_path) as session:
+        assert session.config.spine.retain_cap == 256
 
 
 def test_fs_store_round_trips_and_uses_atomic_tmp(tmp_path: Path) -> None:
