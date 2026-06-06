@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -22,6 +23,7 @@ use crate::content::{ContentStore, Document, Generation, Revision};
 use crate::entity::{extract_entities, extract_entities_for};
 use crate::identity::{reconcile, reconcile_scoped, DurableId, IdentityRegistry};
 use crate::overlay::OverlaySystem;
+use crate::sidecar::Sidecar;
 
 use ruff_python_ast::{name::Name, PySourceType};
 
@@ -86,8 +88,10 @@ struct HeadState {
     /// (clone-shares the inner `Arc<ArcSwap<…>>`). Used by Phase 3 to publish.
     system: OverlaySystem,
     /// Identity registry: binds DurableIds to last-known entity facts.
-    /// Reconciled after every commit; persisted to .tyo3/identity.db.
+    /// Reconciled after every commit; persisted through the sidecar.
     registry: IdentityRegistry,
+    /// Canonical owner for all sidecar paths and durable writes.
+    sidecar: Sidecar,
 }
 
 /// Anything that can produce the cheap, GIL-releasable read clone.
@@ -865,6 +869,7 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore, registry: Identi
 
     HeadState {
         db,
+        sidecar: Sidecar::new(root.as_std_path()),
         root,
         store: initial_store,
         system,
@@ -1145,9 +1150,14 @@ fn run_identity_reconciliation(
     let orphaned = recon.retired.iter().map(|id| id.0.clone()).collect();
 
     // Persist.
-    let identity_path = head.root.as_std_path().join(".tyo3").join("identity.db");
-    if let Err(e) = head.registry.save(&identity_path) {
-        log::error!("Failed to persist identity registry: {}", e);
+    match head.registry.to_bytes() {
+        Ok(bytes) => {
+            let identity_path = head.sidecar.identity_db_path();
+            if let Err(e) = head.sidecar.write_atomic(&identity_path, &bytes) {
+                log::error!("Failed to persist identity registry: {}", e);
+            }
+        }
+        Err(e) => log::error!("Failed to serialise identity registry: {}", e),
     }
 
     IdentityDelta {
@@ -1409,12 +1419,18 @@ impl PyTyProject {
         })?;
         let system_root = SystemPathBuf::from(s);
 
-        // Load identity registry if it exists.
-        let identity_path = absolute.join(".tyo3").join("identity.db");
-        let registry = IdentityRegistry::load(&identity_path).unwrap_or_else(|e| {
-            log::warn!("Failed to load identity registry: {} — starting fresh.", e);
-            IdentityRegistry::default()
-        });
+        let sidecar = Sidecar::new(&absolute);
+        let registry = match fs::read(sidecar.identity_db_path()) {
+            Ok(bytes) => IdentityRegistry::from_bytes(&bytes).unwrap_or_else(|e| {
+                log::warn!("Failed to load identity registry: {} — starting fresh.", e);
+                IdentityRegistry::default()
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => IdentityRegistry::default(),
+            Err(e) => {
+                log::warn!("Failed to read identity registry: {} — starting fresh.", e);
+                IdentityRegistry::default()
+            }
+        };
 
         let head = build_head(system_root, ContentStore::new(), registry);
 

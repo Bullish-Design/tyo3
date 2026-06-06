@@ -14,6 +14,7 @@ mod hash;
 mod content;
 mod entity;
 mod identity;
+mod sidecar;
 mod convert;
 mod dto;
 mod overlay;

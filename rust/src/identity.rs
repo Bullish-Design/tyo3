@@ -16,9 +16,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::fs;
-use std::io;
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -306,38 +303,16 @@ impl IdentityRegistry {
         })
     }
 
-    /// Save the registry atomically to `path` (§11.3.3).
-    /// Writes to `path.tmp`, fsyncs, renames over `path`.
-    pub fn save(&self, path: &Path) -> Result<(), io::Error> {
-        // Ensure the parent directory exists.
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
+    /// Serialise the versioned registry format.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
         let json = self.to_json_value();
-        let text = serde_json::to_string_pretty(&json)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-        let tmp = path.with_extension("tmp");
-        fs::write(&tmp, &text)?;
-
-        // fsync the data.
-        let f = fs::File::open(&tmp)?;
-        f.sync_all()?;
-        drop(f);
-
-        fs::rename(&tmp, path)?;
-        Ok(())
+        serde_json::to_vec_pretty(&json)
     }
 
-    /// Load a registry from `path`.  Returns an empty registry if the file
-    /// does not exist.  Returns `FormatError` for unknown format versions.
-    pub fn load(path: &Path) -> Result<Self, FormatError> {
-        match fs::read_to_string(path) {
-            Ok(text) => Self::from_json(&text),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(FormatError::Io(e)),
-        }
+    /// Deserialise the versioned registry format.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FormatError> {
+        let text = std::str::from_utf8(bytes).map_err(|e| FormatError::Json(e.to_string()))?;
+        Self::from_json(text)
     }
 
     /// Deserialise from JSON text.
@@ -403,7 +378,6 @@ impl IdentityRegistry {
 /// Error from loading a registry.
 #[derive(Debug)]
 pub enum FormatError {
-    Io(io::Error),
     Json(String),
     MissingField(String),
     UnknownVersion(u64),
@@ -412,7 +386,6 @@ pub enum FormatError {
 impl fmt::Display for FormatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FormatError::Io(e) => write!(f, "I/O error: {}", e),
             FormatError::Json(s) => write!(f, "JSON error: {}", s),
             FormatError::MissingField(field) => write!(f, "missing field: {}", field),
             FormatError::UnknownVersion(v) => write!(f, "unknown format version: {}", v),
@@ -1443,10 +1416,10 @@ mod tests {
         assert_eq!(reg.get(&id).unwrap().status, IdentityStatus::Active);
     }
 
-    // ── Step 7: Persistence tests ───────────────────────────────────────
+    // ── Step 7: Format tests ────────────────────────────────────────────
 
     #[test]
-    fn round_trip_save_load() {
+    fn round_trip_to_bytes_from_bytes() {
         let mut reg = IdentityRegistry::default();
         let id = DurableId::mint();
         reg.insert(Anchor {
@@ -1459,11 +1432,8 @@ mod tests {
             status: IdentityStatus::Active,
         });
 
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("identity.db");
-
-        reg.save(&path).unwrap();
-        let loaded = IdentityRegistry::load(&path).unwrap();
+        let bytes = reg.to_bytes().unwrap();
+        let loaded = IdentityRegistry::from_bytes(&bytes).unwrap();
 
         assert_eq!(loaded.len(), reg.len());
         assert_eq!(loaded.get(&id).unwrap().qualified_path, "a.py::X");
@@ -1472,48 +1442,8 @@ mod tests {
     }
 
     #[test]
-    fn load_missing_file_yields_empty_registry() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nonexistent.db");
-        let reg = IdentityRegistry::load(&path).unwrap();
-        assert_eq!(reg.len(), 0);
-    }
-
-    #[test]
-    fn crash_safety_tmp_not_renamed() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("identity.db");
-
-        // Save a valid registry.
-        let mut reg = IdentityRegistry::default();
-        let id = DurableId::mint();
-        reg.insert(Anchor {
-            id: id.clone(),
-            qualified_path: "a.py::X".into(),
-            content_hash: hash(1),
-            kind: SymbolKind::Class,
-            first_seen_rev: Revision(1),
-            last_seen_rev: Revision(1),
-            status: IdentityStatus::Active,
-        });
-        reg.save(&path).unwrap();
-
-        // Simulate an interrupted write: write a tmp but don't rename.
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, b"garbage").unwrap();
-        // Don't rename — crash simulation.
-
-        // Load should still read the prior valid file.
-        let loaded = IdentityRegistry::load(&path).unwrap();
-        assert!(loaded.get(&id).is_some(), "prior valid file survived crash");
-    }
-
-    #[test]
     fn newer_format_version_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("identity.db");
-        std::fs::write(&path, r#"{"format_version": 99, "anchors": []}"#).unwrap();
-        let result = IdentityRegistry::load(&path);
+        let result = IdentityRegistry::from_bytes(br#"{"format_version": 99, "anchors": []}"#);
         match result {
             Err(FormatError::UnknownVersion(99)) => {} // expected
             other => panic!("expected UnknownVersion(99), got {:?}", other),
@@ -1522,10 +1452,6 @@ mod tests {
 
     #[test]
     fn stable_diff_two_saves_identical() {
-        let dir = tempfile::tempdir().unwrap();
-        let path1 = dir.path().join("id1.db");
-        let path2 = dir.path().join("id2.db");
-
         let id_a = DurableId("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string());
         let id_b = DurableId("01ARZ3NDEKTSV4RRFFQ69G5FAW".to_string());
 
@@ -1549,7 +1475,7 @@ mod tests {
             last_seen_rev: Revision(1),
             status: IdentityStatus::Active,
         });
-        reg1.save(&path1).unwrap();
+        let bytes1 = reg1.to_bytes().unwrap();
 
         // Save in "right" order.
         let mut reg2 = IdentityRegistry::default();
@@ -1571,10 +1497,8 @@ mod tests {
             last_seen_rev: Revision(1),
             status: IdentityStatus::Active,
         });
-        reg2.save(&path2).unwrap();
+        let bytes2 = reg2.to_bytes().unwrap();
 
-        let bytes1 = std::fs::read(&path1).unwrap();
-        let bytes2 = std::fs::read(&path2).unwrap();
         assert_eq!(bytes1, bytes2, "stable diff: byte-identical files");
     }
 }
