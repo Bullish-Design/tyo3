@@ -11,6 +11,7 @@ create_exception!(tyo3._native_impl, PositionError, pyo3::exceptions::PyRuntimeE
 create_exception!(tyo3._native_impl, RevisionEvictedError, pyo3::exceptions::PyValueError);
 
 mod hash;
+mod config;
 mod content;
 mod entity;
 mod identity;
