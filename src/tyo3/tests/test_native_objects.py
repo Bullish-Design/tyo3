@@ -201,9 +201,12 @@ class TestPythonizeEdgeCases:
         expected = {
             "TyProject",
             "TySnapshot",
+            "TyO3Error",
             "ProjectClosedError",
             "PathResolutionError",
             "PositionError",
+            "ConfigError",
+            "FormatVersionError",
             # Gate 1 §1.3.6: typed error for reading an evicted revision.
             "RevisionEvictedError",
         }

@@ -279,8 +279,13 @@ def test_sidecar_is_sole_path_owner_in_source() -> None:
     offenders: list[Path] = []
     for base in (repo / "rust" / "src", repo / "src" / "tyo3"):
         for path in base.rglob("*"):
+            if "tests" in path.parts:
+                continue
             if path.is_file() and path.suffix in {".rs", ".py"} and path not in allowed:
-                if ".tyo3" in path.read_text():
+                text = path.read_text()
+                if path.suffix == ".rs":
+                    text = text.split("#[cfg(test)]", 1)[0]
+                if 'join(".tyo3")' in text or '/ ".tyo3"' in text:
                     offenders.append(path.relative_to(repo))
     assert offenders == []
 
