@@ -130,6 +130,24 @@ impl OverlaySystem {
             .cloned()
             .collect()
     }
+
+    /// True if `path` is a directory implied by the generation: some `Text`
+    /// document key is a strict descendant of `path`.
+    ///
+    /// A frozen overlay stores only file documents, but ty's module resolver
+    /// asks for directory metadata on its search roots and on every package
+    /// directory along an import path. Without this, no first-party module
+    /// resolves under a snapshot (every directory looks absent), so reads done
+    /// through a snapshot can't see sibling modules even though their content
+    /// is pinned. Synthesising directories from the file keys keeps the frozen
+    /// view fully self-describing without a disk fallback (Design A, §1.3.1).
+    fn is_synthesised_directory(&self, path: &SystemPath) -> bool {
+        // `starts_with` is component-wise, so a key strictly under `path` makes
+        // `path` an ancestor directory.
+        self.system_keys()
+            .iter()
+            .any(|key| key.as_path() != path && key.starts_with(path))
+    }
 }
 
 impl System for OverlaySystem {
@@ -145,9 +163,20 @@ impl System for OverlaySystem {
                 ))
             }
             Some(Document::Deleted { .. }) => Err(not_found(path)),
-            // Design A: frozen views have no disk fallback.  If a path is not
-            // in the generation, it does not exist at this revision.
-            None if self.frozen.is_some() => Err(not_found(path)),
+            // Design A: frozen views have no disk fallback.  A path with no
+            // document is either a directory implied by the generation's keys
+            // (which the module resolver must see) or genuinely absent.
+            None if self.frozen.is_some() => {
+                if self.is_synthesised_directory(path) {
+                    Ok(Metadata::new(
+                        FileRevision::new(0),
+                        None,
+                        FileType::Directory,
+                    ))
+                } else {
+                    Err(not_found(path))
+                }
+            }
             // Live head: fall through to native disk.
             None => self.native.path_metadata(path),
         }

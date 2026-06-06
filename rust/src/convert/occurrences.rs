@@ -1,491 +1,234 @@
+//! Batch name-occurrence resolution for a file.
+//!
+//! For every name reference in a file we emit a [`NameOccurrenceDto`] carrying
+//! the source token text, its role, its source range, and — crucially — the
+//! *resolved definition target* (`target_file` + `target_name`).
+//!
+//! The target resolution follows import aliases through to the original
+//! definition, **across files**, using the semantic engine's
+//! `definitions_for_name` / `definitions_for_attribute` (with
+//! `ImportAliasResolution::ResolveAliases`).  This is what lets the Python code
+//! layer build cross-file reference and import edges: a use of `User` imported
+//! `from models import User` resolves to `models.py::User`, not to the local
+//! import binding.
+//!
+//! Traversal uses ruff's `SourceOrderVisitor` so coverage is complete (calls,
+//! attributes, comprehensions, f-strings, decorators, annotations, …) rather
+//! than a hand-maintained list of expression kinds.
+
 use ruff_db::files::File;
 use ruff_db::parsed::parsed_module;
+use ruff_db::source::source_text;
 use ruff_python_ast as ast;
+use ruff_python_ast::visitor::source_order::{self, SourceOrderVisitor};
+use ruff_python_ast::AnyNodeRef;
 use ruff_source_file::LineIndex;
+use ruff_text_size::{Ranged, TextRange};
 
-use ty_ide::{SemanticTokenType, SemanticTokenModifier, goto_definition};
 use ty_project::Db;
+use ty_python_semantic::{
+    definitions_for_attribute, definitions_for_imported_symbol, definitions_for_name,
+    ImportAliasResolution, ResolvedDefinition, SemanticModel,
+};
 
 use crate::coordinates;
 use crate::dto::{NameOccurrenceDto, ReferenceRoleDto};
 
-/// Name-like semantic token types.
-const NAME_TOKEN_TYPES: &[SemanticTokenType] = &[
-    SemanticTokenType::Namespace,
-    SemanticTokenType::Class,
-    SemanticTokenType::Parameter,
-    SemanticTokenType::SelfParameter,
-    SemanticTokenType::ClsParameter,
-    SemanticTokenType::Variable,
-    SemanticTokenType::Property,
-    SemanticTokenType::Function,
-    SemanticTokenType::Method,
-    SemanticTokenType::Decorator,
-    SemanticTokenType::BuiltinConstant,
-    SemanticTokenType::TypeParameter,
-];
-
 /// Batch-resolve all name occurrences in a file.
 ///
-/// For every name-like semantic token in the file, emits an occurrence with:
-/// - `role` — definition, import, read, write
-/// - `name` — the source token text
-/// - `range` — the source range
-/// - `target_file`, `target_name`, `target_qualified_name` — when the token
-///   resolves to a definition (may be None for genuinely external/unknown
-///   symbols; `name` is always set for real tokens).
+/// Emits one occurrence per name reference / binding / import, each with:
+/// - `name` — the source token text (never `None` for a real token);
+/// - `role` — read / write / import / definition;
+/// - `range` — the source range of the token;
+/// - `target_file` / `target_name` — the resolved definition site, following
+///   import aliases across files (`None` only when the symbol genuinely does
+///   not resolve, e.g. an unresolved external).
 pub fn convert_file_occurrences(
     db: &dyn Db,
     file: File,
     source: &str,
     line_index: &LineIndex,
 ) -> Vec<NameOccurrenceDto> {
-    let tokens = ty_ide::semantic_tokens(db, file, None);
-
-    let mut occurrences = Vec::with_capacity(tokens.len());
-
-    for token in tokens.iter() {
-        if !is_name_token(&token.token_type) {
-            continue;
-        }
-
-        // Extract the name text directly from source using the token range.
-        let range = token.range;
-        let start: usize = range.start().into();
-        let end: usize = range.end().into();
-        let name_text = &source[start..end];
-
-        // Classify the role from token type and modifiers.
-        let role = classify_role(&token.token_type, token.modifiers);
-
-        // Resolve the definition target.
-        let (target_file, target_name, _target_qualified_name) =
-            resolve_occurrence_target(db, file, &token, range, source);
-
-        occurrences.push(NameOccurrenceDto {
-            range: coordinates::range_to_dto_with_index(source, line_index, range),
-            name: Some(name_text.to_string()),
-            target_file,
-            target_name,
-            target_qualified_name: None,
-            role,
-        });
-    }
-
-    // Also walk the AST to find additional name references that semantic
-    // tokens may skip: attribute access (`obj.method`), constructor calls
-    // (`ClassName()`), and import aliases (`from x import Y`).
     let parsed = parsed_module(db, file).load(db);
-    let module_body = &parsed.syntax().body;
-    // Pre-populate seen ranges from semantic token occurrences
-    let mut seen_ranges: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
-    for occ in &occurrences {
-        seen_ranges.insert((
-            occ.range.start.line,
-            occ.range.start.column,
-        ));
-    }
-    let mut ast_walker = AstOccurrenceWalker {
+    let model = SemanticModel::new(db, file);
+
+    let mut visitor = OccurrenceVisitor {
         db,
         file,
+        model,
         source,
         line_index,
-        occurrences: &mut occurrences,
-        seen_ranges,
+        occurrences: Vec::new(),
     };
-    ast_walker.walk_body(module_body);
-
-    occurrences
+    visitor.visit_body(&parsed.syntax().body);
+    visitor.occurrences
 }
 
-// ── AST Walker for additional occurrences ────────────────────────────
+// ── Visitor ──────────────────────────────────────────────────────────────
 
-struct AstOccurrenceWalker<'a, 'b> {
+struct OccurrenceVisitor<'a> {
     db: &'a dyn Db,
     file: File,
+    model: SemanticModel<'a>,
     source: &'a str,
     line_index: &'a LineIndex,
-    occurrences: &'b mut Vec<NameOccurrenceDto>,
-    seen_ranges: std::collections::HashSet<(u32, u32)>, // (start_offset, end_offset)
+    occurrences: Vec<NameOccurrenceDto>,
 }
 
-impl<'a, 'b> AstOccurrenceWalker<'a, 'b> {
-    fn walk_body(&mut self, body: &'a [ast::Stmt]) {
-        for stmt in body {
-            self.walk_stmt(stmt);
-        }
+impl<'a> OccurrenceVisitor<'a> {
+    /// Push a self-targeting definition occurrence (the binding site of a
+    /// name defined in this file). No FFI resolution — the target is itself.
+    fn add_definition(&mut self, range: TextRange, name: &str) {
+        let path = self.file.path(self.db).as_str().to_string();
+        self.push(
+            range,
+            name,
+            ReferenceRoleDto::Definition,
+            Some(path),
+            Some(name.to_string()),
+        );
     }
 
-    fn walk_stmt(&mut self, stmt: &'a ast::Stmt) {
-        match stmt {
-            ast::Stmt::FunctionDef(func) => {
-                // Walk return type annotation
-                if let Some(returns) = &func.returns {
-                    self.walk_expr(returns);
-                }
-                // Walk decorators
-                for decorator in &func.decorator_list {
-                    self.walk_expr(&decorator.expression);
-                }
-                // Walk the body
-                for s in &func.body {
-                    self.walk_stmt(s);
-                }
-            }
-            ast::Stmt::ClassDef(class) => {
-                // Walk bases and arguments (for `class Foo(Bar):`)
-                if let Some(args) = &class.arguments {
-                    for base in &args.args {
-                        self.walk_expr(base);
-                    }
-                    for keyword in &args.keywords {
-                        self.walk_expr(&keyword.value);
-                    }
-                }
-                // Walk decorators
-                for decorator in &class.decorator_list {
-                    self.walk_expr(&decorator.expression);
-                }
-                // Walk the body
-                for s in &class.body {
-                    self.walk_stmt(s);
-                }
-            }
-            ast::Stmt::Import(import) => {
-                for alias in &import.names {
-                    // Record the imported name
-                    self.try_add_occurrence(
-                        alias.name.range,
-                        alias.name.as_str(),
-                        ReferenceRoleDto::Import,
-                    );
-                    if let Some(as_name) = &alias.asname {
-                        self.try_add_occurrence(
-                            as_name.range,
-                            as_name.as_str(),
-                            ReferenceRoleDto::Definition,
-                        );
-                    }
-                }
-            }
-            ast::Stmt::ImportFrom(import_from) => {
-                // Record module name
-                if let Some(module) = &import_from.module {
-                    // Find the module name position in source
-                    let stmt_range = import_from.range;
-                    let stmt_start: usize = stmt_range.start().into();
-                    let src_after_from = &self.source[stmt_start..];
-                    if let Some(mod_pos) = find_word_in_source(src_after_from, module.as_str()) {
-                        let abs_start = stmt_start + mod_pos;
-                        let abs_end = abs_start + module.as_str().len();
-                        if abs_end <= self.source.len() {
-                            self.try_add_occurrence(
-                                ruff_text_size::TextRange::new(
-                                    ruff_text_size::TextSize::new(abs_start as u32),
-                                    ruff_text_size::TextSize::new(abs_end as u32),
-                                ),
-                                module.as_str(),
-                                ReferenceRoleDto::Import,
-                            );
-                        }
-                    }
-                }
-                // Record each imported name as Import role
-                for alias in &import_from.names {
-                    self.try_add_occurrence(
-                        alias.name.range,
-                        alias.name.as_str(),
-                        ReferenceRoleDto::Import,
-                    );
-                    if let Some(as_name) = &alias.asname {
-                        self.try_add_occurrence(
-                            as_name.range,
-                            as_name.as_str(),
-                            ReferenceRoleDto::Definition,
-                        );
-                    }
-                }
-            }
-            ast::Stmt::Assign(assign) => {
-                for target in &assign.targets {
-                    if let ast::Expr::Name(name) = target {
-                        self.try_add_occurrence(
-                            name.range,
-                            name.id.as_str(),
-                            ReferenceRoleDto::Definition,
-                        );
-                    }
-                }
-                self.walk_expr(&assign.value);
-            }
-            ast::Stmt::AnnAssign(ann_assign) => {
-                self.walk_expr(&ann_assign.annotation);
-                if let Some(value) = &ann_assign.value {
-                    self.walk_expr(value);
-                }
-            }
-            ast::Stmt::For(for_stmt) => {
-                self.walk_expr(&for_stmt.iter);
-                for s in &for_stmt.body {
-                    self.walk_stmt(s);
-                }
-                for s in &for_stmt.orelse {
-                    self.walk_stmt(s);
-                }
-            }
-            ast::Stmt::While(while_stmt) => {
-                self.walk_expr(&while_stmt.test);
-                for s in &while_stmt.body {
-                    self.walk_stmt(s);
-                }
-                for s in &while_stmt.orelse {
-                    self.walk_stmt(s);
-                }
-            }
-            ast::Stmt::If(if_stmt) => {
-                self.walk_expr(&if_stmt.test);
-                for s in &if_stmt.body {
-                    self.walk_stmt(s);
-                }
-                for clause in &if_stmt.elif_else_clauses {
-                    for s in &clause.body {
-                        self.walk_stmt(s);
-                    }
-                }
-            }
-            ast::Stmt::Try(try_stmt) => {
-                for s in &try_stmt.body {
-                    self.walk_stmt(s);
-                }
-                for handler in &try_stmt.handlers {
-                    if let ast::ExceptHandler::ExceptHandler(exc) = handler {
-                        for s in &exc.body {
-                            self.walk_stmt(s);
-                        }
-                    }
-                }
-                for s in &try_stmt.orelse {
-                    self.walk_stmt(s);
-                }
-                for s in &try_stmt.finalbody {
-                    self.walk_stmt(s);
-                }
-            }
-            ast::Stmt::With(with_stmt) => {
-                for s in &with_stmt.body {
-                    self.walk_stmt(s);
-                }
-            }
-            ast::Stmt::Raise(raise) => {
-                if let Some(exc) = &raise.exc {
-                    self.walk_expr(exc);
-                }
-            }
-            ast::Stmt::Return(ret) => {
-                if let Some(value) = &ret.value {
-                    self.walk_expr(value);
-                }
-            }
-            ast::Stmt::Expr(expr_stmt) => {
-                self.walk_expr(&expr_stmt.value);
-            }
-            _ => {}
-        }
-    }
-
-    fn walk_expr(&mut self, expr: &'a ast::Expr) {
-        match expr {
-            ast::Expr::Call(call) => {
-                // Record the call target (could be a Name, Attribute, etc.)
-                self.walk_expr(&call.func);
-                for arg in &call.arguments.args {
-                    self.walk_expr(arg);
-                }
-                for keyword in &call.arguments.keywords {
-                    self.walk_expr(&keyword.value);
-                }
-            }
-            ast::Expr::Attribute(attr) => {
-                // Record `obj.method` as a Read reference to `method`
-                self.try_add_occurrence(
-                    attr.range,
-                    attr.attr.as_str(),
-                    ReferenceRoleDto::Read,
-                );
-                // Walk the value (e.g., `user` in `user.save`)
-                self.walk_expr(&attr.value);
-            }
-            ast::Expr::Name(name) => {
-                // Record name references not already captured by semantic tokens
-                let name_str = name.id.as_str();
-                if matches!(name_str, "True" | "False" | "None" | "_") {
-                    return;
-                }
-                self.try_add_occurrence(name.range, name_str, ReferenceRoleDto::Read);
-            }
-            ast::Expr::BinOp(bin_op) => {
-                self.walk_expr(&bin_op.left);
-                self.walk_expr(&bin_op.right);
-            }
-            ast::Expr::Compare(compare) => {
-                self.walk_expr(&compare.left);
-                for comp in &compare.comparators {
-                    self.walk_expr(comp);
-                }
-            }
-            ast::Expr::BoolOp(bool_op) => {
-                for value in &bool_op.values {
-                    self.walk_expr(value);
-                }
-            }
-            ast::Expr::UnaryOp(unary) => {
-                self.walk_expr(&unary.operand);
-            }
-            ast::Expr::Subscript(subscript) => {
-                self.walk_expr(&subscript.value);
-                self.walk_expr(&subscript.slice);
-            }
-            _ => {}
-        }
-    }
-
-    /// Add an occurrence only if there isn't already one at the same range.
-    fn try_add_occurrence(
+    fn push(
         &mut self,
-        range: ruff_text_size::TextRange,
+        range: TextRange,
         name: &str,
         role: ReferenceRoleDto,
+        target_file: Option<String>,
+        target_name: Option<String>,
     ) {
-        // Compute the (line, column) of the range start for dedup
-        let one_indexed_line = self.line_index.line_index(range.start());
-        let line = (one_indexed_line.get() - 1) as u32; // zero-indexed
-        let line_start: usize = self.line_index.line_start(one_indexed_line, self.source).into();
-        let start_offset: usize = range.start().into();
-        let col = (start_offset - line_start) as u32;
-
-        if self.seen_ranges.contains(&(line, col)) {
-            return;
-        }
-        self.seen_ranges.insert((line, col));
-
-        let name_str = name.to_string();
-
-        // For definitions, target is self; for imports/references, use goto_definition
-        let (target_file, target_name, _) = match role {
-            ReferenceRoleDto::Definition => {
-                let file_path = self.file.path(self.db).as_str().to_string();
-                (Some(file_path), Some(name_str.clone()), None)
-            }
-            _ => self.resolve_via_goto_definition(range),
-        };
-
         self.occurrences.push(NameOccurrenceDto {
             range: coordinates::range_to_dto_with_index(self.source, self.line_index, range),
-            name: Some(name_str),
+            name: Some(name.to_string()),
             target_file,
             target_name,
             target_qualified_name: None,
             role,
         });
     }
+}
 
-    fn resolve_via_goto_definition(
-        &self,
-        range: ruff_text_size::TextRange,
-    ) -> (Option<String>, Option<String>, Option<String>) {
-        let offset = range.start();
-        if let Some(goto_result) = goto_definition(self.db, self.file, offset) {
-            let targets: Vec<_> = (&goto_result.value).into_iter().collect();
-            if let Some(target) = targets.first() {
-                let tgt_file = target.file();
-                let file_path = tgt_file.path(self.db).as_str().to_string();
-                let tgt_source = ruff_db::source::source_text(self.db, tgt_file);
-                let tgt_source_str = tgt_source.as_str();
-                let focus_range = target.focus_range();
-                let tgt_start: usize = focus_range.start().into();
-                let tgt_end: usize = focus_range.end().into();
-                let target_name = if tgt_end <= tgt_source_str.len() {
-                    Some(tgt_source_str[tgt_start..tgt_end].to_string())
-                } else {
-                    None
-                };
-                return (Some(file_path), target_name, None);
+impl<'a> SourceOrderVisitor<'a> for OccurrenceVisitor<'a> {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        match stmt {
+            // Definition sites: the defined name targets itself.
+            ast::Stmt::FunctionDef(func) => {
+                self.add_definition(func.name.range(), func.name.as_str());
             }
+            ast::Stmt::ClassDef(class) => {
+                self.add_definition(class.name.range(), class.name.as_str());
+            }
+            // `from module import name [as alias]` — resolve each imported
+            // symbol to its original definition (cross-file, alias-following).
+            ast::Stmt::ImportFrom(import) => {
+                for alias in &import.names {
+                    let imported = alias.name.as_str();
+                    let defs = definitions_for_imported_symbol(
+                        &self.model,
+                        import,
+                        imported,
+                        ImportAliasResolution::ResolveAliases,
+                    );
+                    let (target_file, target_name) = target_from_defs(self.db, &defs);
+                    // The binding's source location is the `as` name if present,
+                    // else the imported name itself.
+                    let range = alias
+                        .asname
+                        .as_ref()
+                        .map(|a| a.range())
+                        .unwrap_or_else(|| alias.name.range());
+                    self.push(
+                        range,
+                        imported,
+                        ReferenceRoleDto::Import,
+                        target_file,
+                        target_name,
+                    );
+                }
+            }
+            // `import module [as alias]` — a module dependency. We record the
+            // import without a per-symbol target; module-level import edges are
+            // driven by resolved references in the Python layer.
+            ast::Stmt::Import(import) => {
+                for alias in &import.names {
+                    let range = alias
+                        .asname
+                        .as_ref()
+                        .map(|a| a.range())
+                        .unwrap_or_else(|| alias.name.range());
+                    self.push(range, alias.name.as_str(), ReferenceRoleDto::Import, None, None);
+                }
+            }
+            _ => {}
         }
-        (None, None, None)
+        source_order::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        match expr {
+            ast::Expr::Name(name) => match name.ctx {
+                // A use of a name: resolve through aliases to its definition.
+                ast::ExprContext::Load => {
+                    let defs = definitions_for_name(
+                        &self.model,
+                        name.id.as_str(),
+                        AnyNodeRef::from(name),
+                        ImportAliasResolution::ResolveAliases,
+                    );
+                    let (target_file, target_name) = target_from_defs(self.db, &defs);
+                    self.push(
+                        name.range(),
+                        name.id.as_str(),
+                        ReferenceRoleDto::Read,
+                        target_file,
+                        target_name,
+                    );
+                }
+                // A binding target (`x = …`, `del x`): defines the name here.
+                ast::ExprContext::Store | ast::ExprContext::Del => {
+                    self.add_definition(name.range(), name.id.as_str());
+                }
+                _ => {}
+            },
+            // Attribute access (`obj.method`): resolve the member to its
+            // definition (e.g. the method on the class), following the LHS type.
+            ast::Expr::Attribute(attr) => {
+                let defs = definitions_for_attribute(&self.model, attr);
+                let (target_file, target_name) = target_from_defs(self.db, &defs);
+                let role = match attr.ctx {
+                    ast::ExprContext::Store | ast::ExprContext::Del => ReferenceRoleDto::Write,
+                    _ => ReferenceRoleDto::Read,
+                };
+                self.push(attr.attr.range(), attr.attr.as_str(), role, target_file, target_name);
+            }
+            _ => {}
+        }
+        source_order::walk_expr(self, expr);
     }
 }
 
-/// Find the byte offset of `word` within `source`, using simple search.
-fn find_word_in_source(source: &str, word: &str) -> Option<usize> {
-    source.find(word)
-}
+// ── Resolution helper ─────────────────────────────────────────────────────
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
-fn is_name_token(tt: &SemanticTokenType) -> bool {
-    NAME_TOKEN_TYPES.contains(tt)
-}
-
-fn classify_role(
-    token_type: &SemanticTokenType,
-    modifiers: SemanticTokenModifier,
-) -> ReferenceRoleDto {
-    if modifiers.contains(SemanticTokenModifier::DEFINITION) {
-        ReferenceRoleDto::Definition
-    } else if matches!(token_type, SemanticTokenType::Namespace) {
-        ReferenceRoleDto::Import
-    } else {
-        ReferenceRoleDto::Read
-    }
-}
-
-/// Resolve a token occurrence to its definition target.
+/// Extract `(target_file, target_name)` from the first resolved definition.
 ///
-/// For DEFINITION tokens, the target is the current file + name.
-/// For reference/import tokens, uses `goto_definition` to resolve.
-fn resolve_occurrence_target(
-    db: &dyn Db,
-    file: File,
-    token: &ty_ide::SemanticToken,
-    range: ruff_text_size::TextRange,
-    source: &str,
-) -> (Option<String>, Option<String>, Option<String>) {
-    // For DEFINITION tokens, the target is the definition itself.
-    if token.modifiers.contains(SemanticTokenModifier::DEFINITION) {
-        let file_path = file.path(db).as_str().to_string();
-        let start: usize = range.start().into();
-        let end: usize = range.end().into();
-        let name_text = if end <= source.len() {
-            Some(source[start..end].to_string())
-        } else {
-            None
-        };
-        return (Some(file_path), name_text, None);
-    }
+/// `focus_range` gives the definition's name range in its (possibly different)
+/// file; the name text is read from that file's source. Returns `(None, None)`
+/// when nothing resolves.
+fn target_from_defs(db: &dyn Db, defs: &[ResolvedDefinition]) -> (Option<String>, Option<String>) {
+    let Some(def) = defs.first() else {
+        return (None, None);
+    };
+    let focus = def.focus_range(db);
+    let target_file = focus.file();
+    let path = target_file.path(db).as_str().to_string();
 
-    // For reference/import tokens, use goto_definition.
-    let offset = range.start();
-    if let Some(goto_result) = goto_definition(db, file, offset) {
-        let targets: Vec<_> = (&goto_result.value).into_iter().collect();
-        if let Some(target) = targets.first() {
-            let tgt_file = target.file();
-            let file_path = tgt_file.path(db).as_str().to_string();
-            let tgt_source = ruff_db::source::source_text(db, tgt_file);
-            let tgt_source_str = tgt_source.as_str();
-            let focus_range = target.focus_range();
-            let tgt_start: usize = focus_range.start().into();
-            let tgt_end: usize = focus_range.end().into();
-            let target_name = if tgt_end <= tgt_source_str.len() {
-                Some(tgt_source_str[tgt_start..tgt_end].to_string())
-            } else {
-                None
-            };
-            return (Some(file_path), target_name, None);
-        }
-    }
+    let src = source_text(db, target_file);
+    let range = focus.range();
+    let start: usize = range.start().into();
+    let end: usize = range.end().into();
+    let name = src.as_str().get(start..end).map(|s| s.to_string());
 
-    (None, None, None)
+    (Some(path), name)
 }
 
 #[cfg(test)]
@@ -521,9 +264,8 @@ mod tests {
             f.write_all(content.as_bytes()).unwrap();
         }
 
-        let root = SystemPathBuf::from_path_buf(
-            dir.path().canonicalize().unwrap().to_path_buf(),
-        ).unwrap();
+        let root =
+            SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap().to_path_buf()).unwrap();
 
         let system = OverlaySystem::live(root.clone(), ContentStore::new().capture());
         let metadata = ProjectMetadata::new(Name::new("test"), root.clone());
@@ -531,26 +273,15 @@ mod tests {
 
         db.check();
 
-        (
-            dir,
-            crate::project::TyProjectState { db, root },
-        )
+        (dir, crate::project::TyProjectState { db, root })
     }
 
+    /// The core cross-file requirement: a use of an imported symbol resolves to
+    /// the symbol's *original definition file*, not the local import binding.
     #[test]
-    fn test_occurrences_resolve_project_local_targets() {
-        // Two-file fixture simulating the cross-file reference case
-        // from the refactoring guide.
-        // Note: goto_definition resolves imported names to their import
-        // alias in the local file, NOT to the original definition file.
-        // Cross-file resolution (alias → original def) happens on the
-        // Python side.  The Rust layer's job is to produce a complete
-        // set of occurrences with correct name, role, and target_name.
+    fn test_occurrences_resolve_cross_file_targets() {
         let files = vec![
-            (
-                "/project/models.py",
-                "class User:\n    def save(self): ...\n",
-            ),
+            ("/project/models.py", "class User:\n    def save(self): ...\n"),
             (
                 "/project/app.py",
                 "from models import User\ndef run():\n    return User().save()\n",
@@ -569,103 +300,72 @@ mod tests {
 
         let occurrences = convert_file_occurrences(&state.db, app_file, source_str, &line_index);
 
-        let occ_names: Vec<String> = occurrences
+        let dump: Vec<String> = occurrences
             .iter()
-            .map(|o| format!("{:?}({:?})->{:?}", o.name, o.role, o.target_name))
-            .collect();
-
-        assert!(
-            occurrences.len() >= 3,
-            "Expected at least 3 occurrences, got {}\n  {}",
-            occurrences.len(),
-            occ_names.join("\n  ")
-        );
-
-        // Check that `User` appears as an Import role (from 'from models import User')
-        let user_imports: Vec<_> = occurrences
-            .iter()
-            .filter(|o| {
-                o.name.as_deref() == Some("User")
-                    && o.role == ReferenceRoleDto::Import
+            .map(|o| {
+                format!(
+                    "{:?}({:?}) -> {:?}::{:?}",
+                    o.name, o.role, o.target_file, o.target_name
+                )
             })
             .collect();
-        assert!(
-            !user_imports.is_empty(),
-            "Expected a 'User' Import occurrence (from 'from models import User'), got:\n  {}",
-            occ_names.join("\n  ")
-        );
+        let dump = dump.join("\n  ");
 
-        // Check for the `run` definition occurrence.
-        let run_defs: Vec<_> = occurrences
+        // `User` used in `User()` must resolve to models.py::User.
+        let user_ref = occurrences
             .iter()
-            .filter(|o| {
-                o.name.as_deref() == Some("run")
-                    && o.role == ReferenceRoleDto::Definition
-            })
-            .collect();
+            .find(|o| o.name.as_deref() == Some("User") && o.role == ReferenceRoleDto::Read)
+            .unwrap_or_else(|| panic!("no User Read occurrence:\n  {dump}"));
         assert!(
-            !run_defs.is_empty(),
-            "Expected a 'run' occurrence with Definition role, got:\n  {}",
-            occ_names.join("\n  ")
+            user_ref.target_file.as_deref().is_some_and(|f| f.ends_with("models.py")),
+            "User must resolve to models.py, got {:?}\n  {dump}",
+            user_ref.target_file
+        );
+        assert_eq!(
+            user_ref.target_name.as_deref(),
+            Some("User"),
+            "User reference target_name\n  {dump}"
         );
 
-        // Check that `User` reference (in `User()`) exists with Read role
-        // and has a resolved target_name (even if target_file is the local
-        // import-binding file, not models.py).
-        let user_refs: Vec<_> = occurrences
+        // `save` used in `.save()` must resolve to models.py (the method).
+        let save_ref = occurrences
             .iter()
-            .filter(|o| o.name.as_deref() == Some("User") && o.role == ReferenceRoleDto::Read)
-            .collect();
+            .find(|o| o.name.as_deref() == Some("save") && o.role == ReferenceRoleDto::Read)
+            .unwrap_or_else(|| panic!("no save Read occurrence:\n  {dump}"));
         assert!(
-            !user_refs.is_empty(),
-            "Expected a 'User' reference (Read role) occurrence, got:\n  {}",
-            occ_names.join("\n  ")
+            save_ref.target_file.as_deref().is_some_and(|f| f.ends_with("models.py")),
+            "save must resolve to models.py, got {:?}\n  {dump}",
+            save_ref.target_file
+        );
+        assert_eq!(
+            save_ref.target_name.as_deref(),
+            Some("save"),
+            "save reference target_name\n  {dump}"
         );
 
-        let user_ref = &user_refs[0];
-        assert!(
-            user_ref.target_name.as_deref() == Some("User"),
-            "User reference should target name 'User', got target_name={:?}\n  {}",
-            user_ref.target_name,
-            occ_names.join("\n  ")
-        );
-        assert!(
-            user_ref.target_file.is_some(),
-            "User reference should have a resolved target_file\n  {}",
-            occ_names.join("\n  ")
-        );
-
-        // Check that `save` reference (in `.save()`) exists with Read role
-        // and has a resolved target_name.
-        let save_refs: Vec<_> = occurrences
+        // The import binding resolves to models.py too.
+        let user_import = occurrences
             .iter()
-            .filter(|o| o.name.as_deref() == Some("save") && o.role == ReferenceRoleDto::Read)
-            .collect();
+            .find(|o| o.name.as_deref() == Some("User") && o.role == ReferenceRoleDto::Import)
+            .unwrap_or_else(|| panic!("no User Import occurrence:\n  {dump}"));
         assert!(
-            !save_refs.is_empty(),
-            "Expected a 'save' reference occurrence (from user.save()), got:\n  {}",
-            occ_names.join("\n  ")
+            user_import.target_file.as_deref().is_some_and(|f| f.ends_with("models.py")),
+            "import User must resolve to models.py, got {:?}\n  {dump}",
+            user_import.target_file
         );
 
-        let save_ref = &save_refs[0];
+        // `run` is a definition in this file.
         assert!(
-            save_ref.target_name.is_some(),
-            "save reference should have a resolved target_name\n  {}",
-            occ_names.join("\n  ")
-        );
-        assert!(
-            save_ref.target_file.is_some(),
-            "save reference should have a resolved target_file\n  {}",
-            occ_names.join("\n  ")
+            occurrences
+                .iter()
+                .any(|o| o.name.as_deref() == Some("run") && o.role == ReferenceRoleDto::Definition),
+            "expected a run Definition occurrence\n  {dump}"
         );
     }
 
     #[test]
-    fn test_occurrences_have_name_for_every_token() {
-        let files = vec![
-            ("/project/test.py", "x = 1\nprint(x)\n"),
-        ];
-
+    fn test_every_occurrence_has_a_name() {
+        let files = vec![("/project/test.py", "x = 1\nprint(x)\n")];
         let (_dir, state) = state_with_files(files);
 
         let test_path = state.root.join("test.py");
@@ -678,15 +378,9 @@ mod tests {
 
         let occurrences = convert_file_occurrences(&state.db, test_file, source_str, &line_index);
 
-        assert!(!occurrences.is_empty(), "Expected at least some occurrences");
-
+        assert!(!occurrences.is_empty(), "expected occurrences");
         for occ in &occurrences {
-            assert!(
-                occ.name.is_some(),
-                "Every occurrence should have a name, got role={:?} range={:?}",
-                occ.role,
-                occ.range
-            );
+            assert!(occ.name.is_some(), "every occurrence must carry a name: {occ:?}");
         }
     }
 }

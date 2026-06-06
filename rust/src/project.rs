@@ -884,6 +884,29 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore, registry: Identi
 ///
 /// The result is `gen_full`: a generation that fully describes the project
 /// at revision R, ready to be frozen into a snapshot's overlay.
+/// Files a frozen snapshot must carry so its independent database can both
+/// analyse code and reproduce project discovery/configuration.
+///
+/// Python sources are the analysis inputs; the config files are what
+/// `ProjectMetadata::discover` / `apply_configuration_files` read when the
+/// snapshot's database is built. Without the config files in the generation,
+/// a frozen view (which has no disk fallback, §1.3.1) can't honour
+/// `pyproject.toml` / `ty.toml`, so snapshot analysis would silently ignore
+/// project configuration (e.g. `python-version`).
+fn snapshot_relevant_file(path: &SystemPath) -> bool {
+    if path
+        .extension()
+        .and_then(ruff_python_ast::PySourceType::try_from_extension)
+        .is_some()
+    {
+        return true;
+    }
+    matches!(
+        path.file_name(),
+        Some("pyproject.toml" | "ty.toml" | "setup.cfg" | "setup.py")
+    )
+}
+
 fn pre_populate_generation(
     root: &SystemPath,
     generation: &Generation,
@@ -905,16 +928,9 @@ fn pre_populate_generation(
             ruff_db::system::walk_directory::Error,
         >| {
             if let Ok(entry) = entry {
-                if entry.file_type().is_file() {
-                    if entry
-                        .path()
-                        .extension()
-                        .and_then(ruff_python_ast::PySourceType::try_from_extension)
-                        .is_some()
-                    {
-                        if let Ok(mut v) = paths.lock() {
-                            v.push(entry.path().to_path_buf());
-                        }
+                if entry.file_type().is_file() && snapshot_relevant_file(entry.path()) {
+                    if let Ok(mut v) = paths.lock() {
+                        v.push(entry.path().to_path_buf());
                     }
                 }
             }

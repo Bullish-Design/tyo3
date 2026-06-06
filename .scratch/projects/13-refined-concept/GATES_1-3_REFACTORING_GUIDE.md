@@ -125,6 +125,103 @@ the stdlib cases that happen to come through a different path.
 
 ---
 
+## Step 1 — Critical context: session reads run over a *frozen snapshot* (the real root cause)
+
+> **This is the single most important thing to understand before touching reads.**
+> Fixing the `file_occurrences` provider (above) is necessary but **not sufficient**:
+> when Step 1 was first done, the provider was correct (proven by a Rust unit test) yet
+> cross-file imports *still* didn't resolve in any Python session, and the six baseline
+> tests stayed red. The reason is below. It cost a long investigation; this section
+> exists so the next person spends zero time on it.
+
+### What actually happens on a read
+
+`TyO3Session._native()` (in `src/tyo3/session.py`) does **not** return the live head
+database. It returns a **cached frozen head snapshot**:
+
+```python
+def _native(self):              # TyO3Session override
+    if self._head_snap is None:
+        self._head_snap = self._inner.snapshot(None)   # a FROZEN snapshot at HEAD
+    return self._head_snap
+```
+
+So `session.check()`, `session.file_occurrences()`, `session.goto_definition()`, and
+**every `CodeGraph.build()`** run over the snapshot DB built by `build_frozen` /
+`pre_populate_generation` (`rust/src/project.rs`) — over the **frozen** `OverlaySystem`
+(`rust/src/overlay.rs`), *not* the live head. The only thing that reads the live head is
+`session.latest` (`LatestView` → `PyHeadView`).
+
+### Why that breaks cross-file resolution
+
+The frozen `OverlaySystem` is **Design A**: it has **no disk fallback**. A frozen view
+can only see what `pre_populate_generation` interned into its generation. ty's module
+resolver, to resolve `from models import User`, must:
+
+1. confirm each **search-root directory** exists (`path_metadata(<root>)` →
+   `FileType::Directory`), and
+2. find `models.py` / `models/` under it, then
+3. read its content.
+
+The original frozen `path_metadata` returned `not_found` for **anything that wasn't a
+file document** — including **directories** (the generation stores only file keys, never
+directory entries). So under a snapshot *every directory looked absent*, the resolver
+found **no search roots**, and **no first-party module resolved at all** — not synthetic
+fixtures, not the real `requests` repo, not even relative imports (`from .models import …`).
+Stdlib still resolved because it comes from vendored typeshed, not the project tree — which
+is exactly the misleading "stdlib resolves but project-local doesn't" symptom.
+
+A second, related fidelity gap: `pre_populate_generation` only interned `.py`/`.pyi`
+files, so `pyproject.toml` / `ty.toml` were unreadable through the frozen overlay. The
+snapshot's `ProjectMetadata::discover` + `apply_configuration_files` therefore silently
+ignored project configuration (e.g. `python-version`).
+
+### The fixes (landed)
+
+- **`overlay.rs` — synthesise directory metadata.** Frozen `path_metadata` now returns
+  `FileType::Directory` for any path that is a strict ancestor of a generation key
+  (`is_synthesised_directory`). This makes the frozen view fully self-describing for the
+  module resolver **without** reintroducing a disk fallback (preserves §1.3.1).
+- **`project.rs` — pre-populate config files.** `pre_populate_generation` now also
+  interns `pyproject.toml`, `ty.toml`, `setup.cfg`, `setup.py` (`snapshot_relevant_file`),
+  so snapshot discovery/config matches the head.
+- **`occurrences.rs` — use the alias-following resolver.** Resolve targets with
+  `ty_python_semantic::definitions_for_name` / `definitions_for_attribute` (with
+  `ImportAliasResolution::ResolveAliases`), driven by a `SourceOrderVisitor` for complete
+  coverage. **Do not** use `goto_definition` — it stops at the *local import binding*
+  (`app.py`), not the original definition (`models.py`), which is what the first
+  (failed) Step-1 attempt did.
+
+### The invariant to keep (and the debugging trap)
+
+> **Invariant.** A frozen snapshot's generation must be a *complete, self-describing*
+> view: every project source file, every config file ty reads during discovery, and
+> enough structure (directories synthesised from keys) that the module resolver can walk
+> it with **no disk access**. If you add a new kind of file ty needs at analysis time,
+> it must be added to `snapshot_relevant_file` too.
+
+> **Debugging trap.** A Rust unit test that builds over `use_defaults` / `build_head`
+> (live overlay, native disk fallthrough) can **pass** while the identical behaviour
+> **fails** in a Python session — because the session goes through the frozen snapshot
+> and the unit test does not. When a read-path bug reproduces in Python but not in Rust:
+> 1. compare `session.check()` (frozen) against `session.latest.check()` (live head) —
+>    if they differ, the bug is in snapshot fidelity, not in the provider;
+> 2. look for `unresolved-import` diagnostics as the tell that the module resolver can't
+>    see the tree;
+> 3. only then suspect the occurrence/edge logic.
+
+**Validate (snapshot fidelity).**
+- A 2-file synthetic project (`from models import User; User().save()`) opened with
+  `TyO3Session`: `session.check()` reports **no** `unresolved-import` for `models`, and
+  matches `session.latest.check()`.
+- The same for a real `src/`-layout project (e.g. `fixtures/demo_repos/requests`): no
+  first-party `unresolved-import` diagnostics; the graph builds cross-file REFERENCES and
+  IMPORTS edges.
+- A `pyproject.toml` `python-version = "3.8"` is honored by `session.check()` (snapshot
+  path), not just by the live head.
+
+---
+
 ## Step 2 — Verify reference + import edges and the reverse-dep index rebuild
 
 **Goal.** With Step 1's data flowing, confirm the Python reference resolver and
@@ -517,8 +614,10 @@ in the tag annotation.
 
 | Issue | Location | Step |
 |---|---|---|
-| `file_occurrences` returns empty/None occurrences | `rust/src/convert/occurrences.rs`, `dto/occurrences.rs`, `project.rs` (`file_occurrences`) | 1 |
-| Project-local refs skipped; reverse-dep index empty | `graph.py:583-648` (`_resolve_references_via_occurrences`), `_add_import_edge` (650) | 2 |
+| `file_occurrences` returns empty/None occurrences; uses `goto_definition` (stops at import binding) instead of alias-following `definitions_for_name`/`_for_attribute` | `rust/src/convert/occurrences.rs` | 1 |
+| **Reads run over a frozen snapshot; frozen `path_metadata` returns `not_found` for directories → module resolver blind → NO first-party import resolves** | `rust/src/overlay.rs` (`path_metadata`, `is_synthesised_directory`) | 1 (context) |
+| Snapshot pre-population omits config files → `pyproject.toml`/`ty.toml` unreadable in snapshot → project config (e.g. `python-version`) ignored | `rust/src/project.rs` (`pre_populate_generation`, `snapshot_relevant_file`) | 1 (context) |
+| Project-local refs skipped; reverse-dep index empty; `Import`-role occurrences create spurious REFERENCES edges from module node | `graph.py` (`_resolve_references_via_occurrences`), `_add_import_edge` | 2 |
 | Line-number-derived id fallback (§5.6) | `graph/identity.py:46` | 3 |
 | Stale `derive_durable_id` docstring vs `id_for` | `graph/identity.py:19-54`, `project.rs:1816-1837` | 3 |
 | Node `content_hash` is `None` (§6.2.2) | `dto/symbols.rs`, `graph.py:_materialize_file_nodes` (287) | 4 |
