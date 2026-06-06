@@ -84,12 +84,10 @@ pub struct Entity {
 /// Symbols without a natural qualified name get a structural name derived from
 /// container + kind + ordinal — never a line number (SPEC §5.6).
 pub fn extract_entities(state: &TyProjectState) -> Vec<Entity> {
-    let policy = HashPolicy::default();
     let project = state.db.project();
     let indexed = project.files(&state.db);
 
-    // Source-type filter (same as compute_files).
-    let source_files: Vec<File> = indexed
+    let source_files: HashSet<String> = indexed
         .iter()
         .filter(|f: &&File| {
             f.path(&state.db)
@@ -97,8 +95,39 @@ pub fn extract_entities(state: &TyProjectState) -> Vec<Entity> {
                 .and_then(ruff_python_ast::PySourceType::try_from_extension)
                 .is_some()
         })
+        .map(|f| f.path(&state.db).as_str().to_string())
+        .collect();
+
+    extract_entities_for(state, &source_files)
+}
+
+/// Extract addressable entities only from the supplied file paths.
+///
+/// `files` uses the same path strings as `File::path(...).as_str()` and
+/// `ChangeEvent::system_path()`. The full-project extractor delegates here with
+/// the complete source-file set; normal commits pass their touched-file scope.
+pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> Vec<Entity> {
+    let policy = HashPolicy::default();
+    let project = state.db.project();
+    let indexed = project.files(&state.db);
+
+    let mut source_files: Vec<File> = indexed
+        .iter()
+        .filter(|f: &&File| {
+            let path = f.path(&state.db);
+            files.contains(path.as_str())
+                && path
+                    .extension()
+                    .and_then(ruff_python_ast::PySourceType::try_from_extension)
+                    .is_some()
+        })
         .copied()
         .collect();
+    source_files.sort_by(|a, b| {
+        a.path(&state.db)
+            .as_str()
+            .cmp(b.path(&state.db).as_str())
+    });
 
     let mut entities: Vec<Entity> = Vec::new();
 
@@ -238,7 +267,7 @@ mod tests {
         let metadata = ProjectMetadata::new(Name::new("test"), root.clone());
         let db = ProjectDatabase::use_defaults(metadata, system);
 
-        (dir, TyProjectState { db, root })
+        (dir, TyProjectState { db, root, registry: None })
     }
 
     #[test]

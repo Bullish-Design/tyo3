@@ -14,7 +14,7 @@
 //! processing order (§5.5.5).  The one-to-one invariant (§5.5.4) is enforced
 //! by consumed sets so no anchor binds to more than one entity and vice versa.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -180,6 +180,9 @@ impl IdentityRegistry {
 
     /// Retire an anchor: remove from lookup indexes but keep in `by_id`.
     /// This ensures authored records keyed by this id survive (§5.5 rule 5).
+    ///
+    /// Idempotent when the anchor is already `Orphaned`: only transitions
+    /// `Active`/`NeedsReview` → `Orphaned` produce a retire event (§5.5.3).
     pub fn retire(&mut self, id: &DurableId, rev: Revision) {
         // Extract old index keys before mutation.
         let old_path: Option<String> = self.by_id.get(id).map(|a| a.qualified_path.clone());
@@ -187,6 +190,13 @@ impl IdentityRegistry {
         let Some(old_path) = old_path else {
             return;
         };
+
+        // If already orphaned, this is a no-op (§5.5.3: orphaned delta fires once).
+        if let Some(anchor) = self.by_id.get(id) {
+            if anchor.status == IdentityStatus::Orphaned {
+                return;
+            }
+        }
 
         // Update the anchor.
         if let Some(anchor) = self.by_id.get_mut(id) {
@@ -478,7 +488,7 @@ pub struct Reconciliation {
 }
 
 /// How a single entity was bound to (or received) a `DurableId`.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Binding {
     /// Rule 1: exact qualified_path match.
     Exact { id: DurableId },
@@ -491,7 +501,7 @@ pub enum Binding {
 }
 
 /// Confidence level for a STRUCT bind.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Confidence {
     Low,
 }
@@ -564,6 +574,29 @@ pub fn reconcile(
     entities: &[Entity],
     revision: Revision,
 ) -> Reconciliation {
+    reconcile_impl(registry, entities, revision, None)
+}
+
+/// Reconcile only a scoped set of files.
+///
+/// Entities outside `scope` were not extracted, so their anchors must not be
+/// considered vanished. Only anchors whose qualified path belongs to a scoped
+/// file are eligible for retirement.
+pub fn reconcile_scoped(
+    registry: &mut IdentityRegistry,
+    entities: &[Entity],
+    revision: Revision,
+    scope: &HashSet<String>,
+) -> Reconciliation {
+    reconcile_impl(registry, entities, revision, Some(scope))
+}
+
+fn reconcile_impl(
+    registry: &mut IdentityRegistry,
+    entities: &[Entity],
+    revision: Revision,
+    scope: Option<&HashSet<String>>,
+) -> Reconciliation {
     // 1. Determinism pre-sort.
     let mut sorted: Vec<&Entity> = entities.iter().collect();
     sorted.sort_by(|a, b| {
@@ -575,6 +608,7 @@ pub fn reconcile(
     let mut bound_ids: std::collections::HashSet<DurableId> = std::collections::HashSet::new();
     let mut matched_entities: std::collections::HashSet<usize> = std::collections::HashSet::new();
     let mut bindings: Vec<(String, Binding)> = Vec::with_capacity(sorted.len());
+    let mut bindings_by_path: HashMap<String, Binding> = HashMap::with_capacity(sorted.len());
     let mut needs_review: Vec<DurableId> = Vec::new();
 
     // ── Pass A: EXACT match ─────────────────────────────────────────
@@ -595,7 +629,9 @@ pub fn reconcile(
             }
             bound_ids.insert(id.clone());
             matched_entities.insert(idx);
-            bindings.push((e.qualified_path.clone(), Binding::Exact { id }));
+            let binding = Binding::Exact { id };
+            bindings_by_path.insert(e.qualified_path.clone(), binding.clone());
+            bindings.push((e.qualified_path.clone(), binding));
         }
     }
 
@@ -611,6 +647,7 @@ pub fn reconcile(
             .by_hash(&e.content_hash)
             .iter()
             .filter(|cid| !bound_ids.contains(cid))
+            .filter(|cid| anchor_in_scope(registry, cid, scope))
             .cloned()
             .collect();
 
@@ -634,10 +671,9 @@ pub fn reconcile(
                 .unwrap_or_default();
             bound_ids.insert(id.clone());
             matched_entities.insert(idx);
-            bindings.push((
-                e.qualified_path.clone(),
-                Binding::Moved { id, old_path },
-            ));
+            let binding = Binding::Moved { id, old_path };
+            bindings_by_path.insert(e.qualified_path.clone(), binding.clone());
+            bindings.push((e.qualified_path.clone(), binding));
         }
     }
 
@@ -654,6 +690,7 @@ pub fn reconcile(
                 .iter()
                 .filter(|(id, anchor)| {
                     !bound_ids.contains(id)
+                        && anchor_in_scope(registry, id, scope)
                         && anchor.name() == e.name
                         && anchor.kind == e.kind
                         && anchor.container() == e.container.as_deref()
@@ -675,13 +712,12 @@ pub fn reconcile(
             needs_review.push(id.clone());
             bound_ids.insert(id.clone());
             matched_entities.insert(idx);
-            bindings.push((
-                e.qualified_path.clone(),
-                Binding::Struct {
-                    id,
-                    confidence: Confidence::Low,
-                },
-            ));
+            let binding = Binding::Struct {
+                id,
+                confidence: Confidence::Low,
+            };
+            bindings_by_path.insert(e.qualified_path.clone(), binding.clone());
+            bindings.push((e.qualified_path.clone(), binding));
         }
     }
 
@@ -693,13 +729,17 @@ pub fn reconcile(
         let id = DurableId::mint();
         bound_ids.insert(id.clone());
         matched_entities.insert(idx);
-        bindings.push((e.qualified_path.clone(), Binding::Minted { id }));
+        let binding = Binding::Minted { id };
+        bindings_by_path.insert(e.qualified_path.clone(), binding.clone());
+        bindings.push((e.qualified_path.clone(), binding));
     }
 
     // ── Apply to registry ─────────────────────────────────────────┐
-    for (idx, e) in sorted.iter().enumerate() {
-        let binding = &bindings[idx];
-        match &binding.1 {
+    for e in sorted.iter() {
+        let binding = bindings_by_path
+            .get(&e.qualified_path)
+            .expect("every sorted entity has a binding");
+        match binding {
             Binding::Exact { id }
             | Binding::Moved { id, .. }
             | Binding::Struct { id, .. } => {
@@ -733,6 +773,22 @@ pub fn reconcile(
     let all_ids: Vec<DurableId> = registry.by_id.keys().cloned().collect();
     for id in &all_ids {
         if !bound_ids.contains(id) {
+            let in_scope = scope.map_or(true, |scope| {
+                registry
+                    .get(id)
+                    .map_or(false, |anchor| anchor_file(&anchor.qualified_path).map_or(false, |file| scope.contains(file)))
+            });
+            if !in_scope {
+                continue;
+            }
+            // Only emit retired if the anchor *transitions* to Orphaned;
+            // already-orphaned anchors from prior commits do not re-fire (§5.5.3).
+            let already_orphaned = registry
+                .get(id)
+                .map_or(false, |a| matches!(a.status, IdentityStatus::Orphaned));
+            if already_orphaned {
+                continue;
+            }
             registry.retire(id, revision);
             retired.push(id.clone());
         }
@@ -743,6 +799,22 @@ pub fn reconcile(
         retired,
         needs_review,
     }
+}
+
+fn anchor_file(qualified_path: &str) -> Option<&str> {
+    qualified_path.split_once("::").map(|(file, _)| file)
+}
+
+fn anchor_in_scope(
+    registry: &IdentityRegistry,
+    id: &DurableId,
+    scope: Option<&HashSet<String>>,
+) -> bool {
+    scope.map_or(true, |scope| {
+        registry
+            .get(id)
+            .map_or(false, |anchor| anchor_file(&anchor.qualified_path).map_or(false, |file| scope.contains(file)))
+    })
 }
 
 // ── Edit-distance for STRUCT matching ────────────────────────────────────
@@ -800,6 +872,7 @@ impl Anchor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn entity(path: &str, name: &str, kind: SymbolKind, hash: ContentHash, container: Option<&str>) -> Entity {
         Entity {
@@ -1055,6 +1128,164 @@ mod tests {
         assert!(recon.retired.contains(&id));
         assert!(reg.get(&id).is_some(), "retained in by_id");
         assert_eq!(reg.get(&id).unwrap().status, IdentityStatus::Orphaned);
+    }
+
+    #[test]
+    fn orphaned_not_refired_on_unrelated_edit() {
+        // Delete a symbol at R → appears in retired exactly once (at R);
+        // a subsequent unrelated edit at R+1 does NOT list it again (§5.5.3).
+        let mut reg = IdentityRegistry::default();
+        let id = DurableId::mint();
+        reg.insert(Anchor {
+            id: id.clone(),
+            qualified_path: "a.py::OldSym".into(),
+            content_hash: hash(10),
+            kind: SymbolKind::Function,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+
+        // Commit R: delete a.py::OldSym.
+        let recon_r = reconcile(&mut reg, &[], Revision(2));
+        assert!(
+            recon_r.retired.contains(&id),
+            "orphaned at the commit that deletes it"
+        );
+        assert_eq!(reg.get(&id).unwrap().status, IdentityStatus::Orphaned);
+
+        // Commit R+1: unrelated edit (add b.py::NewSym).
+        let entities = vec![entity("b.py", "NewSym", SymbolKind::Function, hash(20), None)];
+        let recon_r1 = reconcile(&mut reg, &entities, Revision(3));
+        assert!(
+            !recon_r1.retired.contains(&id),
+            "already-orphaned id must not re-appear in retired on an unrelated commit"
+        );
+        // Still orphaned.
+        assert_eq!(reg.get(&id).unwrap().status, IdentityStatus::Orphaned);
+    }
+
+    #[test]
+    fn retire_is_idempotent_for_orphaned_anchor() {
+        // Calling retire() on an already-orphaned anchor is a no-op:
+        // status stays Orphaned and last_seen_rev is not bumped.
+        let mut reg = IdentityRegistry::default();
+        let id = DurableId::mint();
+        reg.insert(Anchor {
+            id: id.clone(),
+            qualified_path: "a.py::OldSym".into(),
+            content_hash: hash(10),
+            kind: SymbolKind::Function,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+
+        // First retire.
+        reg.retire(&id, Revision(2));
+        assert_eq!(reg.get(&id).unwrap().status, IdentityStatus::Orphaned);
+        assert_eq!(reg.get(&id).unwrap().last_seen_rev, Revision(2));
+
+        // Second retire on already-orphaned anchor — should be a no-op.
+        reg.retire(&id, Revision(3));
+        assert_eq!(reg.get(&id).unwrap().status, IdentityStatus::Orphaned);
+        assert_eq!(
+            reg.get(&id).unwrap().last_seen_rev,
+            Revision(2),
+            "last_seen_rev must not be bumped by a redundant retire"
+        );
+    }
+
+    #[test]
+    fn scoped_reconcile_does_not_retire_out_of_scope_anchor() {
+        let mut reg = IdentityRegistry::default();
+        let id_a = DurableId::mint();
+        let id_b = DurableId::mint();
+        reg.insert(Anchor {
+            id: id_a.clone(),
+            qualified_path: "a.py::A".into(),
+            content_hash: hash(1),
+            kind: SymbolKind::Class,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+        reg.insert(Anchor {
+            id: id_b.clone(),
+            qualified_path: "b.py::B".into(),
+            content_hash: hash(2),
+            kind: SymbolKind::Class,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+
+        let mut scope = HashSet::new();
+        scope.insert("a.py".to_string());
+        let entities = vec![entity("a.py", "A", SymbolKind::Class, hash(10), None)];
+        let recon = reconcile_scoped(&mut reg, &entities, Revision(2), &scope);
+
+        assert!(recon.retired.is_empty());
+        assert_eq!(reg.get(&id_a).unwrap().status, IdentityStatus::NeedsReview);
+        assert_eq!(reg.get(&id_b).unwrap().status, IdentityStatus::Active);
+        assert!(reg.by_path("b.py::B").is_some());
+    }
+
+    #[test]
+    fn scoped_reconcile_retires_deleted_symbol_inside_scope() {
+        let mut reg = IdentityRegistry::default();
+        let id_a = DurableId::mint();
+        let id_b = DurableId::mint();
+        reg.insert(Anchor {
+            id: id_a.clone(),
+            qualified_path: "a.py::A".into(),
+            content_hash: hash(1),
+            kind: SymbolKind::Class,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+        reg.insert(Anchor {
+            id: id_b.clone(),
+            qualified_path: "b.py::B".into(),
+            content_hash: hash(2),
+            kind: SymbolKind::Class,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+
+        let mut scope = HashSet::new();
+        scope.insert("a.py".to_string());
+        let recon = reconcile_scoped(&mut reg, &[], Revision(2), &scope);
+
+        assert_eq!(recon.retired, vec![id_a.clone()]);
+        assert_eq!(reg.get(&id_a).unwrap().status, IdentityStatus::Orphaned);
+        assert_eq!(reg.get(&id_b).unwrap().status, IdentityStatus::Active);
+    }
+
+    #[test]
+    fn scoped_reconcile_does_not_rebind_out_of_scope_hash_match() {
+        let mut reg = IdentityRegistry::default();
+        let id_b = DurableId::mint();
+        reg.insert(Anchor {
+            id: id_b.clone(),
+            qualified_path: "b.py::B".into(),
+            content_hash: hash(7),
+            kind: SymbolKind::Class,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+
+        let mut scope = HashSet::new();
+        scope.insert("a.py".to_string());
+        let entities = vec![entity("a.py", "A", SymbolKind::Class, hash(7), None)];
+        let recon = reconcile_scoped(&mut reg, &entities, Revision(2), &scope);
+
+        assert!(matches!(recon.bindings[0].1, Binding::Minted { .. }));
+        assert_eq!(reg.get(&id_b).unwrap().qualified_path, "b.py::B");
+        assert_eq!(reg.get(&id_b).unwrap().status, IdentityStatus::Active);
     }
 
     #[test]

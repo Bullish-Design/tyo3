@@ -9,6 +9,8 @@
 /// - `moved`: qualified_paths that moved (Moved bindings)
 /// - `needs_review`: DurableIds flagged for human review
 /// - `orphaned`: DurableIds that disappeared this revision
+/// - `identity_extracted` / `identity_scope_files`: debug counters used to
+///   prove incremental reconciliation is bounded by the committed scope.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SyncResultDto {
     pub revision: u64,
@@ -21,6 +23,10 @@ pub struct SyncResultDto {
     pub needs_review: Vec<String>,
     #[serde(default)]
     pub orphaned: Vec<String>,
+    #[serde(default)]
+    pub identity_extracted: usize,
+    #[serde(default)]
+    pub identity_scope_files: usize,
     pub project_changed: bool,
     pub custom_stdlib_changed: bool,
     pub rescan: bool,

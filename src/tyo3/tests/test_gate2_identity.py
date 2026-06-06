@@ -346,21 +346,55 @@ class TestBoundedCost:
     """§5.5.6: An incremental commit reconciles only the touched+closure
     entity set, not the whole project."""
 
-    def test_incremental_edit_triggers_reconciliation(self):
-        """Even though we currently do full extraction, the reconciliation
-        infrastructure is in place. This test verifies edits produce valid
-        identity results."""
+    def test_incremental_edit_reconciles_only_touched_file(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "mod.py": "x = 1\n",
-            })
+            _write_files(
+                root,
+                {
+                    f"mod{i}.py": f"def f{i}():\n    return {i}\n"
+                    for i in range(12)
+                },
+            )
             s = _new_session(root)
-            id1 = s.id_for("mod.py", 1, 1)
+            edited_id = s.id_for("mod3.py", 1, 5)
+            unrelated_id = s.id_for("mod9.py", 1, 5)
+            assert edited_id is not None
+            assert unrelated_id is not None
 
-            # Edit.
-            s.edit("mod.py", "x = 2\n")
-            id2 = s.id_for("mod.py", 1, 1)
-            assert id1 == id2, "body change should preserve id"
+            result = s.edit("mod3.py", "def f3():\n    return 300\n")
+
+            assert result.identity_scope_files == 1
+            assert result.identity_extracted == 1
+            assert result.orphaned == []
+            assert s.id_for("mod3.py", 1, 5) == edited_id
+            assert s.id_for("mod9.py", 1, 5) == unrelated_id
+
+            s.close()
+
+    def test_incremental_delete_retires_only_symbol_inside_scope(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _write_files(
+                root,
+                {
+                    "target.py": "def kept():\n    return 1\n\n"
+                    "def removed():\n    return 2\n",
+                    "other.py": "def unrelated():\n    return 3\n",
+                },
+            )
+            s = _new_session(root)
+            removed_id = s.id_for("target.py", 4, 5)
+            unrelated_id = s.id_for("other.py", 1, 5)
+            assert removed_id is not None
+            assert unrelated_id is not None
+
+            result = s.edit("target.py", "def kept():\n    return 1\n")
+
+            assert result.identity_scope_files == 1
+            assert result.identity_extracted == 1
+            assert removed_id in result.orphaned
+            assert unrelated_id not in result.orphaned
+            assert s.id_for("other.py", 1, 5) == unrelated_id
 
             s.close()

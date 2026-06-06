@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -19,8 +19,8 @@ use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
 use crate::content::{ContentStore, Document, Generation, Revision};
-use crate::entity::extract_entities;
-use crate::identity::{reconcile, DurableId, IdentityRegistry};
+use crate::entity::{extract_entities, extract_entities_for};
+use crate::identity::{reconcile, reconcile_scoped, DurableId, IdentityRegistry};
 use crate::overlay::OverlaySystem;
 
 use ruff_python_ast::{name::Name, PySourceType};
@@ -1083,6 +1083,82 @@ fn classify_disk_sync(
     }
 }
 
+fn identity_scope_from_events(events: &[ChangeEvent]) -> Option<HashSet<String>> {
+    let scope: HashSet<String> = events
+        .iter()
+        .filter_map(|event| event.system_path())
+        .filter(|path| {
+            path.extension()
+                .and_then(PySourceType::try_from_extension)
+                .is_some()
+        })
+        .map(|path| path.as_str().to_string())
+        .collect();
+
+    if scope.is_empty() {
+        None
+    } else {
+        Some(scope)
+    }
+}
+
+struct IdentityDelta {
+    moved: Vec<String>,
+    needs_review: Vec<String>,
+    orphaned: Vec<String>,
+    extracted: usize,
+    scope_files: usize,
+}
+
+/// Shared identity reconciliation: extract entities, reconcile against
+/// registry, persist, and return identity delta fields.
+///
+/// `scope` is derived from the committed `ChangeEvent` paths. Identity anchors
+/// are file-local (`qualified_path` begins with the defining file), so this is
+/// the bounded closure needed by the identity layer; cross-file graph
+/// invalidation continues to use the code graph's reverse-dependency index.
+fn run_identity_reconciliation(
+    head: &mut HeadState,
+    scope: Option<&HashSet<String>>,
+) -> IdentityDelta {
+    let state = TyProjectState {
+        db: head.db.clone(),
+        root: head.root.clone(),
+        registry: None,
+    };
+    let entities = match scope {
+        Some(scope) => extract_entities_for(&state, scope),
+        None => extract_entities(&state),
+    };
+    let extracted = entities.len();
+    let recon = match scope {
+        Some(scope) => reconcile_scoped(&mut head.registry, &entities, head.store.revision(), scope),
+        None => reconcile(&mut head.registry, &entities, head.store.revision()),
+    };
+
+    let moved = recon.moved().iter().map(|id| {
+        head.registry.get(id)
+            .map(|a| a.qualified_path.clone())
+            .unwrap_or_default()
+    }).collect();
+    let needs_review = recon.needs_review.iter().map(|id| id.0.clone()).collect();
+    let orphaned = recon.retired.iter().map(|id| id.0.clone()).collect();
+
+    // Persist.
+    let identity_path = head.root.as_std_path().join(".tyo3").join("identity.db");
+    if let Err(e) = head.registry.save(&identity_path) {
+        log::error!("Failed to persist identity registry: {}", e);
+    }
+
+    IdentityDelta {
+        moved,
+        needs_review,
+        orphaned,
+        extracted,
+        scope_files: scope.map_or(0, |scope| scope.len()),
+    }
+}
+
 /// Publish the captured store generation, apply `events` to the db, run
 /// reconciliation against the identity registry, and build the SyncResult.
 ///
@@ -1101,39 +1177,8 @@ fn commit_head(
     let result = head.db.apply_changes(events, None);
 
     // 4. Run reconciliation (Gate 2).
-    let revision = head.store.revision();
-
-    let (moved_paths, needs_review_ids, orphaned_ids) = {
-        // Build a read-only view of the new state for entity extraction.
-        let state = TyProjectState {
-            db: head.db.clone(),
-            root: head.root.clone(),
-            registry: None,
-        };
-
-        // Extract all entities from the new revision.
-        let entities = extract_entities(&state);
-
-        // Reconcile against the identity registry.
-        let recon = reconcile(&mut head.registry, &entities, revision);
-
-        // Translate reconciliation into delta fields.
-        let moved = recon.moved().iter().map(|id| {
-            head.registry.get(id)
-                .map(|a| a.qualified_path.clone())
-                .unwrap_or_default()
-        }).collect::<Vec<String>>();
-        let nrv: Vec<String> = recon.needs_review.iter().map(|id| id.0.clone()).collect();
-        let orp: Vec<String> = recon.retired.iter().map(|id| id.0.clone()).collect();
-
-        // Persist the identity registry atomically.
-        let identity_path = head.root.as_std_path().join(".tyo3").join("identity.db");
-        if let Err(e) = head.registry.save(&identity_path) {
-            log::error!("Failed to persist identity registry: {}", e);
-        }
-
-        (moved, nrv, orp)
-    };
+    let scope = if rescan { None } else { identity_scope_from_events(events) };
+    let identity = run_identity_reconciliation(head, scope.as_ref());
 
     // 5. Build result.
     dto::SyncResultDto {
@@ -1141,9 +1186,11 @@ fn commit_head(
         created,
         changed,
         deleted,
-        moved: moved_paths,
-        needs_review: needs_review_ids,
-        orphaned: orphaned_ids,
+        moved: identity.moved,
+        needs_review: identity.needs_review,
+        orphaned: identity.orphaned,
+        identity_extracted: identity.extracted,
+        identity_scope_files: identity.scope_files,
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan,
@@ -1187,31 +1234,20 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
     };
     let result = head.db.apply_changes(std::slice::from_ref(&event), None);
 
-    // Run reconciliation after the event is applied.
-    let mut extra = dto::SyncResultDto::default();
-    {
-        let state = TyProjectState {
-            db: head.db.clone(),
-            root: head.root.clone(),
-            registry: None,
-        };
-        let entities = extract_entities(&state);
-        let recon = reconcile(&mut head.registry, &entities, head.store.revision());
-        extra.moved = recon.moved().iter().map(|id| {
-            head.registry.get(id).map(|a| a.qualified_path.clone()).unwrap_or_default()
-        }).collect();
-        extra.needs_review = recon.needs_review.iter().map(|id| id.0.clone()).collect();
-        extra.orphaned = recon.retired.iter().map(|id| id.0.clone()).collect();
-    }
+    // Run scoped reconciliation after the event is applied.
+    let scope = identity_scope_from_events(std::slice::from_ref(&event));
+    let identity = run_identity_reconciliation(head, scope.as_ref());
 
     dto::SyncResultDto {
         revision: head.store.revision().0,
         created,
         changed,
         deleted,
-        moved: extra.moved,
-        needs_review: extra.needs_review,
-        orphaned: extra.orphaned,
+        moved: identity.moved,
+        needs_review: identity.needs_review,
+        orphaned: identity.orphaned,
+        identity_extracted: identity.extracted,
+        identity_scope_files: identity.scope_files,
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
@@ -1219,34 +1255,6 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
 }
 
 // ── Phase 8: Watcher drain-and-apply core ───────────────────────────────
-
-/// Shared identity reconciliation: extract entities, reconcile against
-/// registry, persist, and return identity delta fields.
-fn run_identity_reconciliation(head: &mut HeadState) -> (Vec<String>, Vec<String>, Vec<String>) {
-    let state = TyProjectState {
-        db: head.db.clone(),
-        root: head.root.clone(),
-        registry: None,
-    };
-    let entities = extract_entities(&state);
-    let recon = reconcile(&mut head.registry, &entities, head.store.revision());
-
-    let moved = recon.moved().iter().map(|id| {
-        head.registry.get(id)
-            .map(|a| a.qualified_path.clone())
-            .unwrap_or_default()
-    }).collect();
-    let needs_review = recon.needs_review.iter().map(|id| id.0.clone()).collect();
-    let orphaned = recon.retired.iter().map(|id| id.0.clone()).collect();
-
-    // Persist.
-    let identity_path = head.root.as_std_path().join(".tyo3").join("identity.db");
-    if let Err(e) = head.registry.save(&identity_path) {
-        log::error!("Failed to persist identity registry: {}", e);
-    }
-
-    (moved, needs_review, orphaned)
-}
 
 /// Fold a batch of watcher-produced ChangeEvents into HEAD as ONE revision.
 ///
@@ -1273,17 +1281,19 @@ fn apply_watch_events(
         let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
         let revision = head.store.bump_revision().0;
 
-        // Run reconciliation.
-        let (moved, needs_review, orphaned) = run_identity_reconciliation(head);
+        // Run full reconciliation for rescans.
+        let identity = run_identity_reconciliation(head, None);
 
         return Some(dto::SyncResultDto {
             revision,
             created: vec![],
             changed: vec![],
             deleted: vec![],
-            moved,
-            needs_review,
-            orphaned,
+            moved: identity.moved,
+            needs_review: identity.needs_review,
+            orphaned: identity.orphaned,
+            identity_extracted: identity.extracted,
+            identity_scope_files: identity.scope_files,
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
@@ -1360,17 +1370,20 @@ fn apply_watch_events(
     // 3. Apply the ty-level ChangeEvents for incremental analysis.
     let result = head.db.apply_changes(&kept_events, None);
 
-    // Run reconciliation.
-    let (moved, needs_review, orphaned) = run_identity_reconciliation(head);
+    // Run scoped reconciliation.
+    let scope = identity_scope_from_events(&kept_events);
+    let identity = run_identity_reconciliation(head, scope.as_ref());
 
     Some(dto::SyncResultDto {
         revision,
         created,
         changed,
         deleted,
-        moved,
-        needs_review,
-        orphaned,
+        moved: identity.moved,
+        needs_review: identity.needs_review,
+        orphaned: identity.orphaned,
+        identity_extracted: identity.extracted,
+        identity_scope_files: identity.scope_files,
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
@@ -1599,17 +1612,19 @@ impl PyTyProject {
         let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
         let revision = head.store.bump_revision().0;
 
-        // Run reconciliation.
-        let (moved, needs_review, orphaned) = run_identity_reconciliation(head);
+        // Run full reconciliation for sync_all.
+        let identity = run_identity_reconciliation(head, None);
 
         let dto = dto::SyncResultDto {
             revision,
             created: vec![],
             changed: vec![],
             deleted: vec![],
-            moved,
-            needs_review,
-            orphaned,
+            moved: identity.moved,
+            needs_review: identity.needs_review,
+            orphaned: identity.orphaned,
+            identity_extracted: identity.extracted,
+            identity_scope_files: identity.scope_files,
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,

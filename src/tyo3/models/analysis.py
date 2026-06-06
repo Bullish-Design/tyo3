@@ -91,6 +91,8 @@ class SyncResult(BaseModel):
     moved: list[str] = Field(default_factory=list)
     needs_review: list[str] = Field(default_factory=list)
     orphaned: list[str] = Field(default_factory=list)
+    identity_extracted: int = 0
+    identity_scope_files: int = 0
     project_changed: bool = False
     custom_stdlib_changed: bool = False
     rescan: bool = False
