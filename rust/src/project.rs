@@ -21,6 +21,7 @@ use ty_project::{ProjectDatabase, ProjectMetadata};
 
 use crate::content::{ContentStore, Document, Generation, Revision};
 use crate::entity::{extract_entities, extract_entities_for};
+use crate::hash::HashPolicy;
 use crate::identity::{reconcile, reconcile_scoped, DurableId, IdentityRegistry};
 use crate::overlay::OverlaySystem;
 use crate::sidecar::Sidecar;
@@ -70,6 +71,7 @@ pub(crate) struct TyProjectState {
     pub(crate) db: ProjectDatabase,
     pub(crate) root: SystemPathBuf,
     pub(crate) registry: Option<IdentityRegistry>,
+    pub(crate) hash_policy: HashPolicy,
 }
 
 /// The live, mutable HEAD of a session. Owns the database plus the content
@@ -90,6 +92,9 @@ struct HeadState {
     /// Identity registry: binds DurableIds to last-known entity facts.
     /// Reconciled after every commit; persisted through the sidecar.
     registry: IdentityRegistry,
+    /// Code-layer identity hash policy. Defaults to Gate 2 behavior until
+    /// Step 5 loads it from validated config.
+    hash_policy: HashPolicy,
     /// Canonical owner for all sidecar paths and durable writes.
     sidecar: Sidecar,
 }
@@ -105,6 +110,7 @@ impl ReadCloneSource for TyProjectState {
             db: self.db.clone(),
             root: self.root.clone(),
             registry: self.registry.clone(),
+            hash_policy: self.hash_policy,
         }
     }
 }
@@ -117,6 +123,7 @@ impl ReadCloneSource for HeadState {
             db: self.db.clone(),
             root: self.root.clone(),
             registry: Some(self.registry.clone()),
+            hash_policy: self.hash_policy,
         }
     }
 }
@@ -874,6 +881,7 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore, registry: Identi
         store: initial_store,
         system,
         registry,
+        hash_policy: HashPolicy::default(),
     }
 }
 
@@ -1005,6 +1013,7 @@ fn build_frozen(root: SystemPathBuf, generation: Generation, rev: Revision) -> T
         db,
         root,
         registry: None,
+        hash_policy: HashPolicy::default(),
     }
 }
 
@@ -1130,6 +1139,7 @@ fn run_identity_reconciliation(
         db: head.db.clone(),
         root: head.root.clone(),
         registry: None,
+        hash_policy: head.hash_policy,
     };
     let entities = match scope {
         Some(scope) => extract_entities_for(&state, scope),
@@ -1856,6 +1866,7 @@ impl PyTyProject {
             db: head.db.clone(),
             root: head.root.clone(),
             registry: Some(head.registry.clone()),
+            hash_policy: head.hash_policy,
         };
 
         // Resolve the file.
@@ -3399,6 +3410,7 @@ mod phase5_concurrency_tests {
                     db: snap.db.clone(),
                     root: snap.root.clone(),
                     registry: None,
+                    hash_policy: snap.hash_policy,
                 };
             let barrier = Arc::clone(&barrier);
             let tx = tx.clone();

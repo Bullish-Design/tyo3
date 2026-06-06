@@ -273,7 +273,15 @@ mod tests {
 
         db.check();
 
-        (dir, crate::project::TyProjectState { db, root, registry: None })
+        (
+            dir,
+            crate::project::TyProjectState {
+                db,
+                root,
+                registry: None,
+                hash_policy: crate::hash::HashPolicy::default(),
+            },
+        )
     }
 
     /// The core cross-file requirement: a use of an imported symbol resolves to

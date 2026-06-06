@@ -107,7 +107,7 @@ pub fn extract_entities(state: &TyProjectState) -> Vec<Entity> {
 /// `ChangeEvent::system_path()`. The full-project extractor delegates here with
 /// the complete source-file set; normal commits pass their touched-file scope.
 pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> Vec<Entity> {
-    let policy = HashPolicy::default();
+    let policy = state.hash_policy;
     let project = state.db.project();
     let indexed = project.files(&state.db);
 
@@ -267,7 +267,7 @@ mod tests {
         let metadata = ProjectMetadata::new(Name::new("test"), root.clone());
         let db = ProjectDatabase::use_defaults(metadata, system);
 
-        (dir, TyProjectState { db, root, registry: None })
+        (dir, TyProjectState { db, root, registry: None, hash_policy: HashPolicy::default() })
     }
 
     #[test]

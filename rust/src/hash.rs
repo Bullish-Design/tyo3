@@ -23,6 +23,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::HashProfileCfg;
+
 /// A 128-bit content hash.
 ///
 /// Derived properties (`Ord`, `Hash`, etc.) exist so `ContentHash` can be used
@@ -62,7 +64,7 @@ pub struct NormalForm(pub String);
 /// normal-form hash. Default values follow SPEC §7: whitespace and trailing
 /// commas are ignored; docstrings and comments are excluded (on the assumption
 /// they are documentation, not behaviour).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HashPolicy {
     /// Collapse whitespace variations (default true). When true, runs of
     /// whitespace are collapsed to a single space and leading/trailing
@@ -87,6 +89,17 @@ impl Default for HashPolicy {
             ignore_trailing_comma: true,
             include_docstrings: false,
             include_comments: false,
+        }
+    }
+}
+
+impl From<&HashProfileCfg> for HashPolicy {
+    fn from(profile: &HashProfileCfg) -> Self {
+        Self {
+            ignore_whitespace: profile.whitespace_insensitive,
+            ignore_trailing_comma: profile.normalize_trailing_commas,
+            include_docstrings: profile.include_docstrings,
+            include_comments: profile.include_comments,
         }
     }
 }
@@ -308,6 +321,29 @@ mod tests {
         let policy = HashPolicy { include_docstrings: true, ..Default::default() };
         let a = normalise_entity_source("def foo():\n    \"\"\"Old.\"\"\"\n    pass\n", &policy);
         let b = normalise_entity_source("def foo():\n    \"\"\"New.\"\"\"\n    pass\n", &policy);
+        assert_ne!(hash_entity(&a), hash_entity(&b));
+    }
+
+    #[test]
+    fn hash_profile_default_maps_to_hash_policy_default() {
+        let profile = HashProfileCfg::default();
+        let policy = HashPolicy::from(&profile);
+
+        assert_eq!(policy, HashPolicy::default());
+    }
+
+    #[test]
+    fn hash_profile_include_docstrings_changes_docstring_hash() {
+        let profile = HashProfileCfg {
+            include_docstrings: true,
+            ..Default::default()
+        };
+        let policy = HashPolicy::from(&profile);
+
+        let a = normalise_entity_source("def foo():\n    \"\"\"Old.\"\"\"\n    pass\n", &policy);
+        let b = normalise_entity_source("def foo():\n    \"\"\"New.\"\"\"\n    pass\n", &policy);
+
+        assert!(policy.include_docstrings);
         assert_ne!(hash_entity(&a), hash_entity(&b));
     }
 

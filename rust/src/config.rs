@@ -274,6 +274,10 @@ impl ValidatedConfig {
             .unwrap_or(&self.raw.spine.default_hash_profile);
         &self.raw.hashing.profiles[profile]
     }
+
+    pub fn hash_policy_for(&self, layer: &str) -> HashPolicy {
+        HashPolicy::from(self.profile_for(layer))
+    }
 }
 
 pub fn validate(raw: RawConfig) -> Result<ValidatedConfig, ConfigError> {
@@ -975,6 +979,14 @@ dim = 3
             ]
         );
         assert!(cfg.profile_for("descriptions").include_docstrings);
+    }
+
+    #[test]
+    fn hash_policy_for_code_uses_default_profile() {
+        let cfg = validate(valid_layered_config()).unwrap();
+        let policy = cfg.hash_policy_for("code");
+
+        assert_eq!(policy, HashPolicy::default());
     }
 
     #[test]
