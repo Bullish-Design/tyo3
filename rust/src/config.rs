@@ -14,6 +14,14 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug)]
 pub enum ConfigError {
+    UnknownVersion(u32),
+    DanglingRef { key: String, target: String },
+    ReservedName(String),
+    Cycle(String),
+    OriginViolation(String),
+    UnknownKind(String),
+    DimMismatch(String),
+    SecretInline(String),
     Parse(String),
     UndefinedEnv(String),
 }
@@ -21,6 +29,16 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ConfigError::UnknownVersion(v) => write!(f, "unsupported schema_version: {v}"),
+            ConfigError::DanglingRef { key, target } => {
+                write!(f, "dangling config reference {key} -> {target}")
+            }
+            ConfigError::ReservedName(name) => write!(f, "reserved layer name: {name}"),
+            ConfigError::Cycle(cycle) => write!(f, "layer dependency cycle: {cycle}"),
+            ConfigError::OriginViolation(s) => write!(f, "layer origin violation: {s}"),
+            ConfigError::UnknownKind(kind) => write!(f, "unknown entity kind: {kind}"),
+            ConfigError::DimMismatch(s) => write!(f, "generator/store dimension mismatch: {s}"),
+            ConfigError::SecretInline(key) => write!(f, "inline secret-like value at {key}"),
             ConfigError::Parse(s) => write!(f, "config parse error: {s}"),
             ConfigError::UndefinedEnv(name) => {
                 write!(f, "undefined environment variable in config: {name}")
@@ -233,8 +251,156 @@ pub struct StoreCfg {
     pub path: Option<String>,
     pub url: Option<String>,
     pub metric: Option<String>,
+    pub dim: Option<usize>,
     #[serde(default = "default_gc")]
     pub gc: GcPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ValidatedConfig {
+    pub raw: RawConfig,
+    pub topo_order: Vec<String>,
+}
+
+impl ValidatedConfig {
+    pub fn profile_for(&self, layer: &str) -> &HashProfileCfg {
+        if layer == "code" {
+            return &self.raw.hashing.profiles[&self.raw.spine.default_hash_profile];
+        }
+        let layer_cfg = &self.raw.layers[layer];
+        let profile = layer_cfg
+            .hash_profile
+            .as_deref()
+            .unwrap_or(&self.raw.spine.default_hash_profile);
+        &self.raw.hashing.profiles[profile]
+    }
+}
+
+pub fn validate(raw: RawConfig) -> Result<ValidatedConfig, ConfigError> {
+    if raw.schema_version != CURRENT_SCHEMA_VERSION {
+        return Err(ConfigError::UnknownVersion(raw.schema_version));
+    }
+
+    if !raw
+        .hashing
+        .profiles
+        .contains_key(&raw.spine.default_hash_profile)
+    {
+        return Err(ConfigError::DanglingRef {
+            key: "spine.default_hash_profile".to_string(),
+            target: raw.spine.default_hash_profile.clone(),
+        });
+    }
+
+    for (name, layer) in &raw.layers {
+        let profile = layer
+            .hash_profile
+            .as_deref()
+            .unwrap_or(&raw.spine.default_hash_profile);
+        if !raw.hashing.profiles.contains_key(profile) {
+            return Err(ConfigError::DanglingRef {
+                key: format!("layers.{name}.hash_profile"),
+                target: profile.to_string(),
+            });
+        }
+    }
+
+    for (name, layer) in &raw.layers {
+        if matches!(layer.origin, LayerOrigin::Derived) {
+            let Some(generator) = &layer.generator else {
+                return Err(ConfigError::OriginViolation(format!(
+                    "layers.{name}.generator is required for derived layers"
+                )));
+            };
+            if !raw.generators.contains_key(generator) {
+                return Err(ConfigError::DanglingRef {
+                    key: format!("layers.{name}.generator"),
+                    target: generator.clone(),
+                });
+            }
+            let Some(store) = &layer.store else {
+                return Err(ConfigError::OriginViolation(format!(
+                    "layers.{name}.store is required for derived layers"
+                )));
+            };
+            if !raw.stores.contains_key(store) {
+                return Err(ConfigError::DanglingRef {
+                    key: format!("layers.{name}.store"),
+                    target: store.clone(),
+                });
+            }
+        }
+    }
+
+    if raw.layers.contains_key("code") {
+        return Err(ConfigError::ReservedName("code".to_string()));
+    }
+
+    let topo_order = topo_order(&raw)?;
+
+    for (name, layer) in &raw.layers {
+        for dep in effective_depends_on(layer) {
+            if let Some(dep_layer) = raw.layers.get(&dep) {
+                if matches!(dep_layer.origin, LayerOrigin::Authored) {
+                    return Err(ConfigError::OriginViolation(format!(
+                        "layers.{name}.depends_on references authored layer {dep}"
+                    )));
+                }
+            }
+        }
+    }
+
+    for (name, layer) in &raw.layers {
+        match layer.origin {
+            LayerOrigin::Derived => {
+                if layer.generator_version.as_deref().unwrap_or("").is_empty() {
+                    return Err(ConfigError::OriginViolation(format!(
+                        "layers.{name}.generator_version is required for derived layers"
+                    )));
+                }
+            }
+            LayerOrigin::Authored => {
+                if !layer.depends_on.is_empty()
+                    || layer.generator.is_some()
+                    || layer.generator_version.is_some()
+                    || layer.hash_profile.is_some()
+                    || layer.store.is_some()
+                {
+                    return Err(ConfigError::OriginViolation(format!(
+                        "layers.{name} is authored but defines derived-only keys"
+                    )));
+                }
+            }
+        }
+    }
+
+    for (name, layer) in &raw.layers {
+        for kind in &layer.entity_kinds {
+            if !is_known_kind(kind) {
+                return Err(ConfigError::UnknownKind(format!(
+                    "layers.{name}.entity_kinds contains {kind}"
+                )));
+            }
+        }
+    }
+
+    for (name, layer) in &raw.layers {
+        if let (Some(generator), Some(store)) = (&layer.generator, &layer.store) {
+            let generator_dim = raw.generators.get(generator).and_then(|g| g.dim);
+            let store_dim = raw.stores.get(store).and_then(|s| s.dim);
+            if let (Some(generator_dim), Some(store_dim)) = (generator_dim, store_dim) {
+                if generator_dim != store_dim {
+                    return Err(ConfigError::DimMismatch(format!(
+                        "layers.{name}: generator {generator} dim {generator_dim} != store {store} dim {store_dim}"
+                    )));
+                }
+            }
+        }
+    }
+
+    lint_secrets(&raw)?;
+
+    Ok(ValidatedConfig { raw, topo_order })
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -405,6 +571,133 @@ fn default_overflow() -> String {
 
 fn default_debounce_ms() -> u64 {
     200
+}
+
+fn effective_depends_on(layer: &LayerCfg) -> Vec<String> {
+    if matches!(layer.origin, LayerOrigin::Derived) && layer.depends_on.is_empty() {
+        vec!["code".to_string()]
+    } else {
+        layer.depends_on.clone()
+    }
+}
+
+fn topo_order(raw: &RawConfig) -> Result<Vec<String>, ConfigError> {
+    let mut incoming: BTreeMap<String, usize> = BTreeMap::new();
+    let mut outgoing: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    incoming.insert("code".to_string(), 0);
+    for name in raw.layers.keys() {
+        incoming.insert(name.clone(), 0);
+    }
+
+    for (name, layer) in &raw.layers {
+        for dep in effective_depends_on(layer) {
+            if dep != "code" && !raw.layers.contains_key(&dep) {
+                return Err(ConfigError::DanglingRef {
+                    key: format!("layers.{name}.depends_on"),
+                    target: dep,
+                });
+            }
+            *incoming.get_mut(name).expect("layer was inserted") += 1;
+            outgoing.entry(dep).or_default().push(name.clone());
+        }
+    }
+
+    for targets in outgoing.values_mut() {
+        targets.sort();
+    }
+
+    let mut ready: Vec<String> = incoming
+        .iter()
+        .filter_map(|(name, count)| (*count == 0).then(|| name.clone()))
+        .collect();
+    ready.sort();
+
+    let mut order = Vec::with_capacity(incoming.len());
+    while let Some(node) = ready.first().cloned() {
+        ready.remove(0);
+        order.push(node.clone());
+
+        if let Some(targets) = outgoing.get(&node) {
+            for target in targets {
+                let count = incoming.get_mut(target).expect("target exists");
+                *count -= 1;
+                if *count == 0 {
+                    ready.push(target.clone());
+                    ready.sort();
+                }
+            }
+        }
+    }
+
+    if order.len() != incoming.len() {
+        let remaining: Vec<String> = incoming
+            .into_iter()
+            .filter_map(|(name, count)| (count > 0).then_some(name))
+            .collect();
+        return Err(ConfigError::Cycle(remaining.join(" -> ")));
+    }
+
+    Ok(order)
+}
+
+fn is_known_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "module"
+            | "class"
+            | "function"
+            | "method"
+            | "constructor"
+            | "variable"
+            | "constant"
+            | "field"
+            | "parameter"
+            | "property"
+            | "type_parameter"
+            | "import"
+    )
+}
+
+fn lint_secrets(raw: &RawConfig) -> Result<(), ConfigError> {
+    let value = serde_json::to_value(raw).map_err(|e| ConfigError::Parse(e.to_string()))?;
+    lint_secret_value("$", &value)
+}
+
+fn lint_secret_value(path: &str, value: &serde_json::Value) -> Result<(), ConfigError> {
+    match value {
+        serde_json::Value::String(s) => {
+            if looks_like_secret(s) {
+                return Err(ConfigError::SecretInline(path.to_string()));
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (idx, item) in items.iter().enumerate() {
+                lint_secret_value(&format!("{path}[{idx}]"), item)?;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (key, item) in map {
+                lint_secret_value(&format!("{path}.{key}"), item)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn looks_like_secret(s: &str) -> bool {
+    s.starts_with("sk-")
+        || s.starts_with("AKIA")
+        || (s.len() >= 32 && high_entropyish(s))
+}
+
+fn high_entropyish(s: &str) -> bool {
+    let alnum = s.chars().filter(|c| c.is_ascii_alphanumeric()).count();
+    let has_lower = s.chars().any(|c| c.is_ascii_lowercase());
+    let has_upper = s.chars().any(|c| c.is_ascii_uppercase());
+    let has_digit = s.chars().any(|c| c.is_ascii_digit());
+    alnum >= 28 && has_lower && has_upper && has_digit
 }
 
 #[cfg(test)]
@@ -615,5 +908,226 @@ path = "${MISSING_TYO3_TEST_VAR}"
         let err = RawConfig::load(&sidecar).unwrap_err();
         assert!(matches!(err, ConfigError::UndefinedEnv(_)));
         std::env::remove_var("TYO3_TEST_VAR");
+    }
+
+    fn parse_cfg(text: &str) -> RawConfig {
+        toml::from_str(text).unwrap()
+    }
+
+    fn valid_layered_config() -> RawConfig {
+        parse_cfg(
+            r#"
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[hashing.profiles.semantic]
+include_comments = true
+include_docstrings = true
+
+[layers.descriptions]
+origin = "derived"
+depends_on = ["code"]
+generator = "describe"
+generator_version = "v1"
+store = "kv"
+hash_profile = "semantic"
+entity_kinds = ["function"]
+
+[layers.description_embeddings]
+origin = "derived"
+depends_on = ["descriptions"]
+generator = "embed"
+generator_version = "v1"
+store = "vectors"
+hash_profile = "semantic"
+
+[generators.describe]
+type = "python"
+callable = "pkg:describe"
+
+[generators.embed]
+type = "http"
+endpoint = "https://example.invalid/embed"
+dim = 3
+
+[stores.kv]
+backend = "fs"
+path = "cache/descriptions"
+
+[stores.vectors]
+backend = "fs"
+path = "cache/vectors"
+dim = 3
+"#,
+        )
+    }
+
+    #[test]
+    fn valid_full_example_topo_order_is_precomputed() {
+        let cfg = validate(valid_layered_config()).unwrap();
+        assert_eq!(
+            cfg.topo_order,
+            vec![
+                "code".to_string(),
+                "descriptions".to_string(),
+                "description_embeddings".to_string()
+            ]
+        );
+        assert!(cfg.profile_for("descriptions").include_docstrings);
+    }
+
+    #[test]
+    fn default_hash_profile_must_resolve() {
+        let mut raw = valid_layered_config();
+        raw.spine.default_hash_profile = "nope".to_string();
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::DanglingRef { key, target } if key == "spine.default_hash_profile" && target == "nope"));
+    }
+
+    #[test]
+    fn depends_on_must_resolve() {
+        let mut raw = valid_layered_config();
+        raw.layers
+            .get_mut("descriptions")
+            .unwrap()
+            .depends_on = vec!["missing".to_string()];
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::DanglingRef { key, target } if key == "layers.descriptions.depends_on" && target == "missing"));
+    }
+
+    #[test]
+    fn cycles_are_rejected() {
+        let mut raw = valid_layered_config();
+        raw.layers.get_mut("descriptions").unwrap().depends_on =
+            vec!["description_embeddings".to_string()];
+        raw.layers
+            .get_mut("description_embeddings")
+            .unwrap()
+            .depends_on = vec!["descriptions".to_string()];
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::Cycle(cycle) if cycle.contains("descriptions")));
+    }
+
+    #[test]
+    fn authored_layer_cannot_be_a_dependency() {
+        let mut raw = valid_layered_config();
+        raw.layers.insert(
+            "intent".to_string(),
+            LayerCfg {
+                origin: LayerOrigin::Authored,
+                depends_on: Vec::new(),
+                generator: None,
+                generator_version: None,
+                hash_profile: None,
+                store: None,
+                serving: ServingMode::Stale,
+                recompute: RecomputeMode::Lazy,
+                entity_kinds: Vec::new(),
+                history: true,
+                review_on_change: true,
+            },
+        );
+        raw.layers
+            .get_mut("descriptions")
+            .unwrap()
+            .depends_on = vec!["intent".to_string()];
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::OriginViolation(s) if s.contains("authored layer intent")));
+    }
+
+    #[test]
+    fn code_is_reserved_layer_name() {
+        let mut raw = valid_layered_config();
+        raw.layers.insert(
+            "code".to_string(),
+            LayerCfg {
+                origin: LayerOrigin::Authored,
+                depends_on: Vec::new(),
+                generator: None,
+                generator_version: None,
+                hash_profile: None,
+                store: None,
+                serving: ServingMode::Stale,
+                recompute: RecomputeMode::Lazy,
+                entity_kinds: Vec::new(),
+                history: true,
+                review_on_change: true,
+            },
+        );
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::ReservedName(name) if name == "code"));
+    }
+
+    #[test]
+    fn derived_layer_requires_store() {
+        let mut raw = valid_layered_config();
+        raw.layers.get_mut("descriptions").unwrap().store = None;
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::OriginViolation(s) if s.contains("store is required")));
+    }
+
+    #[test]
+    fn entity_kinds_are_pinned_to_symbol_kind() {
+        let mut raw = valid_layered_config();
+        raw.layers
+            .get_mut("descriptions")
+            .unwrap()
+            .entity_kinds = vec!["wizard".to_string()];
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::UnknownKind(s) if s.contains("wizard")));
+    }
+
+    #[test]
+    fn inline_secret_like_values_are_rejected() {
+        let mut raw = valid_layered_config();
+        raw.generators.get_mut("embed").unwrap().endpoint =
+            Some("sk-livesecret1234567890".to_string());
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::SecretInline(path) if path.contains("endpoint")));
+    }
+
+    #[test]
+    fn dim_mismatch_is_rejected_when_both_sides_set() {
+        let mut raw = valid_layered_config();
+        raw.stores.get_mut("vectors").unwrap().dim = Some(4);
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::DimMismatch(s) if s.contains("dim 3") && s.contains("dim 4")));
+    }
+
+    #[test]
+    fn schema_version_must_be_supported() {
+        let mut raw = valid_layered_config();
+        raw.schema_version = 999;
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::UnknownVersion(999)));
+    }
+
+    #[test]
+    fn validation_topo_order_is_deterministic() {
+        let first = validate(valid_layered_config()).unwrap().topo_order;
+        let second = validate(valid_layered_config()).unwrap().topo_order;
+
+        assert_eq!(first, second);
     }
 }
