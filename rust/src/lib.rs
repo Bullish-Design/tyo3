@@ -9,6 +9,8 @@ create_exception!(tyo3._native_impl, ProjectClosedError, pyo3::exceptions::PyRun
 create_exception!(tyo3._native_impl, PathResolutionError, pyo3::exceptions::PyRuntimeError);
 create_exception!(tyo3._native_impl, PositionError, pyo3::exceptions::PyRuntimeError);
 create_exception!(tyo3._native_impl, RevisionEvictedError, pyo3::exceptions::PyValueError);
+create_exception!(tyo3._native_impl, ConfigError, pyo3::exceptions::PyValueError);
+create_exception!(tyo3._native_impl, FormatVersionError, pyo3::exceptions::PyValueError);
 
 mod hash;
 mod config;
@@ -37,6 +39,8 @@ fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("PathResolutionError", m.py().get_type::<PathResolutionError>())?;
     m.add("PositionError", m.py().get_type::<PositionError>())?;
     m.add("RevisionEvictedError", m.py().get_type::<RevisionEvictedError>())?;
+    m.add("ConfigError", m.py().get_type::<ConfigError>())?;
+    m.add("FormatVersionError", m.py().get_type::<FormatVersionError>())?;
 
     Ok(())
 }

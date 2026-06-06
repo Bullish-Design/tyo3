@@ -138,6 +138,10 @@ impl Default for ContentStore {
 
 impl ContentStore {
     pub fn new() -> Self {
+        Self::with_retain_cap(DEFAULT_RETAIN_CAP)
+    }
+
+    pub fn with_retain_cap(retain_cap: usize) -> Self {
         let generation: Generation = Arc::new(ContentMap::new());
         let mut retained = BTreeMap::new();
         retained.insert(Revision(0), Arc::clone(&generation));
@@ -146,7 +150,7 @@ impl ContentStore {
             revision: Revision(0),
             version_counter: 0,
             retained,
-            retain_cap: DEFAULT_RETAIN_CAP,
+            retain_cap,
         }
     }
 

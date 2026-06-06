@@ -7,7 +7,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::pythonize;
 
-use crate::{ProjectClosedError, PathResolutionError, PositionError, RevisionEvictedError};
+use crate::{ConfigError as PyConfigError, FormatVersionError, ProjectClosedError, PathResolutionError, PositionError, RevisionEvictedError};
 
 use ruff_db::files::File;
 use ruff_db::source::source_text;
@@ -20,6 +20,7 @@ use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
 use crate::content::{ContentStore, Document, Generation, Revision};
+use crate::config::{self, RawConfig, ValidatedConfig};
 use crate::entity::{extract_entities, extract_entities_for};
 use crate::hash::HashPolicy;
 use crate::identity::{reconcile, reconcile_scoped, DurableId, IdentityRegistry};
@@ -95,6 +96,8 @@ struct HeadState {
     /// Code-layer identity hash policy. Defaults to Gate 2 behavior until
     /// Step 5 loads it from validated config.
     hash_policy: HashPolicy,
+    /// Validated, defaulted project config loaded once on open.
+    config: ValidatedConfig,
     /// Canonical owner for all sidecar paths and durable writes.
     sidecar: Sidecar,
 }
@@ -181,6 +184,13 @@ fn clone_locked_state<T: ReadCloneSource>(
 ) -> PyResult<TyProjectState> {
     let guard = lock_state(inner, op_name)?;
     Ok(guard.as_ref().unwrap().read_clone())
+}
+
+fn config_error_to_pyerr(err: config::ConfigError) -> PyErr {
+    match err {
+        config::ConfigError::UnknownVersion(_) => FormatVersionError::new_err(err.to_string()),
+        other => PyConfigError::new_err(other.to_string()),
+    }
 }
 
 /// Resolve a file handle and return its source text as a String.
@@ -834,6 +844,16 @@ fn compute_hover(
 ///   4. build the db with `fallible` (surfaces config errors),
 ///   5. on any failure, fall back to a default blank project (never panic).
 fn build_head(root: SystemPathBuf, initial_store: ContentStore, registry: IdentityRegistry) -> HeadState {
+    let config = config::validate(RawConfig::defaults()).expect("default config is valid");
+    build_head_with_config(root, initial_store, registry, config)
+}
+
+fn build_head_with_config(
+    root: SystemPathBuf,
+    initial_store: ContentStore,
+    registry: IdentityRegistry,
+    config: ValidatedConfig,
+) -> HeadState {
     use ruff_python_ast::name::Name;
 
     // The overlay the db reads through. The clone handed to fallible/use_defaults
@@ -881,7 +901,8 @@ fn build_head(root: SystemPathBuf, initial_store: ContentStore, registry: Identi
         store: initial_store,
         system,
         registry,
-        hash_policy: HashPolicy::default(),
+        hash_policy: config.hash_policy_for("code"),
+        config,
     }
 }
 
@@ -1430,6 +1451,8 @@ impl PyTyProject {
         let system_root = SystemPathBuf::from(s);
 
         let sidecar = Sidecar::new(&absolute);
+        let raw_config = RawConfig::load(&sidecar).map_err(config_error_to_pyerr)?;
+        let config = config::validate(raw_config).map_err(config_error_to_pyerr)?;
         let registry = match fs::read(sidecar.identity_db_path()) {
             Ok(bytes) => IdentityRegistry::from_bytes(&bytes).unwrap_or_else(|e| {
                 log::warn!("Failed to load identity registry: {} — starting fresh.", e);
@@ -1442,13 +1465,26 @@ impl PyTyProject {
             }
         };
 
-        let head = build_head(system_root, ContentStore::new(), registry);
+        let retain_cap = config.raw.spine.retain_cap;
+        let head = build_head_with_config(
+            system_root,
+            ContentStore::with_retain_cap(retain_cap),
+            registry,
+            config,
+        );
 
         Ok(PyTyProject {
             inner: Arc::new(Mutex::new(Some(head))),
             pending: Arc::new(Mutex::new(Vec::new())),
             watcher: Mutex::new(None),
         })
+    }
+
+    fn config_json(&self) -> PyResult<String> {
+        let guard = lock_state(&self.inner, "config_json")?;
+        let head = guard.as_ref().unwrap();
+        serde_json::to_string(&head.config)
+            .map_err(|e| PyConfigError::new_err(format!("failed to serialise config: {e}")))
     }
 
     // ── Lifecycle: Reload ────────────────────────────────────────────
@@ -1464,12 +1500,13 @@ impl PyTyProject {
         let head = guard.as_mut().unwrap();
 
         let root = head.root.clone();
-        // Preserve overlay content AND identity registry across the rebuild.
+        // Preserve overlay content, identity registry, and validated config across the rebuild.
         let store = std::mem::replace(&mut head.store, ContentStore::new());
         let registry = std::mem::replace(&mut head.registry, IdentityRegistry::default());
+        let config = head.config.clone();
 
         // Rebuild while still holding the lock, then swap atomically.
-        *guard = Some(build_head(root, store, registry));
+        *guard = Some(build_head_with_config(root, store, registry, config));
         drop(guard);
 
         // If a watcher is running, update its watched paths (the head db

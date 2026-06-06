@@ -23,12 +23,16 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from tyo3.exceptions import (
+    ConfigError,
+    FormatVersionError,
     InternalTyError,
     PathResolutionError,
     PositionError,
     ProjectClosedError,
     ProjectOpenError,
+    RevisionEvictedError,
 )
+from tyo3.config import TyConfig
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult, Range, SyncResult
 from tyo3.models.editor import FoldingRange, Hint, InlayHint
@@ -67,6 +71,13 @@ try:
     from tyo3._native_impl import (
         ProjectClosedError as _NativeClosedError,
     )
+    from tyo3._native_impl import (
+        RevisionEvictedError as _NativeRevisionEvictedError,
+    )
+    from tyo3._native_impl import (
+        ConfigError as _NativeConfigError,
+        FormatVersionError as _NativeFormatVersionError,
+    )
 except ImportError:
     # When the native extension isn't built, define dummy classes
     # that never match in `except` clauses.
@@ -77,6 +88,15 @@ except ImportError:
         pass
 
     class _NativePositionError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class _NativeRevisionEvictedError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class _NativeConfigError(Exception):  # type: ignore[no-redef]
+        pass
+
+    class _NativeFormatVersionError(Exception):  # type: ignore[no-redef]
         pass
 
 
@@ -630,8 +650,13 @@ class TyO3Session(_ReadOps):
         root_str = str(root)
         try:
             self._inner = _native.TyProject.open(root_str)
+        except _NativeFormatVersionError as e:
+            raise FormatVersionError(str(e)) from e
+        except _NativeConfigError as e:
+            raise ConfigError(str(e)) from e
         except Exception as e:
             raise ProjectOpenError(f"Cannot open project at '{root_str}': {e}") from e
+        self._config = TyConfig.from_json(self._inner.config_json())
         self._root = StdPath(root_str).resolve()
         self._closed = False
         self._head_snap: Any = None  # cached native head snapshot (current revision)
@@ -640,6 +665,10 @@ class TyO3Session(_ReadOps):
     @property
     def root(self) -> StdPath:
         return self._root
+
+    @property
+    def config(self) -> TyConfig:
+        return self._config
 
     @property
     def head(self) -> int:
@@ -709,6 +738,8 @@ class TyO3Session(_ReadOps):
             native_snapshot = self._inner.snapshot(at)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except _NativeRevisionEvictedError as e:
+            raise RevisionEvictedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in snapshot(): {e}") from e
         return Snapshot(
