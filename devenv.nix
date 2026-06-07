@@ -174,6 +174,43 @@ in
     PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ -x --cov=tyo3 --cov-report=term-missing "$@" 2>&1
   '';
 
+  # ── Spine refactor scripts (REFINED_IMPLEMENTATION_PLAN, Phase 0+) ──
+  #
+  # The refined refactor lands as a phased series. Phase 0 writes the target
+  # contracts up front as `test_final_*.py` invariant tests (failing or
+  # xfail-strict on today's code, each tagged with the phase that turns it
+  # green) plus a parity-oracle harness. `test-final` is the single gate to
+  # run as each phase lands; `parity-oracle` runs the harness self-test that
+  # guards the Phase 2–4 graph cutover. See
+  # .scratch/projects/15-implementation-plan/REFINED_IMPLEMENTATION_PLAN.md.
+
+  scripts.test-final.exec = ''
+    ${detailPreludePerTest}
+    echo "═══ Spine refactor — final invariant suite (Phase 0 contracts) ═══"
+    cd "$DEVENV_ROOT"
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS -ra --no-cov \
+      -p no:cacheprovider \
+      src/tyo3/tests/test_final_content_spine.py \
+      src/tyo3/tests/test_final_no_read_side_writes.py \
+      src/tyo3/tests/test_final_commit_delta_contract.py \
+      src/tyo3/tests/test_final_transaction_rollback.py \
+      src/tyo3/tests/test_final_bus_contract.py \
+      src/tyo3/tests/test_final_derived_contract.py \
+      src/tyo3/tests/test_final_hash_ast.py \
+      src/tyo3/tests/test_final_parity_oracle.py \
+      "$@" 2>&1
+  '';
+
+  scripts.parity-oracle.exec = ''
+    ${detailPreludePerTest}
+    echo "═══ Spine refactor — parity oracle harness (Phase 0.8) ═══"
+    cd "$DEVENV_ROOT"
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS -ra --no-cov \
+      -p no:cacheprovider \
+      src/tyo3/tests/test_final_parity_oracle.py \
+      "$@" 2>&1
+  '';
+
   # ── Fast inner-loop scripts (for the async/snapshot refactor) ───────
   #
   # During the refactor you edit Rust constantly. A full `build` (maturin
