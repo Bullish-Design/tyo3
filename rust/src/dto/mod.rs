@@ -41,6 +41,16 @@ pub struct AuthoredValueDto {
     pub revision: u64,
 }
 
+/// A single revision-stamped version in an authored record's history.
+///
+/// Serialized to a Python list-of-dicts via pythonize for
+/// `PySnapshot::authored_history`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AuthoredVersionDto {
+    pub value: serde_json::Value,
+    pub revision: u64,
+}
+
 /// Result of a project check.  Serialized to a Python dict via pythonize.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CheckResultDto {

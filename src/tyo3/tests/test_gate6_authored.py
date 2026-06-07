@@ -277,6 +277,98 @@ review_on_change = false
         assert v3.status == "present"  # review_on_change = false
 
 
+def test_history_round_trip_survives_reopen(tmp_path):
+    """Author multiple versions → close → reopen → history intact (§11.3.2)."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.intent]
+origin           = "authored"
+history          = true
+review_on_change = true
+""")
+
+    payload_a = {"note": "v1"}
+    payload_b = {"note": "v2"}
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        # Author twice to build history.
+        session.author("intent", foo_id, payload_a)
+        session.author("intent", foo_id, payload_b)
+
+        # Check history before close.
+        snap = session.snapshot()
+        hist = snap.authored_history("intent", foo_id)
+        assert len(hist) == 2
+        assert hist[0].value == payload_a
+        assert hist[1].value == payload_b
+        snap.close()
+
+    # Reopen — history must survive the round-trip.
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+
+        # Current value is the latest.
+        val = session.authored("intent", foo_id)
+        assert val.value == payload_b
+
+        # History has both versions.
+        snap = session.snapshot()
+        hist = snap.authored_history("intent", foo_id)
+        assert len(hist) == 2, f"Expected 2 history entries, got {len(hist)}"
+        assert hist[0].value == payload_a
+        assert hist[1].value == payload_b
+
+        # history=false layer should have no history.
+        assert snap.authored_history("nonexistent", foo_id) == []
+        snap.close()
+
+
+def test_authored_history_empty_for_unknown(tmp_path):
+    """authored_history on unknown id returns empty list."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.intent]
+origin           = "authored"
+history          = true
+review_on_change = true
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        snap = session.snapshot()
+        hist = snap.authored_history("intent", "01NONEXIST")
+        assert hist == []
+        snap.close()
+
+
 def test_moved_entity_keeps_note(tmp_path):
     """Move entity unchanged — note follows the id, not the location.
 

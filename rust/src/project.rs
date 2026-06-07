@@ -922,15 +922,26 @@ fn load_authored_records(
                 Err(_) => continue,
             };
             let doc = AuthoredRecordDoc::from_bytes(&bytes)?;
+            // History from disk: re-insert each historical version if the
+            // layer keeps history.  Put history versions in order (oldest
+            // first), then current — each `put` pushes the previous current
+            // into history, so the final record has the full history chain.
+            if layer_cfg.history {
+                for hist_version in &doc.history {
+                    map = map.put(
+                        &doc.layer,
+                        &doc.durable_id,
+                        hist_version.clone(),
+                        layer_cfg.history,
+                    );
+                }
+            }
             map = map.put(
                 &doc.layer,
                 &doc.durable_id,
                 doc.current,
                 layer_cfg.history,
             );
-            // History from disk: re-insert each historical version if the
-            // layer keeps history.  (The on-doc `history` field is the
-            // serialised form; we trust it matches the put order.)
         }
     }
     Ok(AuthoredStore::new(map))
@@ -2850,6 +2861,52 @@ impl PySnapshot {
         };
         drop(guard);
         pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Return the full version history for an authored record.
+    ///
+    /// Returns all versions (history + current) with `revision <= self.revision`,
+    /// ordered by revision ascending.  Empty if the record doesn't exist.
+    fn authored_history<'py>(
+        &self,
+        py: Python<'py>,
+        layer: &str,
+        id: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let guard = self.inner.lock().map_err(|e| {
+            PyRuntimeError::new_err(format!("Lock poisoned: {e}"))
+        })?;
+        let state = guard.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err("Snapshot is closed")
+        })?;
+
+        let pinned_rev = self.revision;
+        let versions: Vec<dto::AuthoredVersionDto> = match state.authored.as_ref() {
+            Some(store) => match store.records_get(layer, id) {
+                Some(rec) => {
+                    let mut out: Vec<dto::AuthoredVersionDto> = rec
+                        .history
+                        .iter()
+                        .filter(|v| self.is_head || v.revision <= pinned_rev)
+                        .map(|v| dto::AuthoredVersionDto {
+                            value: v.value.clone(),
+                            revision: v.revision,
+                        })
+                        .collect();
+                    if self.is_head || rec.current.revision <= pinned_rev {
+                        out.push(dto::AuthoredVersionDto {
+                            value: rec.current.value.clone(),
+                            revision: rec.current.revision,
+                        });
+                    }
+                    out
+                }
+                None => Vec::new(),
+            },
+            None => Vec::new(),
+        };
+        drop(guard);
+        pythonize(py, &versions).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     // ── Close ────────────────────────────────────────────────

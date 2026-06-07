@@ -36,6 +36,7 @@ def test_session_graph_updates_after_edit(tmp_path: StdPath) -> None:
 def test_snapshot_graph_is_pinned_across_head_edits(tmp_path: StdPath) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as session:
+        session.sync_all()  # Populate identity registry so symbols have durable_ids
         before = session.snapshot()
         try:
             pinned = before.graph()
@@ -68,6 +69,7 @@ def test_snapshot_graph_copy_does_not_mutate_head_graph(tmp_path: StdPath) -> No
 def test_graph_diff_reports_added_symbol(tmp_path: StdPath) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as session:
+        session.sync_all()  # Populate identity registry so symbols have durable_ids
         before = session.snapshot()
         try:
             before_graph = before.graph()

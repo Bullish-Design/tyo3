@@ -36,7 +36,7 @@ from tyo3.exceptions import (
 from tyo3.config import TyConfig
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult, Range, SyncResult
-from tyo3.models.authored import AuthoredValue
+from tyo3.models.authored import AuthoredValue, AuthoredVersion
 from tyo3.models.derived import DerivedValue
 from tyo3.models.editor import FoldingRange, Hint, InlayHint
 from tyo3.models.lsp import Completion, SignatureHelp
@@ -1305,6 +1305,17 @@ class Snapshot(_ReadOps):
         self._check_open()
         dto = self._inner.authored(layer, durable_id)
         return AuthoredValue.model_validate(dto)
+
+    def authored_history(self, layer: str, durable_id: str) -> list[AuthoredVersion]:
+        """Return the full version history for an authored record.
+
+        Returns all versions (history + current) with revision ≤ this
+        snapshot's pinned revision, ordered by revision ascending.
+        Empty list if the record doesn't exist.
+        """
+        self._check_open()
+        dtos = self._inner.authored_history(layer, durable_id)
+        return [AuthoredVersion.model_validate(d) for d in dtos]
 
     def close(self) -> None:
         """Release the pinned revision. Safe to call multiple times."""
