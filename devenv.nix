@@ -129,11 +129,41 @@ in
     exit "$_pytest_rc"
   '';
 
+  # test-fast: no-coverage parallel runner for the inner dev loop.
+  #   devenv shell -- test-fast                     # all tests (default)
+  #   devenv shell -- test-fast --all               # all tests (explicit)
+  #   devenv shell -- test-fast test_project.py     # only that file (bare
+  #                                                 #   names are resolved
+  #                                                 #   under src/tyo3/tests/)
+  #   devenv shell -- test-fast test_project.py::test_open  # a single node id
+  #   devenv shell -- test-fast src/tyo3/tests/foo.py -k bar  # path + flags
+  # Any arg that looks like a test selector (a path, a *.py file, or a ::node
+  # id) narrows the run to just those targets; everything else (flags, -k
+  # exprs) passes through to pytest. With no selector, the full suite runs.
   scripts.test-fast.exec = ''
     ${detailPreludePerTest}
-    echo "═══ Running all tests (no coverage, parallel) ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ -n 4 --dist loadscope --durations=0 "$@" 2>&1
+    _force_all=0
+    _targets=()
+    _passthru=()
+    for _arg in "$@"; do
+      case "$_arg" in
+        --all)          _force_all=1 ;;
+        -*)             _passthru+=("$_arg") ;;          # flag — pass through
+        */*)            _targets+=("$_arg") ;;           # explicit path — verbatim
+        *.py|*.py::*|*::*) _targets+=("src/tyo3/tests/$_arg") ;;  # bare file/node id
+        *)              _passthru+=("$_arg") ;;          # e.g. value of -k
+      esac
+    done
+    if [ "$_force_all" -eq 1 ] || [ ''${#_targets[@]} -eq 0 ]; then
+      _targets=(src/tyo3/tests/)
+      _xdist=(-n 4 --dist loadscope)                    # full suite — parallel
+      echo "═══ Running all tests (no coverage, parallel) ═══"
+    else
+      _xdist=(-n 0)                                      # selected — no xdist overhead
+      echo "═══ Running selected tests: ''${_targets[*]} (no coverage, serial) ═══"
+    fi
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} "''${_targets[@]}" "''${_xdist[@]}" --durations=0 "''${_passthru[@]}" 2>&1
   '';
 
   # scripts.test-quick is retired — test-fast covers the fast dev loop now.
