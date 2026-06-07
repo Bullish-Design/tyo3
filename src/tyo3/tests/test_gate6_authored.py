@@ -18,7 +18,6 @@ import pytest
 # ── Step 0: Failing acceptance tests (API does not exist yet) ────────────
 
 
-@pytest.mark.xfail(reason="Gate 6 Step 0: authored API does not exist yet — pinned for implementation")
 def test_durable_write_and_read(tmp_path):
     """Durable write + read.
 
@@ -47,6 +46,7 @@ review_on_change = true
 """)
 
     with TyO3Session(str(proj)) as session:
+        session.sync_all()  # populate identity registry
         orig_head = session.head
         foo_id = session.id_for("a.py", 1, 5)
         assert foo_id is not None
@@ -60,7 +60,6 @@ review_on_change = true
         assert authored_val.status == "present"
 
 
-@pytest.mark.xfail(reason="Gate 6 Step 0: authored API does not exist yet — pinned for implementation")
 def test_snapshot_isolation_and_time_travel(tmp_path):
     """Snapshot isolation + time-travel.
 
@@ -90,6 +89,7 @@ review_on_change = true
 """)
 
     with TyO3Session(str(proj)) as session:
+        session.sync_all()  # populate identity registry
         foo_id = session.id_for("a.py", 1, 5)
         assert foo_id is not None
 
@@ -124,7 +124,6 @@ review_on_change = true
         snap_at_old.close()
 
 
-@pytest.mark.xfail(reason="Gate 6 Step 0: authored API does not exist yet — pinned for implementation")
 def test_needs_review_on_change_not_dropped(tmp_path):
     """needs_review on change, not dropped.
 
@@ -153,6 +152,7 @@ review_on_change = true
 """)
 
     with TyO3Session(str(proj)) as session:
+        session.sync_all()  # populate identity registry
         foo_id = session.id_for("a.py", 1, 5)
         assert foo_id is not None
 
@@ -171,7 +171,6 @@ review_on_change = true
         assert val.value == payload
 
 
-@pytest.mark.xfail(reason="Gate 6 Step 0: authored API does not exist yet — pinned for implementation")
 def test_orphaned_on_delete_not_dropped(tmp_path):
     """Orphaned on delete, not dropped.
 
@@ -200,6 +199,7 @@ review_on_change = true
 """)
 
     with TyO3Session(str(proj)) as session:
+        session.sync_all()  # populate identity registry
         foo_id = session.id_for("a.py", 1, 5)
         assert foo_id is not None
 

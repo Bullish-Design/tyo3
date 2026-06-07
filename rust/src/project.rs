@@ -24,7 +24,7 @@ use crate::content::{ContentStore, Document, Generation, Revision};
 use crate::config::{self, RawConfig, ValidatedConfig};
 use crate::entity::{extract_entities, extract_entities_for};
 use crate::hash::HashPolicy;
-use crate::identity::{reconcile, reconcile_scoped, DurableId, FormatError, IdentityRegistry};
+use crate::identity::{reconcile, reconcile_scoped, DurableId, FormatError, IdentityRegistry, IdentityStatus};
 use crate::overlay::OverlaySystem;
 use crate::sidecar::Sidecar;
 
@@ -1311,6 +1311,47 @@ fn compute_authored_lifecycle(
     (authored_nr, authored_orph)
 }
 
+/// Derive the authored record status for `(layer, id)` at a snapshot revision.
+///
+/// Status is derived, not stored — the registry (captured per snapshot) is
+/// the single source of truth.  The key decision table:
+///
+/// ```text
+/// status_at(layer, id, R) =
+///     absent                       if no authored record for (layer, id) with rev ≤ R
+///     present                      if layer.review_on_change == false
+///     map(registry@R .anchor(id).status)
+///         Active      → present
+///         NeedsReview → needs_review
+///         Orphaned    → orphaned
+/// ```
+fn derive_authored_status(
+    config: &ValidatedConfig,
+    registry: Option<&IdentityRegistry>,
+    layer: &str,
+    id: &str,
+) -> String {
+    // If review_on_change is false, always present.
+    let review_on_change = config
+        .raw
+        .layers
+        .get(layer)
+        .map(|lc| lc.review_on_change)
+        .unwrap_or(false);
+    if !review_on_change {
+        return "present".to_string();
+    }
+
+    // Map registry status.
+    let durable = DurableId(id.to_string());
+    match registry.and_then(|r| r.status_of(&durable)) {
+        Some(IdentityStatus::Active) => "present".to_string(),
+        Some(IdentityStatus::NeedsReview) => "needs_review".to_string(),
+        Some(IdentityStatus::Orphaned) => "orphaned".to_string(),
+        None => "present".to_string(),  // unknown id → treat as present (no lifecycle to surface)
+    }
+}
+
 /// Shared identity reconciliation: extract entities, reconcile against
 /// registry, persist, and return identity delta fields.
 ///
@@ -2165,6 +2206,7 @@ impl PyTyProject {
 
         let registry = head.registry.clone();
         let authored = Some(head.authored.clone());
+        let config = head.config.clone();
         let hash_policies = head.hash_policies.clone();
         let default_hash_profile = head.default_hash_profile.clone();
         let (generation, rev) = match at {
@@ -2189,6 +2231,7 @@ impl PyTyProject {
         Ok(PySnapshot {
             inner: Mutex::new(Some(state)),
             revision: rev.0,
+            config,
         })
     }
 
@@ -2319,6 +2362,8 @@ pub struct PySnapshot {
     inner: Mutex<Option<TyProjectState>>,
     /// The application revision this snapshot is pinned to (immutable).
     revision: u64,
+    /// Validated config needed for derived status computation.
+    config: ValidatedConfig,
 }
 
 #[pymethods]
@@ -2736,6 +2781,57 @@ impl PySnapshot {
             Some(dto) => pythonize(py, &dto)
                 .map_err(|e| PyRuntimeError::new_err(e.to_string())),
         }
+    }
+
+    // ── Authored reads ──────────────────────────────────────
+
+    /// Resolve an authored value for `(layer, durable_id)` at this snapshot's
+    /// pinned revision.
+    ///
+    /// Status is derived from the snapshot-captured identity registry:
+    /// - `present` if the entity is Active, or the layer has `review_on_change = false`.
+    /// - `needs_review` if the entity's anchor status is `NeedsReview`.
+    /// - `orphaned` if the entity's anchor status is `Orphaned`.
+    /// - `absent` if no authored record for this (layer, id) with `revision <= R`.
+    fn authored<'py>(&self, py: Python<'py>, layer: &str, id: &str) -> PyResult<Bound<'py, PyAny>> {
+        let guard = self.inner.lock().map_err(|e| {
+            PyRuntimeError::new_err(format!("Lock poisoned: {e}"))
+        })?;
+        let state = guard.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err("Snapshot is closed")
+        })?;
+
+        let authored_store = state.authored.as_ref();
+        let registry = state.registry.as_ref();
+
+        let (value, rev, status_str) = match authored_store {
+            Some(store) => {
+                match store.value_at(layer, id, self.revision) {
+                    Some(version) => {
+                        let rev = version.revision;
+                        let status_str = derive_authored_status(
+                            &self.config,
+                            registry,
+                            layer,
+                            id,
+                        );
+                        (Some(version.value.clone()), rev, status_str)
+                    }
+                    None => (None, self.revision, "absent".to_string()),
+                }
+            }
+            None => (None, self.revision, "absent".to_string()),
+        };
+
+        let dto = dto::AuthoredValueDto {
+            layer: layer.to_string(),
+            durable_id: id.to_string(),
+            value,
+            status: status_str,
+            revision: rev,
+        };
+        drop(guard);
+        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     // ── Close ────────────────────────────────────────────────

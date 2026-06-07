@@ -17,6 +17,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import warnings
 from pathlib import Path as StdPath
 from pathlib import PurePosixPath
@@ -35,6 +36,7 @@ from tyo3.exceptions import (
 from tyo3.config import TyConfig
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult, Range, SyncResult
+from tyo3.models.authored import AuthoredValue
 from tyo3.models.derived import DerivedValue
 from tyo3.models.editor import FoldingRange, Hint, InlayHint
 from tyo3.models.lsp import Completion, SignatureHelp
@@ -1012,6 +1014,87 @@ class TyO3Session(_ReadOps):
             return
         dag.gc_orphans(self)
 
+    # ── Authored (Gate 6) ───────────────────────────────────────────
+
+    def author(self, layer: str, durable_id: str, value: Any) -> SyncResult:
+        """Author (write) an authored value for ``(layer, durable_id)``.
+
+        An authored write is a real revision-producing commit: it bumps the
+        revision, persists the record crash-safely, and returns a delta.
+        Derived layers are unaffected — authored layers are sinks (§9.2.4).
+        """
+        self._check_open()
+        self._invalidate_head_snap()
+        payload = json.dumps(value)
+        try:
+            native = self._inner.author(layer, durable_id, payload)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in author(): {e}") from e
+        result = SyncResult.model_validate(native)
+        # Do NOT call _apply_graph_delta — authored writes produce no code/derived delta.
+        return result
+
+    def authored(self, layer: str, durable_id: str) -> AuthoredValue:
+        """Read an authored value from the HEAD snapshot."""
+        self._check_open()
+        native = self._native()
+        try:
+            dto = native.authored(layer, durable_id)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in authored(): {e}") from e
+        return AuthoredValue.model_validate(dto)
+
+    def authored_needs_review(self, layer: str | None = None) -> list[str]:
+        """List durable ids with authored records flagged `needs_review`.
+
+        If `layer` is given, filters to that authored layer."""
+        self._check_open()
+        # Collect from most recent sync result (or derive from registry).
+        # For the HEAD, we derive from the current state.
+        ids = []
+        for lname, lcfg in self.config.layers.items():
+            if lcfg.origin != "authored":
+                continue
+            if layer is not None and lname != layer:
+                continue
+            if not lcfg.review_on_change:
+                continue
+            for nrid in self.needs_review():
+                # Check if this id has an authored record in this layer.
+                try:
+                    val = self.authored(lname, nrid)
+                    if val.status == "needs_review":
+                        ids.append(nrid)
+                except Exception:
+                    pass
+        return sorted(set(ids))
+
+    def authored_orphaned(self, layer: str | None = None) -> list[str]:
+        """List durable ids with authored records flagged `orphaned`.
+
+        If `layer` is given, filters to that authored layer."""
+        self._check_open()
+        ids = []
+        for lname, lcfg in self.config.layers.items():
+            if lcfg.origin != "authored":
+                continue
+            if layer is not None and lname != layer:
+                continue
+            if not lcfg.review_on_change:
+                continue
+            for orph_id in self.orphaned():
+                try:
+                    val = self.authored(lname, orph_id)
+                    if val.status == "orphaned":
+                        ids.append(orph_id)
+                except Exception:
+                    pass
+        return sorted(set(ids))
+
     def close(self) -> None:
         """Close the project and free Rust-side resources.
 
@@ -1212,6 +1295,16 @@ class Snapshot(_ReadOps):
     def docstring(self, durable_id: str) -> DerivedValue:
         """Convenience: derived value from the 'docstrings' layer."""
         return self.derived("docstrings", durable_id)
+
+    def authored(self, layer: str, durable_id: str) -> AuthoredValue:
+        """Resolve an authored value at this snapshot's pinned revision.
+
+        Status is honest (§10.2.3): absent, present, needs_review, or orphaned —
+        derived from the snapshot-captured identity registry.
+        """
+        self._check_open()
+        dto = self._inner.authored(layer, durable_id)
+        return AuthoredValue.model_validate(dto)
 
     def close(self) -> None:
         """Release the pinned revision. Safe to call multiple times."""

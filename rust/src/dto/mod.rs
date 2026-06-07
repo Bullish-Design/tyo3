@@ -29,6 +29,18 @@ pub use hints::*;
 pub use code_action::*;
 pub use sync::*;
 
+/// An authored value resolved at a snapshot revision.
+///
+/// Serialized to a Python dict via pythonize for `PySnapshot::authored`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AuthoredValueDto {
+    pub layer: String,
+    pub durable_id: String,
+    pub value: Option<serde_json::Value>,
+    pub status: String,
+    pub revision: u64,
+}
+
 /// Result of a project check.  Serialized to a Python dict via pythonize.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CheckResultDto {
