@@ -26,7 +26,7 @@ class DerivedLayer:
 
     name: str
     depends_on: tuple[str, ...]  # e.g. ("code",) or ("descriptions",)
-    generator: "Generator"  # Step 3 — protocol, set later
+    generator: "Generator"  # from generators.py — protocol
     generator_version: str
     hash_profile: str
     serving: Literal["stale", "block"]
@@ -117,9 +117,3 @@ class DerivedLayer:
         self._bindings.pop(durable_id, None)
         self._last_good.pop(durable_id, None)
         self._failed.discard(durable_id)
-
-
-# Forward reference for Step 3.
-class Generator:
-    """Protocol for artifact generators. Defined in generators.py (Step 3)."""
-    pass

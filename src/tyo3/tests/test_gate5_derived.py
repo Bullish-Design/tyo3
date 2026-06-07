@@ -343,6 +343,185 @@ class TestDerivedLayer:
 _UPPERCASE_CALL_COUNT = 0
 
 
+# ── Step 3: Generators ──────────────────────────────────────────────────
+
+
+def _make_python_cfg(callable_ref: str, batch_size: int = 64):
+    from tyo3.config import GeneratorConfig
+    return GeneratorConfig(
+        type="python",
+        callable=callable_ref,
+        command=(),
+        endpoint=None,
+        model=None,
+        dim=None,
+        batch_size=batch_size,
+        concurrency=None,
+        timeout_ms=None,
+    )
+
+
+def test_python_generator_deterministic():
+    """A python generator returns deterministic bytes for a batch."""
+    from tyo3.derive.generators import GenInput, PythonGenerator, make_generator
+
+    cfg = _make_python_cfg("tyo3.tests.test_gate5_derived:echo_generator")
+    gen = make_generator(cfg, name="test")
+
+    inputs = [
+        GenInput(durable_id="a", source="hello"),
+        GenInput(durable_id="b", source="world"),
+    ]
+    results = gen.generate(inputs)
+    assert results == [b"hello", b"world"]
+
+    # Deterministic: same inputs → same outputs.
+    results2 = gen.generate(inputs)
+    assert results2 == results
+
+
+def test_python_generator_batching():
+    """Inputs are split into batches per batch_size."""
+    from tyo3.derive.generators import GenInput, make_generator
+
+    cfg = _make_python_cfg("tyo3.tests.test_gate5_derived:echo_generator", batch_size=3)
+    gen = make_generator(cfg, name="test")
+
+    inputs = [GenInput(durable_id=str(i), source=f"item{i}") for i in range(7)]
+    results = gen.generate(inputs)
+    assert len(results) == 7
+    assert results == [f"item{i}".encode() for i in range(7)]
+
+
+def test_python_generator_failure():
+    """Generator raising an exception produces GeneratorFailed."""
+    from tyo3.derive.generators import GenInput, make_generator
+    from tyo3.exceptions import GeneratorFailed
+
+    cfg = _make_python_cfg("tyo3.tests.test_gate5_derived:failing_generator")
+    gen = make_generator(cfg, name="test")
+
+    with pytest.raises(GeneratorFailed) as exc_info:
+        gen.generate([GenInput(durable_id="x", source="boom")])
+    assert exc_info.value.layer == "test"
+    assert "x" in exc_info.value.input_ids
+
+
+def test_command_generator_success():
+    """A command generator round-trips stdin→stdout."""
+    from tyo3.config import GeneratorConfig
+    from tyo3.derive.generators import GenInput, CommandGenerator
+
+    cfg = GeneratorConfig(
+        type="command",
+        callable=None,
+        command=("cat",),
+        endpoint=None,
+        model=None,
+        dim=None,
+        batch_size=2,
+        concurrency=1,
+        timeout_ms=5000,
+    )
+    gen = CommandGenerator(cfg, name="test")
+
+    inputs = [
+        GenInput(durable_id="a", source="hello"),
+        GenInput(durable_id="b", source="world"),
+    ]
+    results = gen.generate(inputs)
+    # cat passes stdin through; we expect JSON-encoded lines back
+    assert len(results) == 2
+
+
+def test_command_generator_timeout():
+    """A command exceeding timeout raises GeneratorFailed."""
+    from tyo3.config import GeneratorConfig
+    from tyo3.derive.generators import GenInput, CommandGenerator
+    from tyo3.exceptions import GeneratorFailed
+
+    cfg = GeneratorConfig(
+        type="command",
+        callable=None,
+        command=("sleep", "5"),
+        endpoint=None,
+        model=None,
+        dim=None,
+        batch_size=1,
+        concurrency=1,
+        timeout_ms=100,  # 100ms — way too short for sleep 5
+    )
+    gen = CommandGenerator(cfg, name="test")
+
+    with pytest.raises(GeneratorFailed, match="timed out"):
+        gen.generate([GenInput(durable_id="x", source="x")])
+
+
+def test_command_generator_nonzero_exit():
+    """A command with non-zero exit raises GeneratorFailed."""
+    from tyo3.config import GeneratorConfig
+    from tyo3.derive.generators import GenInput, CommandGenerator
+    from tyo3.exceptions import GeneratorFailed
+
+    cfg = GeneratorConfig(
+        type="command",
+        callable=None,
+        command=("false",),
+        endpoint=None,
+        model=None,
+        dim=None,
+        batch_size=1,
+        concurrency=1,
+        timeout_ms=5000,
+    )
+    gen = CommandGenerator(cfg, name="test")
+
+    with pytest.raises(GeneratorFailed, match="exited"):
+        gen.generate([GenInput(durable_id="x", source="x")])
+
+
+def test_http_generator_stub():
+    """HTTP generator with stubbed endpoint returns artifacts."""
+    from tyo3.config import GeneratorConfig
+    from tyo3.derive.generators import GenInput, HttpGenerator
+    from tyo3.exceptions import GeneratorFailed
+
+    cfg = GeneratorConfig(
+        type="http",
+        callable=None,
+        command=(),
+        endpoint="http://127.0.0.1:19999/nonexistent",
+        model="test-model",
+        dim=3,
+        batch_size=2,
+        concurrency=1,
+        timeout_ms=500,
+    )
+    gen = HttpGenerator(cfg, name="test")
+
+    # This endpoint doesn't exist → should raise GeneratorFailed.
+    with pytest.raises(GeneratorFailed, match="HTTP request failed"):
+        gen.generate([GenInput(durable_id="x", source="test")])
+
+
+# ── Generator test helpers ───────────────────────────────────────────────
+
+
+def echo_generator(inputs):
+    """Trivial python generator: returns the source text as-is (encoded)."""
+    global _ECHO_CALL_COUNT
+    _ECHO_CALL_COUNT += 1
+    return [inp.source for inp in inputs]
+
+
+_ECHO_CALL_COUNT = 0
+
+
+def failing_generator(inputs):
+    """A generator that always raises."""
+    raise RuntimeError("intentional failure")
+
+
 def uppercase_generator(inputs):
     """Trivial python generator: returns the uppercased normalised name.
 

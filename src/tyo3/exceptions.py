@@ -48,6 +48,20 @@ class StoreBackendUnavailable(TyO3Error):
     """Raised when an optional store backend dependency is not installed."""
 
 
+class GeneratorFailed(TyO3Error):
+    """A derived-layer generator failed (timeout, non-zero exit, HTTP error).
+
+    Carries the layer name and the offending input DurableIds so callers
+    can mark exactly the affected artifacts failed while leaving prior
+    artifacts intact (§9.2.6).
+    """
+
+    def __init__(self, message: str, *, layer: str, input_ids: list[str]) -> None:
+        super().__init__(message)
+        self.layer = layer
+        self.input_ids = input_ids
+
+
 class AnalysisError(TyO3Error):
     """Raised when a type-checking operation fails."""
 
