@@ -385,6 +385,8 @@ mod tests {
     use super::*;
     use crate::content::ContentStore;
     use std::io::Write;
+    use std::sync::Mutex;
+    use ruff_db::system::walk_directory::{DirectoryEntry as WalkDirEntry, Error as WalkDirError, WalkState};
     use ruff_python_ast::name::Name;
     use ty_project::{ProjectDatabase, ProjectMetadata};
 
@@ -620,5 +622,113 @@ mod tests {
         let live_names: Vec<&str> = live_entries.iter().map(|e| e.path().as_str()).collect();
         assert!(live_names.iter().any(|p| p.contains("c.py")),
             "c.py must appear in live enumeration, got {live_names:?}");
+    }
+
+    // ── Phase 1 frozen strictness lock-in tests ──────────────────────
+
+    /// §5.2: a frozen view's `source_type` returns `None` for paths not in
+    /// the generation — never falls through to disk.
+    #[test]
+    fn frozen_source_type_none_for_unknown_path() {
+        let (_dir, root, a) = fixture("X = 1\n");
+        let mut map = ContentMap::new();
+        // Only a.py is in the generation.
+        map.system = map.system.insert(a.clone(), Document::text("X = 1\n", 1));
+        let gen = Arc::new(map);
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        // b.py is on disk but NOT in the generation → None.
+        let b = root.join("b.py");
+        std::fs::write(_dir.path().join("b.py"), b"Y = 2\n").unwrap();
+        assert_eq!(frozen.source_type(&b), None);
+
+        // a.py IS in the generation → Python source type.
+        assert!(frozen.source_type(&a).is_some());
+    }
+
+    /// §5.2: a frozen view's `path_metadata` for a path not in the generation
+    /// returns `not_found` — even if the file exists on disk.
+    #[test]
+    fn frozen_path_metadata_not_found_for_unpopulated_disk_file() {
+        let (_dir, root, a) = fixture("X = 1\n");
+        let mut map = ContentMap::new();
+        map.system = map.system.insert(a.clone(), Document::text("X = 1\n", 1));
+        let gen = Arc::new(map);
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        // b.py exists on disk but is not in the generation.
+        let b = root.join("b.py");
+        std::fs::write(_dir.path().join("b.py"), b"Y = 2\n").unwrap();
+        assert!(frozen.path_metadata(&b).is_err());
+    }
+
+    /// §5.2 known gap: `walk_directory` delegates to native disk even for
+    /// frozen views, so a walk can discover files created after the frozen
+    /// revision.  However, `read_to_string` on those files returns
+    /// `not_found`, and this gap only manifests if a Phase 1 read path
+    /// calls `walk_directory` on a frozen view.  This test documents the
+    /// current behaviour so it is explicit.
+    #[test]
+    fn frozen_walk_directory_sees_disk_but_read_fails() {
+        let (_dir, root, a) = fixture("X = 1\n");
+        let mut map = ContentMap::new();
+        map.system = map.system.insert(a.clone(), Document::text("X = 1\n", 1));
+        let gen = Arc::new(map);
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        // Create a new file on disk after the frozen view is pinned.
+        let c_path = _dir.path().join("c.py");
+        std::fs::write(&c_path, b"Z = 3\n").unwrap();
+
+        // walk_directory delegates to native even for frozen views,
+        // so it will discover c.py on disk.
+        let walker = frozen.walk_directory(&root);
+        let found: Arc<Mutex<Vec<SystemPathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+        let found_clone = Arc::clone(&found);
+        walker.run(move || {
+            let found = Arc::clone(&found_clone);
+            Box::new(move |entry: std::result::Result<
+                WalkDirEntry,
+                WalkDirError,
+            >| {
+                if let Ok(entry) = entry {
+                    if let Ok(mut v) = found.lock() {
+                        v.push(entry.path().to_path_buf());
+                    }
+                }
+                WalkState::Continue
+            })
+        });
+        let found = Arc::try_unwrap(found).unwrap().into_inner().unwrap();
+
+        // c.py IS discovered by the walk (the gap).
+        let c_rust_path = SystemPathBuf::from_path_buf(c_path).unwrap();
+        assert!(
+            found.contains(&c_rust_path),
+            "walk_directory gap: c.py IS visible via native walk on frozen view"
+        );
+
+        // But read_to_string still returns not_found for c.py because
+        // it is not in the generation.
+        assert!(frozen.read_to_string(&c_rust_path).is_err());
+    }
+
+    /// §5.2 lock-in: a snapshot at R where a file was tombstoned (deleted)
+    /// at R observes the tombstone, not the disk file.
+    #[test]
+    fn frozen_tombstone_survives_disk_restoration() {
+        let (_dir, root, a) = fixture("X = 1\n");
+        // a.py was tombstoned at R (the generation says it was deleted).
+        let mut map = ContentMap::new();
+        map.system = map.system.insert(a.clone(), Document::Deleted { version: 1 });
+        let gen = Arc::new(map);
+
+        let frozen = OverlaySystem::frozen(root.clone(), gen, Revision(1));
+
+        // The tombstone hides the disk file.
+        assert!(frozen.read_to_string(&a).is_err());
+        assert!(frozen.path_metadata(&a).is_err());
+        // source_type returns None for tombstoned paths.
+        assert_eq!(frozen.source_type(&a), None);
     }
 }
