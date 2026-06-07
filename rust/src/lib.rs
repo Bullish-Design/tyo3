@@ -19,6 +19,7 @@ mod content;
 mod entity;
 mod identity;
 mod sidecar;
+mod authored;
 mod convert;
 mod dto;
 mod overlay;

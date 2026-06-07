@@ -3166,7 +3166,7 @@ mod phase4_tests {
         std::fs::write(dir.path().join(".keep"), "").unwrap();
         let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
         let head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
-        let snap = build_frozen(root, head.store.capture(), head.store.revision());
+        let snap = build_frozen(root, head.store.capture(), head.store.revision(), HashMap::new(), "structure".to_string());
 
         assert!(compute_files(&snap).is_empty());
     }
@@ -3185,7 +3185,7 @@ mod phase4_tests {
 
         // Pre-populate the generation with the disk content at r0.
         let gen_r0 = pre_populate(&mut head.store, a.clone(), "X = 1\n");
-        let snap0 = build_frozen(root.clone(), gen_r0, head.store.revision());
+        let snap0 = build_frozen(root.clone(), gen_r0, head.store.revision(), HashMap::new(), "structure".to_string());
         assert!(read(&snap0, &a).contains("X = 1"));
 
         // Many HEAD edits land afterwards.
@@ -3214,7 +3214,7 @@ mod phase4_tests {
 
         // Pre-populate the disk content into the generation.
         let gen = pre_populate(&mut head.store, a.clone(), "DISK = 1\n");
-        let snap = build_frozen(root.clone(), gen, head.store.revision());
+        let snap = build_frozen(root.clone(), gen, head.store.revision(), HashMap::new(), "structure".to_string());
         assert!(read(&snap, &a).contains("DISK = 1"));
 
         // Mutate the real file on disk (an out-of-band change).
@@ -3236,7 +3236,7 @@ mod phase4_tests {
         head.db
             .apply_changes(std::slice::from_ref(&ev), None);
 
-        let snap = build_frozen(root.clone(), head.store.capture(), head.store.revision());
+        let snap = build_frozen(root.clone(), head.store.capture(), head.store.revision(), HashMap::new(), "structure".to_string());
         assert!(read(&snap, &a).contains("OVERLAY = 1"));
     }
 
@@ -3255,7 +3255,7 @@ mod phase4_tests {
 
         // Build frozen from the pre-populated r0 generation (clone out of retained).
         let g0 = head.store.generation_at(r0).expect("r0 still retained");
-        let snap0 = build_frozen(root.clone(), g0, r0);
+        let snap0 = build_frozen(root.clone(), g0, r0, HashMap::new(), "structure".to_string());
         assert!(read(&snap0, &a).contains("X = 1"));
     }
 
@@ -3271,13 +3271,13 @@ mod phase4_tests {
         // Pre-populate and build first snapshot at r0.
         let gen = pre_populate(&mut head.store, a.clone(), "SHARED = 1\n");
         let r0 = head.store.revision();
-        let snap1 = build_frozen(root.clone(), gen.clone(), r0);
+        let snap1 = build_frozen(root.clone(), gen.clone(), r0, HashMap::new(), "structure".to_string());
 
         // Mutate disk between snapshots.
         std::fs::write(_dir.path().join("a.py"), b"MUTATED = 999\n").unwrap();
 
         // Build second snapshot at the same revision r0.
-        let snap2 = build_frozen(root.clone(), gen, r0);
+        let snap2 = build_frozen(root.clone(), gen, r0, HashMap::new(), "structure".to_string());
 
         // Both snapshots read the same pinned content.
         assert_eq!(read(&snap1, &a), read(&snap2, &a));
@@ -3361,7 +3361,7 @@ mod phase5_concurrency_tests {
         let edit_count = stress_count("TYO3_MVCC_STRESS_EDITS", 100);
 
         let snapshots: Vec<TyProjectState> = (0..snapshot_count)
-            .map(|_| build_frozen(root.clone(), gen.clone(), rev))
+            .map(|_| build_frozen(root.clone(), gen.clone(), rev, HashMap::new(), "structure".to_string()))
             .collect();
 
         // Force each snapshot to do real work before the writer starts.
@@ -3412,7 +3412,7 @@ mod phase5_concurrency_tests {
         let edit_count = stress_count("TYO3_MVCC_STRESS_EDITS", 100);
 
         let snapshots: Vec<TyProjectState> = (0..reader_count)
-            .map(|_| build_frozen(root.clone(), gen.clone(), rev))
+            .map(|_| build_frozen(root.clone(), gen.clone(), rev, HashMap::new(), "structure".to_string()))
             .collect();
 
         let barrier = Arc::new(Barrier::new(reader_count + 1));
@@ -3508,7 +3508,7 @@ mod phase5_concurrency_tests {
         // Pre-populate the content (Design A).
         let gen = pre_populate_gen(&mut head.store, &a, "CAPTURED = 1\n");
         let rev = head.store.revision();
-        let snap = build_frozen(root.clone(), gen, rev);
+        let snap = build_frozen(root.clone(), gen, rev, HashMap::new(), "structure".to_string());
 
         let reader_count = stress_count("TYO3_MVCC_STRESS_READERS", 16);
         let barrier = Arc::new(Barrier::new(reader_count));
@@ -3521,6 +3521,8 @@ mod phase5_concurrency_tests {
                     root: snap.root.clone(),
                     registry: None,
                     hash_policy: snap.hash_policy,
+                    hash_policies: std::collections::HashMap::new(),
+                    default_hash_profile: "structure".to_string(),
                 };
             let barrier = Arc::clone(&barrier);
             let tx = tx.clone();
@@ -3595,7 +3597,7 @@ mod step7_ingest_tests {
         std::fs::write(_dir.path().join("a.py"), b"SECOND = 999\n").unwrap();
 
         // Build a frozen view at the synced revision — must read FIRST content.
-        let snap = build_frozen(root.clone(), gen_at_r, r_sync);
+        let snap = build_frozen(root.clone(), gen_at_r, r_sync, HashMap::new(), "structure".to_string());
         let file = ruff_db::files::system_path_to_file(&snap.db, &a).unwrap();
         let content = source_text(&snap.db, file).as_str().to_string();
         assert!(
@@ -3628,7 +3630,7 @@ mod step7_ingest_tests {
         std::fs::write(_dir.path().join("a.py"), b"WATCHER_MUTATED = 999\n").unwrap();
 
         // Snapshot at R_watch must read the ingested (first) content.
-        let snap = build_frozen(root, gen, r_watch);
+        let snap = build_frozen(root, gen, r_watch, HashMap::new(), "structure".to_string());
         let file = ruff_db::files::system_path_to_file(&snap.db, &a).unwrap();
         let content = source_text(&snap.db, file).as_str().to_string();
         assert!(content.contains("WATCHER_FIRST = 1"));
@@ -3650,7 +3652,7 @@ mod step7_ingest_tests {
 
         // Even if disk still has the file, the snapshot sees it as absent.
         // (Under Design A, the frozen view has no disk fallback.)
-        let snap = build_frozen(root, gen, r_del);
+        let snap = build_frozen(root, gen, r_del, HashMap::new(), "structure".to_string());
         let result = ruff_db::files::system_path_to_file(&snap.db, &a);
         // Should be an error — file is tombstoned in the generation.
         assert!(
