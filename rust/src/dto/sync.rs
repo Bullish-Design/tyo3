@@ -27,6 +27,12 @@ pub struct SyncResultDto {
     pub identity_extracted: usize,
     #[serde(default)]
     pub identity_scope_files: usize,
+    #[serde(default)]
+    pub authored: Vec<String>,
+    #[serde(default)]
+    pub authored_needs_review: Vec<String>,
+    #[serde(default)]
+    pub authored_orphaned: Vec<String>,
     pub project_changed: bool,
     pub custom_stdlib_changed: bool,
     pub rescan: bool,

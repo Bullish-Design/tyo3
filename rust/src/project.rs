@@ -1356,6 +1356,7 @@ fn commit_head(
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan,
+        ..Default::default()
     }
 }
 
@@ -1410,6 +1411,9 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
         orphaned: identity.orphaned,
         identity_extracted: identity.extracted,
         identity_scope_files: identity.scope_files,
+        authored: vec![],
+        authored_needs_review: vec![],
+        authored_orphaned: vec![],
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
@@ -1456,6 +1460,9 @@ fn apply_watch_events(
             orphaned: identity.orphaned,
             identity_extracted: identity.extracted,
             identity_scope_files: identity.scope_files,
+            authored: vec![],
+            authored_needs_review: vec![],
+            authored_orphaned: vec![],
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
@@ -1546,6 +1553,9 @@ fn apply_watch_events(
         orphaned: identity.orphaned,
         identity_extracted: identity.extracted,
         identity_scope_files: identity.scope_files,
+        authored: vec![],
+        authored_needs_review: vec![],
+        authored_orphaned: vec![],
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
@@ -1798,6 +1808,96 @@ impl PyTyProject {
         pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
+    /// Author (write) an authored value for `(layer, durable_id)`.
+    ///
+    /// An authored write is a real revision-producing commit: it bumps the
+    /// revision under the single write lock, updates the `AuthoredStore`
+    /// copy-on-write, persists the record crash-safely, and returns a delta.
+    /// Atomic — on parse or persistence failure, the in-memory store is
+    /// rolled back (§5.4, §3.3.1, §3.3.6, §11.3.3).
+    fn author<'py>(
+        &self,
+        py: Python<'py>,
+        layer: &str,
+        id: &str,
+        value_json: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let mut guard = lock_state(&self.inner, "author")?;
+        let head = guard.as_mut().unwrap();
+
+        // 1. Validate: layer is a declared authored layer.
+        let lcfg = head.config.authored_layer_config(layer).ok_or_else(|| {
+            PyConfigError::new_err(format!("'{layer}' is not a declared authored layer"))
+        })?;
+
+        // 2. Parse value JSON early (before any mutation).
+        let value: serde_json::Value = serde_json::from_str(value_json).map_err(|e| {
+            PyValueError::new_err(format!("invalid authored value JSON: {e}"))
+        })?;
+
+        // 3. Validate: id should exist in the registry.
+        let durable_id = DurableId(id.to_string());
+        if head.registry.get(&durable_id).is_none() {
+            return Err(PyValueError::new_err(format!(
+                "durable id '{id}' is not known to the identity registry"
+            )));
+        }
+
+        // 4. Bump the revision with an empty content change
+        //    (so this authored edit IS a revision with a retained generation).
+        head.store.apply_batch(Vec::new());
+        head.system.publish(head.store.capture());
+        let revision = head.store.revision();
+
+        // 5. Copy-on-write the authored store.
+        let version = crate::authored::AuthoredVersion {
+            value,
+            revision: revision.0,
+        };
+        let prior = head.authored.clone();
+        let new_map = head.authored.put(layer, id, version.clone(), lcfg.history);
+        head.authored = AuthoredStore::new(new_map);
+
+        // 6. Persist the record crash-safely (under the write lock, §11.3.3).
+        let rec = head.authored.records_get(layer, id).unwrap();
+        let doc = AuthoredRecordDoc {
+            format_version: crate::authored::AUTHORED_FORMAT_VERSION,
+            layer: layer.to_string(),
+            durable_id: id.to_string(),
+            current: rec.current.clone(),
+            history: rec.history.clone(),
+        };
+        let bytes = match doc.to_bytes() {
+            Ok(b) => b,
+            Err(e) => {
+                // Rollback on serialisation failure.
+                head.authored = prior;
+                return Err(PyRuntimeError::new_err(format!(
+                    "failed to serialise authored record: {e}"
+                )));
+            }
+        };
+        if let Err(e) = head.sidecar.write_atomic(
+            &head.sidecar.record_path(layer, id),
+            &bytes,
+        ) {
+            // Rollback on persistence failure (§3.3.6).
+            head.authored = prior;
+            return Err(PyRuntimeError::new_err(format!(
+                "failed to persist authored record: {e}"
+            )));
+        }
+
+        // 7. Build the delta — authored-only, no code/derived changes.
+        let dto = dto::SyncResultDto {
+            revision: revision.0,
+            authored: vec![id.to_string()],
+            ..Default::default()
+        };
+        drop(guard);
+        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     /// Ingest a disk change for `path`: drop any overlay for it and re-read disk.
     fn sync_path<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
         let mut guard = lock_state(&self.inner, "sync_path")?;
@@ -1842,6 +1942,9 @@ impl PyTyProject {
             orphaned: identity.orphaned,
             identity_extracted: identity.extracted,
             identity_scope_files: identity.scope_files,
+            authored: vec![],
+            authored_needs_review: vec![],
+            authored_orphaned: vec![],
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,

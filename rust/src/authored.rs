@@ -12,7 +12,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-const AUTHORED_FORMAT_VERSION: u32 = 1;
+pub const AUTHORED_FORMAT_VERSION: u32 = 1;
 
 // ── On-disk record format ──────────────────────────────────────────────
 

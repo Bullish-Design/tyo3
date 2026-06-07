@@ -93,6 +93,9 @@ class SyncResult(BaseModel):
     orphaned: list[str] = Field(default_factory=list)
     identity_extracted: int = 0
     identity_scope_files: int = 0
+    authored: list[str] = Field(default_factory=list)
+    authored_needs_review: list[str] = Field(default_factory=list)
+    authored_orphaned: list[str] = Field(default_factory=list)
     project_changed: bool = False
     custom_stdlib_changed: bool = False
     rescan: bool = False

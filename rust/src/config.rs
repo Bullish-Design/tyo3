@@ -278,6 +278,17 @@ impl ValidatedConfig {
     pub fn hash_policy_for(&self, layer: &str) -> HashPolicy {
         HashPolicy::from(self.profile_for(layer))
     }
+
+    /// Return a reference to the `LayerCfg` for a declared authored layer,
+    /// or `None` if the layer is not declared or not authored.
+    pub fn authored_layer_config(&self, layer: &str) -> Option<&LayerCfg> {
+        let lc = self.raw.layers.get(layer)?;
+        if matches!(lc.origin, LayerOrigin::Authored) {
+            Some(lc)
+        } else {
+            None
+        }
+    }
 }
 
 pub fn validate(raw: RawConfig) -> Result<ValidatedConfig, ConfigError> {
