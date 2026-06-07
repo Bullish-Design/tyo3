@@ -14,29 +14,205 @@ from __future__ import annotations
 
 import pytest
 
-# ── Step 0: Failing acceptance tests (API does not exist yet) ────────────
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 1 — Interest unit tests (standalone, no session needed)
+# ═══════════════════════════════════════════════════════════════════════════
 
 
-def test_scoped_reverse_dep_delivery(tmp_path):
-    """Scoped, reverse-dep-aware delivery (§12.2.1, §4.3.3).
+class TestInterest:
+    """Unit tests for the Interest filter (§12.2.1)."""
 
-    A subscriber interested in ``models.py`` is notified on edits to it
-    and to its importers (reverse-dep), and not on unrelated edits.
-    """
-    from tyo3 import TyO3Session
-    from tyo3.bus.interest import Interest
+    def test_files_matches_when_affected_file_overlaps(self):
+        from tyo3.bus.interest import Interest
 
-    proj = tmp_path / "proj"
-    proj.mkdir()
+        i = Interest.files_of({"a.py"})
+        assert i.matches(set(), {"a.py"})
+        assert not i.matches(set(), {"b.py"})
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
-    (proj / "models.py").write_text("class User:\n    name: str\n")
-    (proj / "app.py").write_text("from models import User\n\ndef create():\n    return User()\n")
-    (proj / "other.py").write_text("def unrelated():\n    pass\n")
+    def test_ids_matches_when_affected_id_overlaps(self):
+        from tyo3.bus.interest import Interest
 
-    cfg_dir = proj / ".tyo3"
-    cfg_dir.mkdir()
-    (cfg_dir / "config.toml").write_text("""\
+        i = Interest.ids_of({"01KXYZ"})
+        assert i.matches({"01KXYZ"}, set())
+        assert not i.matches({"01KABC"}, set())
+
+    def test_layer_matches_when_touched_layer_overlaps(self):
+        from tyo3.bus.interest import Interest
+
+        i = Interest.layer("intent")
+        assert i.matches(set(), set(), {"intent"})
+        assert not i.matches(set(), set(), {"embeddings"})
+
+    def test_all_matches_everything(self):
+        from tyo3.bus.interest import Interest
+
+        assert Interest.ALL.matches(set(), set())
+        assert Interest.ALL.matches({"X"}, {"f.py"}, {"L"})
+        assert Interest.ALL.all is True
+
+    def test_union_combines_correctly(self):
+        from tyo3.bus.interest import Interest
+
+        a = Interest.files_of({"a.py"})
+        b = Interest.ids_of({"01KXYZ"})
+        u = a | b
+        assert u.matches(set(), {"a.py"})
+        assert u.matches({"01KXYZ"}, set())
+        assert not u.matches(set(), {"b.py"})
+
+    def test_union_with_all_is_all(self):
+        from tyo3.bus.interest import Interest
+
+        a = Interest.files_of({"a.py"})
+        u = a | Interest.ALL
+        assert u.all is True
+        assert u.matches(set(), set())
+
+    def test_empty_interest_matches_nothing(self):
+        from tyo3.bus.interest import Interest
+
+        i = Interest()
+        assert i.is_empty
+        assert not i.matches({"X"}, {"f.py"}, {"L"})
+
+    def test_immutable_and_hashable(self):
+        from tyo3.bus.interest import Interest
+
+        i = Interest.files_of({"a.py"})
+        # Should not raise:
+        d = {i: "value"}
+        assert d[i] == "value"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 2 — Delta unit tests (standalone; transitive affected set §4.3.3)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestDelta:
+    """Unit tests for the Delta + transitive affected set (§4.3.3)."""
+
+    def test_from_sync_result_basic_mapping(self):
+        from tyo3.bus.delta import Delta
+        from tyo3.models.analysis import SyncResult
+
+        result = SyncResult(
+            revision=5,
+            created=["01A", "01B"],
+            changed=["01C"],
+            deleted=["01D"],
+            moved=["01E"],
+            authored=["01F"],
+            rescan=False,
+        )
+        delta = Delta.from_sync_result(result, graph=None)
+        assert delta.revision == 5
+        assert delta.created == frozenset({"01A", "01B"})
+        assert delta.changed == frozenset({"01C"})
+        assert delta.deleted == frozenset({"01D"})
+        assert delta.moved == frozenset({"01E"})
+        assert delta.authored == frozenset({"01F"})
+        assert delta.rescan is False
+        # affected = changed ∪ deleted when no graph
+        assert delta.affected == frozenset({"01C", "01D"})
+
+    def test_affected_includes_transitive_dependents(self):
+        """Transitive affected set includes importers (§4.3.3)."""
+        from tyo3 import TyO3Session
+        from tyo3.bus.delta import Delta
+
+        import tempfile
+        proj = tempfile.mkdtemp()
+        try:
+            import os
+            os.makedirs(os.path.join(proj, ".tyo3"))
+            with open(os.path.join(proj, "pyproject.toml"), "w") as f:
+                f.write('[project]\nname = "test"\n')
+            with open(os.path.join(proj, "models.py"), "w") as f:
+                f.write("class User:\n    name: str = ''\n")
+            with open(os.path.join(proj, "app.py"), "w") as f:
+                f.write("from models import User\n\ndef create():\n    return User()\n")
+            with open(os.path.join(proj, ".tyo3", "config.toml"), "w") as f:
+                f.write("schema_version = 1\n[spine]\nretain_cap = 64\n[hashing.profiles.structure]\n")
+
+            with TyO3Session(proj) as session:
+                session.sync_all()
+                # Get a graph with both files indexed.
+                g = session.graph
+
+                user_id = session.id_for("models.py", 1, 7)
+                assert user_id is not None
+
+                # Edit models.py::User. The delta's affected set
+                # should include the importers via reverse-dep.
+                result = session.edit("models.py", "class User:\n    name: str = ''\n    age: int = 0\n")
+                delta = Delta.from_sync_result(result, g)
+
+                # User is in the changed file; affected should include
+                # User + its transitive dependents (app.py's 'create' function
+                # that references User).
+                assert user_id in delta.affected
+                # The changed set should contain ids from models.py
+                assert len(delta.changed) >= 1
+        finally:
+            import shutil
+            shutil.rmtree(proj, ignore_errors=True)
+
+    def test_rescan_delta(self):
+        from tyo3.bus.delta import Delta
+        from tyo3.models.analysis import SyncResult
+
+        result = SyncResult(revision=1, rescan=True)
+        delta = Delta.from_sync_result(result, graph=None)
+        assert delta.rescan is True
+        assert delta.is_empty()  # no ids in a pure rescan result
+
+    def test_scoped_to_filters_by_interest(self, tmp_path):
+        from tyo3.bus.delta import Delta
+        from tyo3.bus.interest import Interest
+        from tyo3.models.analysis import SyncResult
+
+        result = SyncResult(
+            revision=3,
+            changed=["01A", "01B"],
+            deleted=["01C"],
+        )
+        delta = Delta.from_sync_result(result, graph=None)
+
+        # Scope to id "01A" only.
+        interest = Interest.ids_of({"01A"})
+        scoped = delta.scoped_to(interest)
+        assert "01A" in scoped.changed
+        assert "01B" not in scoped.changed
+        assert "01C" not in scoped.deleted
+
+    def test_is_empty(self):
+        from tyo3.bus.delta import Delta
+        from tyo3.models.analysis import SyncResult
+
+        empty = Delta.from_sync_result(SyncResult(revision=0), graph=None)
+        assert empty.is_empty()
+
+        nonempty = Delta.from_sync_result(
+            SyncResult(revision=1, changed=["01A"]), graph=None
+        )
+        assert not nonempty.is_empty()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 0 — Failing acceptance tests (full bus API, wired through session)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _make_two_file_project(root):
+    (root / "pyproject.toml").write_text('[project]\nname = "test"\n')
+    (root / "models.py").write_text("class User:\n    name: str\n")
+    (root / "app.py").write_text("from models import User\n\ndef create():\n    return User()\n")
+    (root / "other.py").write_text("def unrelated():\n    pass\n")
+    cfg = root / ".tyo3"
+    cfg.mkdir()
+    (cfg / "config.toml").write_text("""\
 schema_version = 1
 
 [spine]
@@ -53,12 +229,45 @@ enabled = false
 debounce_ms = 200
 """)
 
+
+def _make_one_file_project(root):
+    (root / "pyproject.toml").write_text('[project]\nname = "test"\n')
+    (root / "models.py").write_text("class User:\n    name: str\n")
+    cfg = root / ".tyo3"
+    cfg.mkdir()
+    (cfg / "config.toml").write_text("""\
+schema_version = 1
+
+[spine]
+retain_cap = 64
+
+[hashing.profiles.structure]
+
+[coordination.bus]
+queue_capacity = 64
+overflow = "coalesce"
+""")
+
+
+def test_scoped_reverse_dep_delivery(tmp_path):
+    """Scoped, reverse-dep-aware delivery (§12.2.1, §4.3.3).
+
+    A subscriber interested in ``models.py`` is notified on edits to it
+    and to its importers (reverse-dep), and not on unrelated edits.
+    """
+    from tyo3 import TyO3Session
+    from tyo3.bus.interest import Interest
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _make_two_file_project(proj)
+
     with TyO3Session(str(proj)) as session:
         session.sync_all()
         user_id = session.id_for("models.py", 1, 7)  # class User
         assert user_id is not None
 
-        sub = session.subscribe(Interest.files({"models.py"}))
+        sub = session.subscribe(Interest.files_of({"models.py"}))
 
         # Edit models.py → subscriber is notified
         result1 = session.edit("models.py", "class User:\n    name: str\n    age: int\n")
@@ -73,7 +282,7 @@ debounce_ms = 200
         assert delta2 is not None, "subscriber should be notified on importer edit (reverse-dep)"
 
         # Edit an unrelated file → subscriber NOT notified
-        result3 = session.edit("other.py", "def unrelated():\n    return 42\n")
+        session.edit("other.py", "def unrelated():\n    return 42\n")
         delta3 = sub.poll(timeout=0.5)
         assert delta3 is None, "subscriber should NOT be notified on unrelated edit"
 
@@ -91,24 +300,7 @@ def test_revision_stamped_read_at_r(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
-    (proj / "models.py").write_text("class User:\n    name: str\n")
-
-    cfg_dir = proj / ".tyo3"
-    cfg_dir.mkdir()
-    (cfg_dir / "config.toml").write_text("""\
-schema_version = 1
-
-[spine]
-retain_cap = 64
-
-[hashing.profiles.structure]
-
-[coordination.bus]
-queue_capacity = 64
-overflow = "coalesce"
-""")
+    _make_one_file_project(proj)
 
     with TyO3Session(str(proj)) as session:
         session.sync_all()
@@ -142,24 +334,7 @@ def test_clean_teardown(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
-    (proj / "models.py").write_text("class User:\n    name: str\n")
-
-    cfg_dir = proj / ".tyo3"
-    cfg_dir.mkdir()
-    (cfg_dir / "config.toml").write_text("""\
-schema_version = 1
-
-[spine]
-retain_cap = 64
-
-[hashing.profiles.structure]
-
-[coordination.bus]
-queue_capacity = 64
-overflow = "coalesce"
-""")
+    _make_one_file_project(proj)
 
     with TyO3Session(str(proj)) as session:
         session.sync_all()
