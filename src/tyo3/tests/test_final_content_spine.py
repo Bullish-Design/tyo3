@@ -123,11 +123,6 @@ def _disk_read_counter(session) -> int | None:
     return None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 1: the project-content disk-read counter seam does not exist; "
-    "snapshot construction still walks the live filesystem (pre_populate_generation)",
-)
 def test_snapshot_construction_reads_no_disk(tmp_path):
     s = _open(tmp_path, {"a.py": "x = 1\n", "pkg/m.py": "def f():\n    return 1\n"})
     try:

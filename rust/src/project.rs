@@ -11,7 +11,7 @@ use crate::{ConfigError as PyConfigError, FormatVersionError, ProjectClosedError
 
 use ruff_db::files::File;
 use ruff_db::source::source_text;
-use ruff_db::system::{OsSystem, System as _, SystemPath, SystemPathBuf, SystemVirtualPathBuf};
+use ruff_db::system::{SystemPath, SystemPathBuf, SystemVirtualPathBuf};
 use ruff_db::Db as _; // bring files() etc. into scope
 use ruff_source_file::LineIndex;
 
@@ -1050,53 +1050,6 @@ fn build_head_with_config(
 /// a frozen view (which has no disk fallback, §1.3.1) can't honour
 /// `pyproject.toml` / `ty.toml`, so snapshot analysis would silently ignore
 /// project configuration (e.g. `python-version`).
-fn pre_populate_generation(
-    root: &SystemPath,
-    generation: &Generation,
-) -> Generation {
-    // Walk the project root to discover all files.  We use the native
-    // OsSystem so we get an accurate, consistent disk view.
-    let native = OsSystem::new(root.to_path_buf());
-    let mut map = (**generation).clone();
-
-    let walker = native.walk_directory(root);
-    // Collect file paths synchronously using Mutex for thread safety
-    // (walk_directory may use multiple threads).
-    let paths: Arc<Mutex<Vec<SystemPathBuf>>> = Arc::new(Mutex::new(Vec::new()));
-    let paths_clone = Arc::clone(&paths);
-    walker.run(move || {
-        let paths = Arc::clone(&paths_clone);
-        Box::new(move |entry: std::result::Result<
-            ruff_db::system::walk_directory::DirectoryEntry,
-            ruff_db::system::walk_directory::Error,
-        >| {
-            if let Ok(entry) = entry {
-                if entry.file_type().is_file() && is_project_relevant(entry.path()) {
-                    if let Ok(mut v) = paths.lock() {
-                        v.push(entry.path().to_path_buf());
-                    }
-                }
-            }
-            ruff_db::system::walk_directory::WalkState::Continue
-        })
-    });
-
-    let paths = Arc::try_unwrap(paths).unwrap_or_else(|_| panic!("pre_populate_generation: walk_dir still owning Arc")).into_inner().unwrap();
-
-    // For every discovered file not already in the generation, read disk
-    // once and insert a Document::Text.
-    for path in &paths {
-        if !map.system.contains_key(path) {
-            if let Ok(text) = native.read_to_string(path) {
-                let doc = Document::text(text, 0); // version 0 — not from store counter
-                map.system = map.system.insert(path.clone(), doc);
-            }
-        }
-    }
-
-    Arc::new(map)
-}
-
 fn build_frozen(
     root: SystemPathBuf,
     generation: Generation,
@@ -1104,9 +1057,11 @@ fn build_frozen(
     hash_policies: HashMap<String, HashPolicy>,
     default_hash_profile: String,
 ) -> TyProjectState {
-    // Pre-populate so the frozen overlay has no need for disk fallback.
-    let gen_full = pre_populate_generation(&root, &generation);
-    let system = OverlaySystem::frozen(root.clone(), gen_full, rev);
+    // Phase 1: the generation is already complete (ingested at open and
+    // updated at every commit), so no disk pre-population is needed.
+    // The frozen overlay pins exactly the generation as-is, achieving
+    // O(1) snapshot capture with no disk content reads.
+    let system = OverlaySystem::frozen(root.clone(), generation, rev);
 
     let built: Result<ProjectDatabase, String> = ProjectMetadata::discover(&root, &system)
         .map_err(|e| format!("project discovery failed: {e}"))
