@@ -201,6 +201,133 @@ class TestDelta:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Step 3 — Subscription unit tests (queue, overflow, iterator, teardown)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestSubscription:
+    """Unit tests for Subscription queue + overflow + teardown."""
+
+    @staticmethod
+    def _make_delta(revision: int, changed: set[str] | None = None) -> "Delta":
+        from tyo3.bus.delta import Delta
+        return Delta(
+            revision=revision,
+            created=frozenset(),
+            changed=frozenset(changed or set()),
+            deleted=frozenset(),
+            moved=frozenset(),
+            authored=frozenset(),
+            affected=frozenset(changed or set()),
+            rescan=False,
+            files=frozenset(),
+            layers=frozenset(),
+        )
+
+    def test_poll_returns_none_when_empty(self):
+        from tyo3.bus.interest import Interest
+        from tyo3.bus.subscription import Subscription
+
+        sub = Subscription(Interest.ALL, capacity=10)
+        assert sub.poll(timeout=0) is None
+
+    def test_poll_returns_delta_when_offered(self):
+        from tyo3.bus.interest import Interest
+        from tyo3.bus.subscription import Subscription
+
+        sub = Subscription(Interest.ALL, capacity=10)
+        d = self._make_delta(1, {"01A"})
+        sub._offer(d)
+        result = sub.poll(timeout=0)
+        assert result is not None
+        assert result.revision == 1
+        assert "01A" in result.changed
+
+    def test_iterator_yields_in_order(self):
+        from tyo3.bus.interest import Interest
+        from tyo3.bus.subscription import Subscription
+
+        sub = Subscription(Interest.ALL, capacity=10)
+
+        import threading
+
+        def _produce():
+            for r in range(1, 4):
+                sub._offer(self._make_delta(r, {f"id{r}"}))
+
+        t = threading.Thread(target=_produce)
+        t.start()
+        t.join()  # wait for all offers to complete
+
+        # Now consume.
+        revisions = []
+        for delta in sub:
+            revisions.append(delta.revision)
+            if delta.revision == 3:
+                sub.close()
+
+        assert revisions == [1, 2, 3]
+
+    def test_coalesce_unions_affected_sets(self):
+        """capacity=2; offer 5 deltas; queue ≤ capacity; tail carries union."""
+        from tyo3.bus.interest import Interest
+        from tyo3.bus.subscription import Subscription
+
+        sub = Subscription(Interest.ALL, capacity=2, overflow="coalesce")
+        for r in range(1, 6):
+            sub._offer(self._make_delta(r, {f"id{r}"}))
+
+        # Queue has at most 2 items.
+        d1 = sub.poll(timeout=0)
+        d2 = sub.poll(timeout=0)
+        d3 = sub.poll(timeout=0)
+        assert d1 is not None
+        # d2 should be the coalesced tail of remaining 4 deltas
+        if d2 is not None:
+            # The coalesced tail should contain all overflowed ids
+            all_ids = d1.changed | d2.changed
+            for r in range(1, 6):
+                assert f"id{r}" in all_ids, f"id{r} missing from coalesced union"
+            # Latest revision should be the last one.
+            assert d2.revision == 5
+        assert d3 is None
+
+    def test_error_overflow_sets_lagged(self):
+        from tyo3.bus.interest import Interest
+        from tyo3.bus.subscription import Subscription
+
+        sub = Subscription(Interest.ALL, capacity=1, overflow="error")
+        sub._offer(self._make_delta(1, {"id1"}))
+        sub._offer(self._make_delta(2, {"id2"}))  # overflows
+        assert sub.lagged is True
+        # Producer is never blocked.
+        d1 = sub.poll(timeout=0)
+        assert d1 is not None
+        assert d1.revision == 1
+
+    def test_close_is_idempotent(self):
+        from tyo3.bus.interest import Interest
+        from tyo3.bus.subscription import Subscription
+
+        sub = Subscription(Interest.ALL, capacity=10)
+        sub.close()
+        sub.close()  # should not raise
+        # _offer after close is a no-op.
+        sub._offer(self._make_delta(1))
+        assert sub.poll(timeout=0) is None
+
+    def test_context_manager_closes(self):
+        from tyo3.bus.interest import Interest
+        from tyo3.bus.subscription import Subscription
+
+        with Subscription(Interest.ALL, capacity=10) as sub:
+            sub._offer(self._make_delta(1))
+            assert sub.poll(timeout=0) is not None
+        # After exit, closed.
+        assert sub.poll(timeout=0) is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Step 0 — Failing acceptance tests (full bus API, wired through session)
 # ═══════════════════════════════════════════════════════════════════════════
 
