@@ -262,6 +262,427 @@ path = "cache/upper"
 
 # ── Test generator (in-process, deterministic) ────────────────────────────
 
+# ── Step 2: EntityView validation tests (§10.2.2, §10.2.3) ──────────
+
+
+def test_entity_view_all_layers_describe_same_revision(tmp_path):
+    """The §10.2.2 join: build an entity with code + derived + authored;
+    snap.entity(id) returns all three at snap.revision. After many head
+    writes, the held snapshot is unchanged."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper"
+serving = "block"
+entity_kinds = ["function"]
+
+[layers.intent]
+origin           = "authored"
+history          = true
+review_on_change = true
+
+[generators.upper_gen]
+type = "python"
+callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+
+[stores.kv_upper]
+backend = "fs"
+path = "cache/upper"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        session.author("intent", foo_id, {"note": "v1"})
+
+        snap = session.snapshot()
+        snap_rev = snap.revision
+
+        # Take EntityView.
+        ev = snap.entity(foo_id)
+        assert ev.revision == snap_rev
+        assert ev.code is not None
+        assert ev.code.name == "foo"
+        assert ev.content_hash is not None
+        assert "upper" in ev.derived
+        assert "intent" in ev.authored
+        assert ev.authored["intent"].value == {"note": "v1"}
+
+        # Many head writes — the held snapshot is unchanged.
+        session.edit("a.py", "def foo():\n    return 99\n")
+        session.author("intent", foo_id, {"note": "v2"})
+
+        ev2 = snap.entity(foo_id)
+        assert ev2.code.name == "foo"
+        assert ev2.authored["intent"].value == {"note": "v1"}  # still v1 at snap_rev
+        assert ev2.revision == snap_rev  # still at the original revision
+
+        snap.close()
+
+
+def test_entity_view_absent_entity(tmp_path):
+    """snap.entity(unknown_id) -> status='absent', code=None, empty derived/authored."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.intent]
+origin           = "authored"
+history          = true
+review_on_change = true
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        snap = session.snapshot()
+        ev = snap.entity("01UNKNOWNID0000000000000000")
+        assert ev.status == "absent"
+        assert ev.code is None
+        assert ev.derived == {}
+        assert ev.authored == {}
+        snap.close()
+
+
+# ── Step 3: Code-layer diff tests ────────────────────────────────────
+
+
+def test_code_diff_entity_body_changed(tmp_path):
+    """Edit one entity's body -> changed == {id}, everything else empty."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        before = session.snapshot()
+        session.edit("a.py", "def foo():\n    return 99\n")
+        after = session.snapshot()
+
+        from tyo3.models.diff import _compute_code_diff
+        d = _compute_code_diff(after, before)
+        assert foo_id in d.changed
+        assert not d.added
+        assert not d.removed
+        assert not d.moved
+
+        before.close()
+        after.close()
+
+
+def test_code_diff_add_file_removed(tmp_path):
+    """Add a file -> its nodes in added; delete -> removed."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        before = session.snapshot()
+
+        (proj / "b.py").write_text("def bar():\n    return 2\n")
+        session.sync_path("b.py")
+        after = session.snapshot()
+
+        from tyo3.models.diff import _compute_code_diff
+        d = _compute_code_diff(after, before)
+        assert len(d.added) > 0
+
+        before.close()
+        after.close()
+
+
+# ── Step 4: Derived drift tests ──────────────────────────────────────
+
+
+def test_derived_drift_on_body_edit(tmp_path):
+    """Edit an entity's body -> it appears in derived layer's drifted;
+    unrelated entity does not."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\ndef bar():\n    return 2\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper"
+serving = "block"
+entity_kinds = ["function"]
+
+[generators.upper_gen]
+type = "python"
+callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+
+[stores.kv_upper]
+backend = "fs"
+path = "cache/upper"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        bar_id = session.id_for("a.py", 3, 5)
+        assert foo_id is not None
+        assert bar_id is not None
+
+        before = session.snapshot()
+        session.edit("a.py", "def foo():\n    return 99\ndef bar():\n    return 2\n")
+        after = session.snapshot()
+
+        upper_view_after = after.layer("upper")
+        upper_view_before = before.layer("upper")
+        d = upper_view_after.diff(upper_view_before)
+
+        assert foo_id in d.drifted
+        assert bar_id not in d.drifted
+
+        before.close()
+        after.close()
+
+
+# ── Step 5: Authored diff tests ──────────────────────────────────────
+
+
+def test_authored_diff_changed(tmp_path):
+    """Author a note between R0 and R1 -> added == {id}.
+    Re-author same id with new value -> changed == {id}."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.intent]
+origin           = "authored"
+history          = true
+review_on_change = true
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        # R0: before author
+        before = session.snapshot()
+        session.author("intent", foo_id, {"note": "v1"})
+        mid = session.snapshot()
+
+        # Added
+        from tyo3.models.diff import _compute_authored_diff
+        d1 = _compute_authored_diff(mid, before, "intent")
+        assert foo_id in d1.added
+
+        # Re-author
+        session.author("intent", foo_id, {"note": "v2"})
+        after = session.snapshot()
+        d2 = _compute_authored_diff(after, mid, "intent")
+        assert foo_id in d2.changed
+
+        before.close()
+        mid.close()
+        after.close()
+
+
+# ── Step 6: Combined SnapshotDiff tests ───────────────────────────────
+
+
+def test_combined_diff_entities_union(tmp_path):
+    """Edit one entity body + author note on another -> entities() is union."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\ndef bar():\n    return 2\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper"
+serving = "block"
+entity_kinds = ["function"]
+
+[layers.intent]
+origin           = "authored"
+history          = true
+review_on_change = true
+
+[generators.upper_gen]
+type = "python"
+callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+
+[stores.kv_upper]
+backend = "fs"
+path = "cache/upper"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        bar_id = session.id_for("a.py", 3, 5)
+        assert foo_id is not None
+        assert bar_id is not None
+
+        before = session.snapshot()
+        session.edit("a.py", "def foo():\n    return 99\ndef bar():\n    return 2\n")
+        session.author("intent", bar_id, {"note": "updated"})
+        after = session.snapshot()
+
+        d = after.diff(before)
+        entities = d.entities()
+        assert foo_id in entities
+        assert bar_id in entities
+
+        before.close()
+        after.close()
+
+
+def test_same_revision_diff_is_empty(tmp_path):
+    """Diff between two snapshots at the same revision -> is_empty."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        snap1 = session.snapshot()
+        snap2 = session.snapshot()
+        d = snap2.diff(snap1)
+        assert d.is_empty
+        snap1.close()
+        snap2.close()
+
+
+# ── Step 7: LatestView boundary tests ────────────────────────────────
+
+
+def test_latest_has_no_entity_no_diff(tmp_path):
+    """Honest boundary: latest exposes no entity() or diff()."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    with TyO3Session(str(proj)) as session:
+        lv = session.latest
+        assert not hasattr(lv, "entity")
+        assert not hasattr(lv, "diff")
+
+
+# ── Step 8: No-config no-op test ─────────────────────────────────────
+
+
+def test_code_only_project_no_op(tmp_path):
+    """A project with only the code layer: snap.entity(id) has empty
+    derived/authored; snap.diff carries only code; matches Gate 3."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        snap = session.snapshot()
+        ev = snap.entity(foo_id)
+        assert ev.code is not None
+        assert ev.derived == {}
+        assert ev.authored == {}
+
+        before = session.snapshot()
+        session.edit("a.py", "def foo():\n    return 99\n")
+        after = session.snapshot()
+        d = after.diff(before)
+        assert d.derived == {}
+        assert d.authored == {}
+
+        before.close()
+        after.close()
+        snap.close()
+
+
+# ── Test generator (in-process, deterministic) ────────────────────────────
+
 _UPPERCASE_CALL_COUNT = 0
 
 
