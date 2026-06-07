@@ -6,12 +6,8 @@ See TyO3_REVIEW_2_REFACTORING_GUIDE.md §Phase 0.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from tyo3.graph import CodeGraph, EdgeData, EdgeKind, SymbolNode
-from tyo3.graph.models import GraphBuildReport
 from tyo3.models.analysis import Range
-from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import SymbolKind
 from tyo3.tests.conftest import get_graph, needs_native
 from tyo3.tests.graph_helpers import edges_of_kind, find_one
@@ -182,29 +178,10 @@ def test_dependencies_include_references() -> None:
     )
 
 
-def test_cross_file_project_target_mismatch_is_reported(tmp_path) -> None:
-    """Cross-file occurrence targets must not disappear without a report failure."""
-
-    occurrence = SimpleNamespace(
-        role=ReferenceRole.READ,
-        target_file=str(tmp_path / "target.py"),
-        target_name="Missing",
-        target_qualified_name=None,
-        range=_range(),
-    )
-    session = SimpleNamespace(file_occurrences=lambda _path: [occurrence])
-    report = GraphBuildReport()
-    graph = CodeGraph()
-
-    graph._resolve_references_via_occurrences(
-        session,
-        "source.py",
-        {"source.py", "target.py"},
-        report=report,
-        root=tmp_path,
-        native_by_graph={"source.py": str(tmp_path / "source.py")},
-    )
-
-    assert not report.complete
-    assert [failure.error_type for failure in report.failures] == ["ProjectLocalTargetMismatch"]
-    assert "source.py -> target.py::Missing" in report.failures[0].message
+# NOTE: ``test_cross_file_project_target_mismatch_is_reported`` exercised
+# ``CodeGraph._resolve_references_via_occurrences``, the Python per-occurrence
+# reference resolver that reported a ``ProjectLocalTargetMismatch`` build
+# failure when a cross-file target could not be resolved. Under Gate 3N,
+# cross-file reference resolution (and its inbound revalidation) happens
+# authoritatively in the native CodeDelta producer, so that Python path and
+# its test were removed with the rewrite.

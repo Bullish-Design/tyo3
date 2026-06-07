@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 from tyo3 import TyO3Session
 
@@ -92,12 +94,23 @@ def _run_child(tmp_path, code, *, timeout=20.0):
     """Run code in a subprocess with tmp_path as cwd. Returns CompletedProcess."""
     script = tmp_path / "_test_script.py"
     script.write_text(textwrap.dedent(code))
+    # `tyo3` is built in-tree (pyproject `package = false`), so it is not
+    # installed into the venv's site-packages — the parent test process only
+    # sees it because pytest prepends `src/` to its own sys.path. A bare
+    # subprocess inherits env vars, not sys.path, so put `src/` on PYTHONPATH
+    # for the child or `import tyo3` fails with ModuleNotFoundError.
+    src_dir = Path(__file__).resolve().parent.parent.parent
+    env = {**os.environ}
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (str(src_dir), env.get("PYTHONPATH", "")) if p
+    )
     return subprocess.run(
         [sys.executable, str(script)],
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
 
 

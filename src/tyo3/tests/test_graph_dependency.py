@@ -215,12 +215,22 @@ class TestResolveExternal:
 
     def test_returns_stub_when_no_cache(self) -> None:
         graph = CodeGraph()
-        graph._add_stub_node(
-            durable_id="unknown::Bar",
-            name="Bar",
-            qualified_name="Bar",
-            kind=SymbolKind.CLASS,
-            package="unknown",
+        # External stub nodes are materialised by the native CodeDelta with their
+        # package already set (§6.2.2); inject one directly to exercise the
+        # no-cache path of resolve_external.
+        graph._add_node(
+            SymbolNode(
+                durable_id="unknown::Bar",
+                name="Bar",
+                qualified_name="Bar",
+                kind=SymbolKind.CLASS,
+                file="<external>",
+                range=Range.model_validate(
+                    {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
+                ),
+                external=True,
+                package="unknown",
+            )
         )
         result = graph.resolve_external("unknown::Bar")
         assert result is not None
@@ -251,12 +261,19 @@ class TestResolveExternal:
         dep.save()
 
         graph = CodeGraph()
-        graph._add_stub_node(
-            durable_id="stdlib::pathlib.Path",
-            name="Path",
-            qualified_name="pathlib.Path",
-            kind=SymbolKind.CLASS,
-            package="stdlib",
+        graph._add_node(
+            SymbolNode(
+                durable_id="stdlib::pathlib.Path",
+                name="Path",
+                qualified_name="pathlib.Path",
+                kind=SymbolKind.CLASS,
+                file="<external>",
+                range=Range.model_validate(
+                    {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
+                ),
+                external=True,
+                package="stdlib",
+            )
         )
 
         resolved = graph.resolve_external("stdlib::pathlib.Path")
@@ -266,28 +283,7 @@ class TestResolveExternal:
         assert resolved.file == "stdlib/pathlib.pyi"
 
 
-class TestInferPackage:
-    def test_site_packages(self) -> None:
-        graph = CodeGraph()
-        result = graph._infer_package("/home/user/.local/lib/python3.13/site-packages/pydantic/main.py")
-        assert result == "pydantic"
-
-    def test_stdlib(self) -> None:
-        graph = CodeGraph()
-        result = graph._infer_package("/usr/lib/python3.13/pathlib.py")
-        assert result == "stdlib"
-
-    def test_typeshed(self) -> None:
-        graph = CodeGraph()
-        result = graph._infer_package("/usr/lib/python3.13/typeshed/stdlib/builtins.pyi")
-        assert result == "stdlib"
-
-    def test_venv_site_packages(self) -> None:
-        graph = CodeGraph()
-        result = graph._infer_package("/home/user/project/.venv/lib/python3.13/site-packages/requests/api.py")
-        assert result == "requests"
-
-    def test_unknown_returns_none(self) -> None:
-        graph = CodeGraph()
-        result = graph._infer_package("/tmp/some_random_file.py")
-        assert result is None
+# NOTE: the old ``TestInferPackage`` suite exercised ``CodeGraph._infer_package``,
+# a Python path→package heuristic. Package attribution now happens authoritatively
+# in the native CodeDelta producer (external nodes carry ``package`` directly), so
+# that helper and its tests were removed with the Gate 3N build rewrite.

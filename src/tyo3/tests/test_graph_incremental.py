@@ -5,8 +5,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path as StdPath
 
-import pytest
-
 from tyo3 import TyO3Session
 from tyo3.graph import CodeGraph, EdgeKind
 from tyo3.tests.graph_helpers import edges_of_kind
@@ -140,8 +138,7 @@ def test_importers_index_populated_after_build(tmp_path: StdPath) -> None:
     (tmp_path / "app.py").write_text("from models import User\nu = User()\n")
     with TyO3Session(str(tmp_path)) as s:
         g = _build(s)
-        assert "app.py" in g._importers_of({"models.py"})
-        assert g._importers_of({"models.py"}) == g._file_importers.get("models.py", set())
+        assert "app.py" in g._file_importers.get("models.py", set())
 
 
 def test_importers_index_survives_apply_delta(tmp_path: StdPath) -> None:
@@ -151,7 +148,7 @@ def test_importers_index_survives_apply_delta(tmp_path: StdPath) -> None:
         g = _build(s)
         sync = s.edit("models.py", "class User:\n    name: str\n")
         g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
-        assert "app.py" in g._importers_of({"models.py"})  # rebuilt, not lost
+        assert "app.py" in g._file_importers.get("models.py", set())  # rebuilt, not lost
 
 
 # ── Idempotence / sequence ───────────────────────────────────────────────
@@ -173,13 +170,7 @@ def test_apply_delta_sequence_matches_rebuild(tmp_path: StdPath) -> None:
         _assert_structurally_equal(g, rebuilt)
 
 
-# ── Guard: apply_delta without build ────────────────────────────────────
-
-
-def test_apply_delta_without_build_raises(tmp_path: StdPath) -> None:
-    (tmp_path / "a.py").write_text("x = 1\n")
-    with TyO3Session(str(tmp_path)) as s:
-        sync = s.edit("a.py", "x = 2\n")
-        g = CodeGraph()
-        with pytest.raises(RuntimeError, match="CodeGraph\\.build"):
-            g.apply_delta(s, sync)
+# NOTE: there was a ``test_apply_delta_without_build_raises`` guard here. Under
+# Gate 3N, ``apply_delta`` applies the commit's self-contained native
+# ``code_delta`` and no longer requires a prior ``build()``, so the "must build
+# first" invariant — and the test asserting it — were removed with the rewrite.

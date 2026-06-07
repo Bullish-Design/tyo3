@@ -209,99 +209,16 @@ class TestQualifiedNameResolution:
 
 
 class TestBuildReports:
-    """Verify that build reports capture failures programmatically."""
+    """Verify the build report for the native single-pass build (Gate 3N).
 
-    def test_build_report_records_symbol_failure(self) -> None:
-        """When document_symbols raises for a file, the report captures it."""
-        mock_session = MagicMock()
-        mock_session.files.return_value = ["/fake/a.py", "/fake/b.py"]
-
-        def _symbols(file_str: str) -> list:
-            if file_str == "/fake/b.py":
-                raise RuntimeError("simulated symbol failure")
-            return []
-
-        mock_session.document_symbols.side_effect = _symbols
-
-        graph, report = CodeGraph.build_with_report(mock_session)
-
-        assert not report.complete
-        assert report.files_total == 2
-        assert report.files_indexed == 1
-        assert len(report.failures) == 1
-        assert report.failures[0].file == "/fake/b.py"
-        assert report.failures[0].phase == "symbols"
-        assert report.failures[0].error_type == "RuntimeError"
-        assert "simulated symbol failure" in report.failures[0].message
-
-    def test_build_report_records_references_failure(self) -> None:
-        """When file_occurrences raises for a file, the report captures it."""
-        mock_session = MagicMock()
-        mock_session.files.return_value = ["/fake/a.py"]
-        mock_session.document_symbols.return_value = []
-        mock_session.id_for.return_value = "01KTCTESTTESTTESTTESTTES01"
-        mock_session.file_occurrences.side_effect = RuntimeError("simulated ref failure")
-
-        graph, report = CodeGraph.build_with_report(mock_session)
-
-        assert not report.complete
-        assert len(report.failures) == 1
-        assert report.failures[0].file == "/fake/a.py"
-        assert report.failures[0].phase == "references"
-
-    def test_build_report_records_inheritance_failure(self) -> None:
-        """When type_hierarchy raises for a class, the report captures it."""
-        from tyo3.models.analysis import FileRange, Range
-        from tyo3.models.symbols import Symbol
-
-        class_range = Range.model_validate(
-            {
-                "start": {"line": 1, "column": 1},
-                "end": {"line": 5, "column": 1},
-            }
-        )
-        mock_class = Symbol(
-            name="MyClass",
-            qualified_name="MyClass",
-            kind=SymbolKind.CLASS,
-            location=FileRange(
-                path=StdPath("/fake/a.py"),
-                range=class_range,
-            ),
-            deprecated=False,
-            durable_id="01KTCTESTTESTTESTTESTTES01",
-            content_hash="123",
-        )
-
-        mock_session = MagicMock()
-        mock_session.files.return_value = ["/fake/a.py"]
-        mock_session.document_symbols.return_value = [mock_class]
-        mock_session.file_occurrences.return_value = []
-        mock_session.id_for.return_value = "01KTCTESTTESTTESTTESTTES01"
-        # Inheritance resolution now uses the lean class_supertypes() path.
-        mock_session.class_supertypes.side_effect = RuntimeError("simulated inheritance failure")
-
-        graph, report = CodeGraph.build_with_report(mock_session)
-
-        assert not report.complete
-        assert len(report.failures) == 1
-        assert report.failures[0].phase == "inheritance"
-
-    def test_build_report_records_diagnostics_failure(self) -> None:
-        """When session.check() raises, the report captures it."""
-        mock_session = MagicMock()
-        mock_session.files.return_value = ["/fake/a.py"]
-        mock_session.document_symbols.return_value = []
-        mock_session.file_occurrences.return_value = []
-        mock_session.id_for.return_value = "01KTCTESTTESTTESTTESTTES01"
-        mock_session.check.side_effect = RuntimeError("simulated check failure")
-
-        graph, report = CodeGraph.build_with_report(mock_session)
-
-        assert not report.complete
-        assert len(report.failures) == 1
-        assert report.failures[0].phase == "diagnostics"
-        assert report.failures[0].file == "<project>"
+    The structural graph is produced authoritatively in Rust and applied via a
+    single ``CodeDelta``; there are no per-file Python passes (symbols /
+    references / inheritance) that can fail mid-build, and diagnostics are
+    collected lazily off the structural path. A successful build therefore
+    yields a *complete* report with no failures, and the report simply records
+    the single-pass file totals. (The old per-phase failure-injection tests
+    described a multi-pass Python build that no longer exists.)
+    """
 
     @needs_native
     def test_build_report_complete_on_clean_fixture(self) -> None:
@@ -336,31 +253,3 @@ class TestBuildReports:
         assert isinstance(graph, CodeGraph)
         assert isinstance(report, GraphBuildReport)
         assert isinstance(report.complete, bool)
-
-    def test_build_report_multiple_failures(self) -> None:
-        """Multiple failures across phases are all recorded."""
-        mock_session = MagicMock()
-        mock_session.files.return_value = ["/fake/a.py", "/fake/b.py", "/fake/c.py"]
-
-        def _symbols(file_str: str) -> list:
-            if file_str == "/fake/a.py":
-                return []
-            if file_str == "/fake/b.py":
-                raise RuntimeError("b failed")
-            if file_str == "/fake/c.py":
-                raise ValueError("c failed")
-            return []
-
-        mock_session.document_symbols.side_effect = _symbols
-        mock_session.file_occurrences.return_value = []
-        mock_session.check.side_effect = RuntimeError("check failed")
-
-        graph, report = CodeGraph.build_with_report(mock_session)
-
-        assert not report.complete
-        assert report.files_total == 3
-        assert report.files_indexed == 1  # only a.py succeeded
-        assert len(report.failures) == 3  # b.py symbols, c.py symbols, diagnostics
-        phases = {f.phase for f in report.failures}
-        assert "symbols" in phases
-        assert "diagnostics" in phases
