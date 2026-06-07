@@ -20,7 +20,7 @@ use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
 use crate::authored::{AuthoredMap, AuthoredRecordDoc, AuthoredStore, AuthoredLoadError};
-use crate::content::{ContentStore, Document, Generation, Revision};
+use crate::content::{is_project_relevant, ContentStore, Document, Generation, Revision};
 use crate::config::{self, RawConfig, ValidatedConfig};
 use crate::entity::{extract_entities, extract_entities_for};
 use crate::hash::HashPolicy;
@@ -1050,20 +1050,6 @@ fn build_head_with_config(
 /// a frozen view (which has no disk fallback, §1.3.1) can't honour
 /// `pyproject.toml` / `ty.toml`, so snapshot analysis would silently ignore
 /// project configuration (e.g. `python-version`).
-fn snapshot_relevant_file(path: &SystemPath) -> bool {
-    if path
-        .extension()
-        .and_then(ruff_python_ast::PySourceType::try_from_extension)
-        .is_some()
-    {
-        return true;
-    }
-    matches!(
-        path.file_name(),
-        Some("pyproject.toml" | "ty.toml" | "setup.cfg" | "setup.py")
-    )
-}
-
 fn pre_populate_generation(
     root: &SystemPath,
     generation: &Generation,
@@ -1085,7 +1071,7 @@ fn pre_populate_generation(
             ruff_db::system::walk_directory::Error,
         >| {
             if let Ok(entry) = entry {
-                if entry.file_type().is_file() && snapshot_relevant_file(entry.path()) {
+                if entry.file_type().is_file() && is_project_relevant(entry.path()) {
                     if let Ok(mut v) = paths.lock() {
                         v.push(entry.path().to_path_buf());
                     }

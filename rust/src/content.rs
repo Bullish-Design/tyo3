@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ruff_db::system::{SystemPathBuf, SystemVirtualPathBuf};
+use ruff_db::system::{SystemPath, SystemPathBuf, SystemVirtualPathBuf};
 use rpds::HashTrieMapSync;
 
 use crate::hash::{hash_text, ContentHash};
@@ -320,6 +320,43 @@ impl ContentStore {
     }
 }
 
+// ── Project-relevant content predicate ──────────────────────────────────
+
+/// The single authority for "what belongs in an analysis generation."
+///
+/// A path is relevant if it is a Python source file **or** one of the
+/// project configuration files the analysis engine consumes during
+/// discovery/setup.  Everything else — including the TyO3 sidecar's own
+/// `.tyo3/config.toml` — is excluded.
+///
+/// This predicate is used by both disk ingest (commit-time) and snapshot
+/// construction to guarantee one definition of relevant content (§5.1).
+pub fn is_project_relevant(path: &SystemPath) -> bool {
+    // Explicitly exclude the TyO3 sidecar directory and everything beneath it.
+    // Walk ancestors: if any component is `.tyo3`, the path is excluded.
+    {
+        let mut current = Some(path);
+        while let Some(p) = current {
+            if p.file_name() == Some(".tyo3") {
+                return false;
+            }
+            current = p.parent();
+        }
+    }
+
+    if path
+        .extension()
+        .and_then(ruff_python_ast::PySourceType::try_from_extension)
+        .is_some()
+    {
+        return true;
+    }
+    matches!(
+        path.file_name(),
+        Some("pyproject.toml" | "ty.toml" | "setup.cfg" | "setup.py")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,7 +476,7 @@ mod tests {
         assert!(store.generation_at(r6).is_some());
     }
 
-    /// A captured generation remains independent after subsequent mutations.
+        /// A captured generation remains independent after subsequent mutations.
     #[test]
     fn captured_generation_is_independent() {
         let mut store = ContentStore::new();
@@ -464,5 +501,45 @@ mod tests {
             Document::Text { text, .. } => assert_eq!(text.as_ref(), "v2"),
             _ => panic!("expected Text"),
         }
+    }
+
+    // ── is_project_relevant tests ─────────────────────────────────────
+
+    #[test]
+    fn py_source_files_are_relevant() {
+        assert!(is_project_relevant(&SystemPathBuf::from("/p/a.py").as_path()));
+        assert!(is_project_relevant(&SystemPathBuf::from("/p/b.pyi").as_path()));
+        assert!(is_project_relevant(&SystemPathBuf::from("/p/c.ipynb").as_path()));
+    }
+
+    #[test]
+    fn config_files_are_relevant() {
+        assert!(is_project_relevant(&SystemPathBuf::from("/p/pyproject.toml").as_path()));
+        assert!(is_project_relevant(&SystemPathBuf::from("/p/ty.toml").as_path()));
+        assert!(is_project_relevant(&SystemPathBuf::from("/p/setup.cfg").as_path()));
+        assert!(is_project_relevant(&SystemPathBuf::from("/p/setup.py").as_path()));
+    }
+
+    #[test]
+    fn non_relevant_files_are_excluded() {
+        assert!(!is_project_relevant(&SystemPathBuf::from("/p/README.md").as_path()));
+        assert!(!is_project_relevant(&SystemPathBuf::from("/p/Makefile").as_path()));
+        assert!(!is_project_relevant(&SystemPathBuf::from("/p/data.json").as_path()));
+    }
+
+    #[test]
+    fn tyo3_sidecar_is_excluded() {
+        // The sidecar dir itself is not relevant.
+        assert!(!is_project_relevant(
+            &SystemPathBuf::from("/p/.tyo3/config.toml").as_path()
+        ));
+        // Any .py inside .tyo3/ is also excluded.
+        assert!(!is_project_relevant(
+            &SystemPathBuf::from("/p/.tyo3/helper.py").as_path()
+        ));
+        // Nested directories inside .tyo3/ are excluded.
+        assert!(!is_project_relevant(
+            &SystemPathBuf::from("/p/.tyo3/sub/config.toml").as_path()
+        ));
     }
 }
