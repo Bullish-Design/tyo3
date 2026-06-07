@@ -231,6 +231,113 @@ def test_no_config_noop_content_hashes(tmp_path):
         assert foo.content_hash == foo.content_hashes["structure"]
 
 
+# ── Step 2: DerivedLayer construction and policy ─────────────────────────
+
+
+class TestDerivedLayer:
+    def test_from_config_populates_fields(self, tmp_path):
+        from tyo3.config import LayerConfig
+        from tyo3.derive.layer import DerivedLayer, Generator
+        from tyo3.stores.fs import FsStore
+
+        cfg = LayerConfig(
+            origin="derived",
+            depends_on=("code",),
+            generator="embed_gen",
+            generator_version="text-embedding-3@v1",
+            hash_profile="semantic",
+            store="vectors",
+            serving="stale",
+            recompute="lazy",
+            entity_kinds=("function", "method", "class"),
+            history=False,
+            review_on_change=False,
+        )
+        store = FsStore(tmp_path / "cache")
+
+        # Use a dummy generator (real generator comes in Step 3)
+        class DummyGen:
+            def generate(self, inputs):
+                return [b"dummy"] * len(inputs)
+
+        gen = DummyGen()
+        layer = DerivedLayer.from_config(cfg, store, gen)
+        layer.name = "embeddings"
+
+        assert layer.name == "embeddings"
+        assert layer.depends_on == ("code",)
+        assert layer.generator_version == "text-embedding-3@v1"
+        assert layer.hash_profile == "semantic"
+        assert layer.serving == "stale"
+        assert layer.recompute == "lazy"
+        assert layer.is_code_derived is True
+        assert layer.applies_to("function") is True
+        assert layer.applies_to("method") is True
+        assert layer.applies_to("class") is True
+        assert layer.applies_to("variable") is False
+
+    def test_layer_derived_layer(self, tmp_path):
+        from tyo3.config import LayerConfig
+        from tyo3.derive.layer import DerivedLayer
+        from tyo3.stores.fs import FsStore
+
+        cfg = LayerConfig(
+            origin="derived",
+            depends_on=("descriptions",),
+            generator="embed_gen",
+            generator_version="v1",
+            hash_profile="semantic",
+            store="vectors",
+            serving="stale",
+            recompute="lazy",
+            entity_kinds=(),
+            history=False,
+            review_on_change=False,
+        )
+        store = FsStore(tmp_path / "cache")
+
+        class DummyGen:
+            def generate(self, inputs):
+                return [b"dummy"] * len(inputs)
+
+        layer = DerivedLayer.from_config(cfg, store, DummyGen())
+        layer.name = "description_embeddings"
+
+        assert layer.is_code_derived is False
+        assert layer.depends_on == ("descriptions",)
+
+    def test_entity_kinds_none_means_all(self, tmp_path):
+        from tyo3.config import LayerConfig
+        from tyo3.derive.layer import DerivedLayer
+        from tyo3.stores.fs import FsStore
+
+        cfg = LayerConfig(
+            origin="derived",
+            depends_on=("code",),
+            generator="gen",
+            generator_version="v1",
+            hash_profile="structure",
+            store="kv",
+            serving="stale",
+            recompute="lazy",
+            entity_kinds=(),  # empty → None → all
+            history=False,
+            review_on_change=False,
+        )
+        store = FsStore(tmp_path / "cache")
+
+        class DummyGen:
+            def generate(self, inputs):
+                return [b"dummy"] * len(inputs)
+
+        layer = DerivedLayer.from_config(cfg, store, DummyGen())
+
+        assert layer.entity_kinds is None
+        assert layer.applies_to("function") is True
+        assert layer.applies_to("variable") is True
+        assert layer.applies_to("module") is True
+
+
 # ── Test generator (call-counting seam) ──────────────────────────────────
 
 _UPPERCASE_CALL_COUNT = 0
