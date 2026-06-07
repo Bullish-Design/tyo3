@@ -293,3 +293,78 @@ def test_files_are_unique_and_absolute(fixture_name: str) -> None:
     for f in files:
         assert str(f).startswith("/"), f"Non-absolute: {f}"
         assert StdPath(f).exists(), f"Missing on disk: {f}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Gate 7 property: Diff parity between live snapshots and time-travel rebuilds
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@needs_native
+@settings(max_examples=15, deadline=None)
+@given(
+    num_edits=st.integers(min_value=1, max_value=6),
+    seed=st.integers(min_value=0, max_value=9999),
+)
+def test_diff_parity_live_vs_time_travel(num_edits: int, seed: int) -> None:
+    """Gate 7 §10.3 code-diff property: a.code.diff(b.code) from live
+    snapshots equals the diff from time-travel rebuilds at the same R0/R1.
+
+    Code-only (no derived/authored layers) for speed; full-layer parity
+    is tested in test_gate7_read_surface.py::test_diff_parity_all_layers.
+    """
+    import random
+    import tempfile
+    import shutil
+    from tyo3 import TyO3Session
+
+    rng = random.Random(seed)
+
+    tmp_root = StdPath(tempfile.mkdtemp(prefix="tyo3_prop_"))
+    try:
+        proj = tmp_root / "proj"
+        proj.mkdir(parents=True)
+        (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        (proj / "a.py").write_text(
+            "def foo():\n    return 10\n"
+            "def bar():\n    return 20\n"
+        )
+
+        with TyO3Session(str(proj)) as session:
+            session.sync_all()
+            foo_id = session.id_for("a.py", 1, 5)
+            assume(foo_id is not None)
+
+            snap_r0 = session.snapshot()
+            r0 = snap_r0.revision
+
+            for i in range(num_edits):
+                val = rng.randint(1, 999)
+                session.edit(
+                    "a.py",
+                    f"def foo():\n    return {val}\ndef bar():\n    return 20\n",
+                )
+
+            snap_r1 = session.snapshot()
+            r1 = snap_r1.revision
+
+            d_live = snap_r1.diff(snap_r0)
+
+            snap_r0_tt = session.snapshot(at=r0)
+            snap_r1_tt = session.snapshot(at=r1)
+            d_tt = snap_r1_tt.diff(snap_r0_tt)
+
+            assert d_live.code.changed == d_tt.code.changed, (
+                f"code.changed mismatch: live={d_live.code.changed}, tt={d_tt.code.changed}"
+            )
+            assert d_live.code.added == d_tt.code.added
+            assert d_live.code.removed == d_tt.code.removed
+            assert d_live.code.moved == d_tt.code.moved
+            assert d_live.entities() == d_tt.entities()
+
+            snap_r0.close()
+            snap_r1.close()
+            snap_r0_tt.close()
+            snap_r1_tt.close()
+    finally:
+        shutil.rmtree(str(tmp_root), ignore_errors=True)

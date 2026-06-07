@@ -7,7 +7,7 @@ entity DurableIds (excluding ``<module>`` / ``<external>`` synthetics);
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterable, Literal
+from typing import TYPE_CHECKING, Iterable, Literal
 
 from tyo3.graph.identity import is_entity_durable_id
 from tyo3.layers.base import LayerDiff
@@ -54,64 +54,16 @@ class CodeLayerView:
     def diff(self, other: CodeLayerView) -> LayerDiff:
         """Structural code diff between *other* (before) and *self* (after).
 
-        Returns a ``LayerDiff`` — note that the code-layer diff carries more
-        precision via ``CodeDiff`` (Step 3); this is the uniform protocol
-        view for the combined diff.
+        Returns a ``LayerDiff`` — the uniform protocol view. For the
+        detailed ``CodeDiff`` (with moved, edges), use :func:`SnapshotDiff`
+        (the combined diff) or :func:`_compute_code_diff` directly.
         """
-        # Deferred import to avoid circularity; implemented in Step 3.
-        from tyo3.models.diff import CodeDiff
+        from tyo3.models.diff import _compute_code_diff
 
-        cd = _code_layer_diff_detail(self, other)
+        cd = _compute_code_diff(self._snapshot, other._snapshot)
         return LayerDiff(
             layer="code",
-            added=cd.added | cd.changed,  # changed is "added" in generic terms
+            added=cd.added | cd.changed,
             removed=cd.removed,
-            drifted=frozenset(),  # code layer has no drift concept yet
+            drifted=frozenset(),  # code layer has no drift concept
         )
-
-
-def _code_layer_diff_detail(after: CodeLayerView, before: CodeLayerView) -> Any:
-    """Compute the detailed CodeDiff (Step 3) — factored out for reuse."""
-    # Will be replaced by the full CodeDiff impl in Step 3.
-    after_ids = {n.durable_id for idx in after.graph._graph.node_indices()
-                 if is_entity_durable_id((n := after.graph._graph[idx]).durable_id)}
-    before_ids = {n.durable_id for idx in before.graph._graph.node_indices()
-                  if is_entity_durable_id((n := before.graph._graph[idx]).durable_id)}
-
-    # Simple set delta for now — Step 3 enriches with changed/moved/edges.
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class CodeDiff:
-        added: frozenset[str]
-        removed: frozenset[str]
-        changed: frozenset[str]
-        moved: frozenset[str]
-        edges_added: frozenset
-        edges_removed: frozenset
-
-    # Compare content_hash for ids in both sets.
-    changed = frozenset(
-        did for did in (after_ids & before_ids)
-        if _content_hash(after, did) != _content_hash(before, did)
-    )
-    moved = frozenset()  # Step 3 will compute moved ids
-    added = after_ids - before_ids
-    removed = before_ids - after_ids
-
-    return CodeDiff(
-        added=added,
-        removed=removed,
-        changed=changed,
-        moved=moved,
-        edges_added=frozenset(),
-        edges_removed=frozenset(),
-    )
-
-
-def _content_hash(view: CodeLayerView, durable_id: str) -> str | None:
-    """Get the content_hash for an entity id from a pinned graph."""
-    node = view.graph.symbol(durable_id)
-    if node is not None:
-        return node.content_hash
-    return None

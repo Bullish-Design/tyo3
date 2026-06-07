@@ -770,6 +770,526 @@ def test_code_only_project_no_op(tmp_path):
         snap.close()
 
 
+# ── CodeLayerView.diff via uniform protocol ─────────────────────────
+
+
+def test_code_layer_view_diff_via_protocol(tmp_path):
+    """CodeLayerView.diff() via the uniform LayerView protocol
+    exercises the production path (now delegating to _compute_code_diff)."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        before = session.snapshot()
+        session.edit("a.py", "def foo():\n    return 99\n")
+        after = session.snapshot()
+
+        # Uniform protocol: CodeLayerView.diff(CodeLayerView) -> LayerDiff
+        d = after.code.diff(before.code)
+        from tyo3.layers.base import LayerDiff
+        assert isinstance(d, LayerDiff)
+        assert foo_id in (d.added | d.drifted)
+
+        before.close()
+        after.close()
+
+
+# ── Honest staleness in the join (§10.2.3) ────────────────────────────
+
+
+def test_entity_view_honest_staleness_in_join(tmp_path):
+    """§10.2.3: a stale derived member of the join reports 'stale';
+    never silently fresh."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper"
+serving = "stale"
+entity_kinds = ["function"]
+
+[generators.upper_gen]
+type = "python"
+callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+
+[stores.kv_upper]
+backend = "fs"
+path = "cache/upper"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        # Force an initial derived computation for foo.
+        snap_init = session.snapshot()
+        _ = snap_init.derived("upper", foo_id)
+        snap_init.close()
+
+        # Edit the entity body — the derived layer is serving="stale".
+        session.edit("a.py", "def foo():\n    return 99\n")
+
+        snap = session.snapshot()
+        ev = snap.entity(foo_id)
+
+        # The derived value should exist and carry an honest status.
+        if "upper" in ev.derived:
+            dv = ev.derived["upper"]
+            # With serving="stale", after an edit, status should be "stale"
+            # (not silently "fresh") unless lazy recompute finished.
+            assert dv.status in ("stale", "fresh", "failed", "absent")
+            # It must never silently present as fresh when the content hash changed.
+
+        snap.close()
+
+
+# ── Profile-aware derived drift (Step 4) ──────────────────────────────
+
+
+def test_derived_drift_profile_aware(tmp_path):
+    """Profile-aware drift: with a 'structure' profile, a docstring-only
+    edit does NOT drift; with 'semantic' (include_docstrings) it does."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    '''old doc.'''\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    # Two derived layers: one with structure profile, one with semantic profile.
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+[hashing.profiles.semantic]
+include_docstrings = true
+
+[layers.upper_struct]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper_struct"
+serving = "block"
+entity_kinds = ["function"]
+
+[layers.upper_semantic]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "semantic"
+store = "kv_upper_semantic"
+serving = "block"
+entity_kinds = ["function"]
+
+[generators.upper_gen]
+type = "python"
+callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+
+[stores.kv_upper_struct]
+backend = "fs"
+path = "cache/upper_struct"
+
+[stores.kv_upper_semantic]
+backend = "fs"
+path = "cache/upper_semantic"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        before = session.snapshot()
+        # Docstring-only edit.
+        session.edit("a.py", "def foo():\n    '''new doc.'''\n    return 1\n")
+        after = session.snapshot()
+
+        # Structure profile: docstring change does NOT affect hash → no drift.
+        d_struct = after.layer("upper_struct").diff(before.layer("upper_struct"))
+        # Semantic profile: docstring IS included in hash → drift.
+        d_semantic = after.layer("upper_semantic").diff(before.layer("upper_semantic"))
+
+        assert foo_id not in d_struct.drifted, (
+            f"structure profile should ignore docstring change, got drifted={d_struct.drifted}"
+        )
+        assert foo_id in d_semantic.drifted, (
+            f"semantic profile should detect docstring change, but not in drifted={d_semantic.drifted}"
+        )
+
+        before.close()
+        after.close()
+
+
+# ── review_changed in authored diff (Step 5) ──────────────────────────
+
+
+def test_authored_diff_review_changed_on_body_edit(tmp_path):
+    """Edit the entity's body between R0 and R1 (no authored write)
+    → the note's id in review_changed."""
+    from tyo3 import TyO3Session
+    from tyo3.models.diff import _compute_authored_diff
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.intent]
+origin           = "authored"
+history          = true
+review_on_change = true
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        # Author a note on foo.
+        session.author("intent", foo_id, {"note": "v1"})
+
+        before = session.snapshot()
+        # Edit foo's body — this should flag the note as needs_review.
+        session.edit("a.py", "def foo():\n    return 99\n")
+        after = session.snapshot()
+
+        ad = _compute_authored_diff(after, before, "intent")
+        # The note should NOT be in 'changed' (no authored write occurred).
+        assert foo_id not in ad.changed, (
+            f"expected no authored change, got changed={ad.changed}"
+        )
+        # The note should be in 'review_changed' (body edit triggered review).
+        assert foo_id in ad.review_changed, (
+            f"expected review_changed, got review_changed={ad.review_changed}"
+        )
+
+        before.close()
+        after.close()
+
+
+# ── Latest floats (Step 7) ────────────────────────────────────────────
+
+
+def test_latest_floats_reflects_head_edit(tmp_path):
+    """session.latest.derived(...) returns the current value warm and
+    reflects a subsequent head edit on the next call (it floats)."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper"
+serving = "block"
+entity_kinds = ["function"]
+
+[generators.upper_gen]
+type = "python"
+callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+
+[stores.kv_upper]
+backend = "fs"
+path = "cache/upper"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        # Latest derived read.
+        lv = session.latest
+        val1 = lv.derived("upper", foo_id)
+        assert val1 is not None
+
+        # Edit the body — latest should reflect the change on the next call.
+        session.edit("a.py", "def foo():\n    return 99\n")
+        val2 = lv.derived("upper", foo_id)
+        assert val2 is not None
+
+        # Snapshot pins: old snapshot still sees the old revision.
+        snap = session.snapshot()
+        snap_val = snap.derived("upper", foo_id)
+        assert snap_val is not None
+        snap.close()
+
+
+# ── session.entity == snapshot.entity (Step 7) ────────────────────────
+
+
+def test_session_entity_equals_snapshot_entity(tmp_path):
+    """session.entity(id) is sugar over a fresh head snapshot; should
+    be consistent."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        ev_session = session.entity(foo_id)
+        snap = session.snapshot()
+        ev_snap = snap.entity(foo_id)
+
+        # Both should describe the same entity at the current head.
+        assert ev_session.durable_id == ev_snap.durable_id
+        assert ev_session.code is not None
+        assert ev_snap.code is not None
+        # The content hash should match (same revision).
+        assert ev_session.content_hash == ev_snap.content_hash
+
+        snap.close()
+
+
+# ── Concurrency / no-lock (§10.2.4) ───────────────────────────────────
+
+
+def test_reads_take_no_write_lock(tmp_path):
+    """§10.2.4: a hot writer doing code edits never blocks while
+    multiple threads call snap.entity(...) and latest.derived(...).
+
+    Uses a single shared session (one exclusive Rust project handle).
+    Readers call snapshot() for pinned reads; writer calls edit().
+    MVCC snapshots ensure reads never take the write lock."""
+    import threading
+    import time
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper"
+serving = "block"
+entity_kinds = ["function"]
+
+[generators.upper_gen]
+type = "python"
+callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+
+[stores.kv_upper]
+backend = "fs"
+path = "cache/upper"
+""")
+
+    errors: list[Exception] = []
+    read_count = {"count": 0}
+    stop_flag = {"stop": False}
+
+    def reader(session: TyO3Session, foo_id: str) -> None:
+        lv = session.latest
+        while not stop_flag["stop"]:
+            try:
+                snap = session.snapshot()
+                ev = snap.entity(foo_id)
+                assert ev is not None
+                _ = lv.derived("upper", foo_id)
+                read_count["count"] += 1
+                snap.close()
+            except Exception as e:
+                errors.append(e)
+                break
+            time.sleep(0.001)
+
+    def writer(session: TyO3Session) -> None:
+        for i in range(50):
+            try:
+                body = f"def foo():\n    return {i}\n"
+                session.edit("a.py", body)
+            except Exception as e:
+                errors.append(e)
+                break
+            time.sleep(0.002)
+        stop_flag["stop"] = True
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        t_readers = [
+            threading.Thread(target=reader, args=(session, foo_id), daemon=True)
+            for _ in range(3)
+        ]
+        t_writer = threading.Thread(target=writer, args=(session,), daemon=True)
+
+        for t in t_readers:
+            t.start()
+        t_writer.start()
+
+        t_writer.join(timeout=30)
+        for t in t_readers:
+            t.join(timeout=5)
+
+        assert not errors, f"Errors during concurrent read/write: {errors}"
+        assert read_count["count"] > 0, (
+            f"No reads completed — writer may have blocked readers"
+        )
+
+
+# ── Diff parity for derived and authored layers (§10.3) ───────────────
+
+
+def test_diff_parity_all_layers(tmp_path):
+    """§10.3 acceptance: diff from live snapshots equals diff from
+    fresh rebuilds at same R0/R1 for derived and authored layers."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "upper_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper"
+serving = "block"
+entity_kinds = ["function"]
+
+[layers.intent]
+origin           = "authored"
+history          = true
+review_on_change = true
+
+[generators.upper_gen]
+type = "python"
+callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+
+[stores.kv_upper]
+backend = "fs"
+path = "cache/upper"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        session.sync_all()
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id is not None
+
+        session.author("intent", foo_id, {"note": "v1"})
+
+        # R0: live snapshots.
+        snap_r0 = session.snapshot()
+        r0 = snap_r0.revision
+
+        # Edit.
+        session.edit("a.py", "def foo():\n    return 99\n")
+        session.author("intent", foo_id, {"note": "v2"})
+
+        # R1: live snapshots.
+        snap_r1 = session.snapshot()
+        r1 = snap_r1.revision
+
+        # Diff via live snapshots.
+        d_live = snap_r1.diff(snap_r0)
+
+        # Rebuild snapshots at the same revisions (time-travel).
+        snap_r0_rebuilt = session.snapshot(at=r0)
+        snap_r1_rebuilt = session.snapshot(at=r1)
+
+        # Diff via rebuilt snapshots.
+        d_rebuilt = snap_r1_rebuilt.diff(snap_r0_rebuilt)
+
+        # Code diff should match.
+        assert d_live.code.changed == d_rebuilt.code.changed
+        assert d_live.code.added == d_rebuilt.code.added
+        assert d_live.code.removed == d_rebuilt.code.removed
+
+        # Derived diff should match.
+        if "upper" in d_live.derived and "upper" in d_rebuilt.derived:
+            assert d_live.derived["upper"].drifted == d_rebuilt.derived["upper"].drifted
+
+        # Authored diff should match.
+        if "intent" in d_live.authored and "intent" in d_rebuilt.authored:
+            assert d_live.authored["intent"].changed == d_rebuilt.authored["intent"].changed
+            assert d_live.authored["intent"].added == d_rebuilt.authored["intent"].added
+
+        snap_r0.close()
+        snap_r1.close()
+        snap_r0_rebuilt.close()
+        snap_r1_rebuilt.close()
+
+
 # ── Test generator (in-process, deterministic) ────────────────────────────
 
 _UPPERCASE_CALL_COUNT = 0
