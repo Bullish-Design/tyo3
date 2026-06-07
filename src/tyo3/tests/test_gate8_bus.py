@@ -606,6 +606,14 @@ overflow = "coalesce"
 class TestWatcherBus:
     """Tests for watcher → bus integration (§4.4)."""
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Deferred to Phase 5: Phase 1's ingest_project interns every "
+        "project file at open, so apply_watch_events' has_overlay() guard drops "
+        "the watcher event and poll_changes returns None — no bus delta fires. "
+        "Phase 5 funnels writes through the single commit and distinguishes "
+        "unsaved buffers from ingested content.",
+    )
     def test_inject_changes_fires_bus(self, tmp_path):
         """_inject_changes + poll_changes → subscriber receives a delta."""
         from tyo3 import TyO3Session

@@ -1030,26 +1030,12 @@ fn build_head_with_config(
 /// `apply_changes`, and a HEAD `apply_changes` never blocks on it (architecture §0).
 ///
 /// `generation` is the content pinned at `rev` (captured from the store, O(1)).
-/// Disk files not in `generation` are captured read-once by the frozen overlay
-/// (overlay.rs §2), so the snapshot never races live disk.
-/// Pre-populate a generation with the full project file set for revision R.
-///
-/// Under Design A, a frozen snapshot must contain ALL project files in its
-/// generation — there is no disk fallback.  This function enumerates the
-/// project file set against the native disk *once* and inserts every project
-/// file not already in `generation` into a derived generation.
-///
-/// The result is `gen_full`: a generation that fully describes the project
-/// at revision R, ready to be frozen into a snapshot's overlay.
-/// Files a frozen snapshot must carry so its independent database can both
-/// analyse code and reproduce project discovery/configuration.
-///
-/// Python sources are the analysis inputs; the config files are what
-/// `ProjectMetadata::discover` / `apply_configuration_files` read when the
-/// snapshot's database is built. Without the config files in the generation,
-/// a frozen view (which has no disk fallback, §1.3.1) can't honour
-/// `pyproject.toml` / `ty.toml`, so snapshot analysis would silently ignore
-/// project configuration (e.g. `python-version`).
+/// Since Phase 1, the generation is already *complete* for revision R: every
+/// project-relevant file (Python sources plus the `pyproject.toml` / `ty.toml`
+/// config files that `ProjectMetadata::discover` / `apply_configuration_files`
+/// read) was interned at open and at every commit. The frozen overlay therefore
+/// pins exactly this generation with no disk fallback (overlay.rs §2), so the
+/// snapshot never races live disk and capture stays O(1).
 fn build_frozen(
     root: SystemPathBuf,
     generation: Generation,

@@ -107,9 +107,22 @@ impl RawConfig {
         let secrets = load_secrets(sidecar)?;
         expand_value(&mut value, &secrets)?;
 
-        value
+        let mut cfg: Self = value
             .try_into()
-            .map_err(|e: toml::de::Error| ConfigError::Parse(e.to_string()))
+            .map_err(|e: toml::de::Error| ConfigError::Parse(e.to_string()))?;
+
+        // A partial config.toml (e.g. one that only sets `[spine] retain_cap`)
+        // deserialises `hashing.profiles` as an empty map, which would leave the
+        // default `spine.default_hash_profile = "structure"` dangling.  Seed the
+        // built-in `structure` profile that `defaults()` provides so a partial
+        // config inherits it; an *explicitly* bad reference
+        // (`default_hash_profile = "nope"`) still dangles in `validate`.
+        cfg.hashing
+            .profiles
+            .entry("structure".to_string())
+            .or_insert_with(HashProfileCfg::default);
+
+        Ok(cfg)
     }
 }
 
@@ -847,6 +860,30 @@ gitignore_cache = true
         assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(cfg.spine.retain_cap, 256);
         assert!(structure.matches_hash_policy_default());
+    }
+
+    /// A partial config.toml that sets only `[spine] retain_cap` must still load
+    /// and validate: the built-in `structure` profile is seeded so the default
+    /// `spine.default_hash_profile` does not dangle.
+    #[test]
+    fn partial_config_seeds_default_hash_profile_and_validates() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = Sidecar::new(dir.path());
+        std::fs::create_dir_all(dir.path().join(".tyo3")).unwrap();
+        std::fs::write(
+            sidecar.config_path(),
+            "schema_version = 1\n\n[spine]\nretain_cap = 4\n",
+        )
+        .unwrap();
+
+        let cfg = RawConfig::load(&sidecar).unwrap();
+        assert_eq!(cfg.spine.retain_cap, 4);
+        assert!(
+            cfg.hashing.profiles.contains_key("structure"),
+            "partial config must inherit the built-in `structure` profile"
+        );
+        // The whole config validates (no dangling default_hash_profile).
+        assert!(validate(cfg).is_ok(), "partial config must validate");
     }
 
     #[test]

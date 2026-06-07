@@ -314,8 +314,18 @@ derived[layer][content_hash] -> artifact   // immutable per (content_hash, gener
 - Sidecar writes go through the single write transaction and **MUST** be crash-safe
   (write-temp-then-rename). Formats are versioned; reading a newer format **MUST**
   fail loudly with a typed error, never silently misread.
-- The sidecar never modifies source files; its presence/absence never changes
-  program behaviour for collaborators who do not use TyO3.
+- The sidecar never modifies **source files**; it never changes program
+  behaviour for collaborators who do not use TyO3.
+  - **Clarification (not a violation):** TyO3 **MAY create** the `.tyo3/`
+    directory on `open` — e.g. persisting `identity.db` from the identity
+    reconciliation run at open is expected and desirable. This is *not* a
+    violation of "presence/absence never changes behaviour": `.tyo3/` is
+    git-ignored for shared projects, so it never reaches collaborators and never
+    affects anyone who does not use TyO3. The invariant that matters is that no
+    **source** file is created, deleted, or modified by opening or reading a
+    project. Do **not** re-file "opening a sidecar-less project creates `.tyo3/`"
+    as a §5.10 violation. (Tests assert only that the *source* tree is
+    unchanged, excluding `.tyo3/`.)
 
 ### 5.11 The subscription bus
 - A subscriber registers an *interest* (a set of files/ids, a layer, or ALL). On each

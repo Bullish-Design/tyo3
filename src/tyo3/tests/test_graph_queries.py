@@ -27,9 +27,16 @@ class TestGraphQueries:
     def test_children(self) -> None:
         graph = get_graph("classes")
         modules = graph.symbols_of_kind(SymbolKind.MODULE)
-        if modules:
-            kids = graph.children(modules[0].durable_id)
-            assert len(kids) > 0
+        assert modules, "the classes fixture should expose at least one module"
+        # Module enumeration order is NOT stable — it follows graph-insertion
+        # order, which depends on file ingest order (Phase 1 ingests the project
+        # at open; the frozen walk enumerates in sorted order). So don't assume
+        # modules[0] is the populated one; assert that children() returns the
+        # contained symbols for whichever module actually has them.
+        children_counts = {m.durable_id: len(graph.children(m.durable_id)) for m in modules}
+        assert any(c > 0 for c in children_counts.values()), (
+            f"at least one module must report containment children, got {children_counts}"
+        )
 
     def test_transitive_dependencies_returns_set(self) -> None:
         graph = get_graph("imports")

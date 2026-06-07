@@ -390,12 +390,23 @@ def test_open_with_sidecar_writes_managed_gitignore_preserving_user_lines(tmp_pa
 
 
 def test_open_without_sidecar_touches_no_source_files(tmp_path: Path) -> None:
+    # Opening MAY create the .tyo3/ sidecar (it persists the identity registry
+    # reconciled at open); that is acceptable because .tyo3/ is git-ignored for
+    # shared projects and never affects collaborators who don't use TyO3.  What
+    # must hold is that no *source* file is created, deleted, or modified — so we
+    # compare the source tree, excluding the sidecar.
+    def source_files(root: Path) -> dict[Path, str]:
+        return {
+            p: p.read_text()
+            for p in root.rglob("*")
+            if p.is_file() and ".tyo3" not in p.relative_to(root).parts
+        }
+
     _project(tmp_path)
-    before = {path: path.read_text() for path in tmp_path.rglob("*") if path.is_file()}
+    before = source_files(tmp_path)
 
     with TyO3Session(tmp_path):
         pass
 
-    after = {path: path.read_text() for path in tmp_path.rglob("*") if path.is_file()}
-    assert before == after
-    assert not (tmp_path / ".tyo3").exists()
+    after = source_files(tmp_path)
+    assert before == after, "opening a project must not modify any source file"

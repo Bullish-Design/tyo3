@@ -77,12 +77,18 @@ def test_head_revision_advances(tmp_path):
         proj.close()
 
 
-def test_head_starts_at_zero(tmp_path):
-    """Fresh project starts at revision 0."""
+def test_head_starts_at_one_after_open_ingest(tmp_path):
+    """Fresh project starts at revision 1.
+
+    Convention (Phase 1, Step 1.3): the content store seeds an empty
+    ``Revision(0)``; opening ingests the project's relevant files as the first
+    batch, advancing head to ``Revision(1)`` before any explicit write.  So a
+    freshly-opened project observes ``head == 1``, not 0.
+    """
     (tmp_path / "a.py").write_text("x = 1\n")
     proj = TyProject.open(str(tmp_path))
     try:
-        assert proj.head == 0
+        assert proj.head == 1
     finally:
         proj.close()
 

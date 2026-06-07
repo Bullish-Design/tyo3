@@ -71,6 +71,44 @@ in the background and give them time rather than assuming a hang.
 publishes or fully rolls back, with the sidecar as a participant (§5.3, §5.10).
 Once publication is the *last* in-lock step, no Python-side write lock is needed.
 
+### Carried over from Phase 1 — funnel these through the commit (MUST address here)
+
+Phase 1 made committed generations the *authoritative* record (ingest at open;
+complete generations; snapshot reads no disk). Two write paths were intentionally
+left for Phase 5 to fix because they belong to the "single commit funnel" work,
+**not** the content gate. When you build `commit(mutation)` (Step 5.1), these two
+must be routed through it. Each has an `xfail(strict=True)` test that will flip to
+a failure (forcing the marker's removal) the moment you fix it — they are your
+acceptance signal:
+
+1. **`sync_all` must re-ingest disk, not just republish + Rescan.**
+   Today `sync_all` (`rust/src/project.rs`, the `fn sync_all` PyO3 method) does
+   `head.system.publish(head.store.capture())` + `apply_changes(&[Rescan])`. Since
+   the generation is now authoritative, that **no longer discovers files created
+   after open** — it republishes the existing (possibly empty) generation, so a new
+   disk file is "File not in project". `sync_path` and pre-open `ingest_project`
+   both work; `sync_all` is the gap. Fix: route `sync_all` through
+   `ContentStore::ingest_project` (re-read the whole project into the generation as
+   one batch) so new/changed/deleted files are picked up, then commit normally.
+   - **Test (remove the xfail when fixed):**
+     `test_graph_build.py::TestGraphConstruction::test_content_hash_updates_incrementally_by_semantic_body`.
+
+2. **The watcher's `apply_watch_events` must distinguish an unsaved buffer from
+   ingested disk content.** It drops any event whose path returns
+   `ContentStore::has_overlay(path) == true` (the "unsaved buffer wins over disk"
+   rule). Phase 1 now interns *every* project file at open, so `has_overlay` is
+   true for all of them and **every watcher event is dropped** (`poll_changes`
+   returns `None`). Fix as part of the commit funnel: track which paths carry a
+   genuinely *unsaved overlay edit* (from `edit`/`edit_virtual`) separately from
+   paths whose content was ingested from disk, and gate the buffer-wins rule on the
+   former only.
+   - **Tests (remove the xfails when fixed):**
+     `test_watch.py::test_deleted_event`,
+     `test_watch.py::test_injected_change_matches_expected_delta`,
+     `test_watch.py::test_real_watcher_observes_disk_change` (strict=False — FS
+     timing), and
+     `test_gate8_bus.py::TestWatcherBus::test_inject_changes_fires_bus`.
+
 **The situation today** (confirmed in the current code):
 
 - **Publication happens first, persistence happens later, and persistence

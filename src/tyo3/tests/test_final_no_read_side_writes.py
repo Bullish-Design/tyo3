@@ -6,8 +6,11 @@ reading ``session.graph`` can change ``session.head``.  Phase 4 removes the
 read-side write: identity is reconciled at open and on every commit, so a graph
 read never mutates the session.
 
-These are marked ``xfail(strict=True)`` until Phase 4; they flip to failures
-(forcing marker removal) once reads stop advancing head.
+The remaining read-side writes (``session.graph`` priming, the latest-view
+``check()``) are marked ``xfail(strict=True)`` until Phase 4; they flip to
+failures (forcing marker removal) once reads stop advancing head.  The
+``snapshot().graph()`` case is already green: Phase 1.3 reconciles identity at
+open, so building a pinned snapshot graph no longer primes via a session write.
 """
 
 from __future__ import annotations
@@ -52,11 +55,10 @@ def test_reading_session_graph_does_not_advance_head(tmp_path):
         s.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 4: snapshot().graph() build primes identity via a session "
-    "write, advancing head",
-)
+# Now a live assertion (no longer xfail): Phase 1.3 reconciles identity at open,
+# so building a snapshot's pinned graph no longer primes identity via a session
+# write — snapshot().graph() does not advance head. (The other two read-side-write
+# paths in this file remain xfail until Phase 4.)
 def test_snapshot_graph_does_not_advance_head(tmp_path):
     s = _open(tmp_path, _FILES)
     try:
