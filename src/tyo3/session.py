@@ -1310,6 +1310,14 @@ class Snapshot(_ReadOps):
         from tyo3.models.view import EntityView
         return EntityView.from_snapshot(self, durable_id)
 
+    def embedding_drift(self, before: Snapshot) -> Any:
+        """Convenience: derived drift from the 'embeddings' layer.
+
+        Sugar for ``self.layer("embeddings").diff(before.layer("embeddings"))``.
+        Raises ``KeyError`` if no embeddings layer is configured.
+        """
+        return self.layer("embeddings").diff(before.layer("embeddings"))
+
     def diff(self, before: Snapshot) -> Any:
         """Return a ``SnapshotDiff`` — the combined, id-keyed diff across all layers.
 
