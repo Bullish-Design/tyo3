@@ -522,6 +522,115 @@ def failing_generator(inputs):
     raise RuntimeError("intentional failure")
 
 
+# ── Step 4: Derivation DAG ──────────────────────────────────────────────
+
+
+class TestDerivationDAG:
+    def test_from_session_empty_when_no_layers(self, tmp_path):
+        """Empty config → empty DAG."""
+        from tyo3 import TyO3Session
+        from tyo3.derive.dag import DerivationDAG
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+        with TyO3Session(str(proj)) as session:
+            dag = DerivationDAG.from_session(session)
+            assert dag.is_empty
+
+    def test_from_session_builds_code_derived_layer(self, tmp_path):
+        """A config with a code-derived layer builds successfully."""
+        from tyo3 import TyO3Session
+        from tyo3.derive.dag import DerivationDAG
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+        cfg_dir = proj / ".tyo3"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "echo_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv"
+serving = "stale"
+
+[generators.echo_gen]
+type = "python"
+callable = "tyo3.tests.test_gate5_derived:echo_generator"
+
+[stores.kv]
+backend = "fs"
+path = "cache/upper"
+""")
+
+        with TyO3Session(str(proj)) as session:
+            dag = DerivationDAG.from_session(session)
+            assert not dag.is_empty
+            upper = dag.layer("upper")
+            assert upper.is_code_derived
+            assert upper.generator_version == "v1"
+
+    def test_resolve_input_code_derived(self, tmp_path):
+        """Resolve input for a code-derived layer returns the profile hash."""
+        from tyo3 import TyO3Session
+        from tyo3.derive.dag import DerivationDAG
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+        cfg_dir = proj / ".tyo3"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "echo_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv"
+serving = "stale"
+
+[generators.echo_gen]
+type = "python"
+callable = "tyo3.tests.test_gate5_derived:echo_generator"
+
+[stores.kv]
+backend = "fs"
+path = "cache/upper"
+""")
+
+        with TyO3Session(str(proj)) as session:
+            dag = DerivationDAG.from_session(session)
+            snap = session.snapshot()
+            foo_id = session.id_for("a.py", 1, 5)
+            # If identity is available, test resolve_input.
+            if foo_id:
+                gen_input, input_hash = dag.resolve_input(
+                    dag.layer("upper"), snap, foo_id
+                )
+                assert gen_input.durable_id == foo_id
+                assert len(input_hash) > 0
+            snap.close()
+
+
 def uppercase_generator(inputs):
     """Trivial python generator: returns the uppercased normalised name.
 
