@@ -2186,6 +2186,15 @@ impl PyTyProject {
         Ok(guard.as_ref().unwrap().store.revision().0)
     }
 
+    /// Phase 1 test seam: the number of project-content files read from
+    /// disk by ingest helpers.  Increments once per file actually read;
+    /// snapshot construction (after Phase 1.4) adds zero reads, proving
+    /// O(1) capture structurally.
+    fn project_content_disk_reads(&self) -> PyResult<u64> {
+        let guard = lock_state(&self.inner, "project_content_disk_reads")?;
+        Ok(guard.as_ref().unwrap().store.disk_read_count())
+    }
+
     // ── Snapshot ─────────────────────────────────────────────────────
 
     /// Pin a revision-isolated MVCC snapshot. `at=None` pins the current head
