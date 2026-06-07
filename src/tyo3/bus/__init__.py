@@ -8,8 +8,6 @@ what-changed (§12.1).  It lives in Python, fed from the write path
 from tyo3.bus.interest import Interest
 from tyo3.bus.delta import Delta
 from tyo3.bus.subscription import Subscription
+from tyo3.bus.bus import Bus
 
-# Imported lazily by the session; will exist by Step 4.
-# from tyo3.bus.bus import Bus
-
-__all__ = ["Interest", "Delta", "Subscription"]
+__all__ = ["Interest", "Delta", "Subscription", "Bus"]

@@ -328,6 +328,142 @@ class TestSubscription:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Step 4 — Bus unit tests (register, scoped fan-out, order)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestBus:
+    """Unit tests for Bus register + scoped fan-out (§12.2.1)."""
+
+    @staticmethod
+    def _make_delta(revision: int, changed: set[str] | None = None, *, files: set[str] | None = None, layers: set[str] | None = None, rescan: bool = False) -> "Delta":
+        from tyo3.bus.delta import Delta
+        c = frozenset(changed or set())
+        return Delta(
+            revision=revision,
+            created=frozenset(),
+            changed=c,
+            deleted=frozenset(),
+            moved=frozenset(),
+            authored=frozenset(),
+            affected=c,
+            rescan=rescan,
+            files=frozenset(files or set()),
+            layers=frozenset(layers or {"code"}),
+        )
+
+    def test_disjoint_interests_receive_scoped_slices(self):
+        from tyo3.bus.bus import Bus
+        from tyo3.bus.interest import Interest
+
+        bus = Bus(capacity=10)
+        sub_a = bus.subscribe(Interest.ids_of({"01A"}))
+        sub_b = bus.subscribe(Interest.ids_of({"01B"}))
+
+        delta = self._make_delta(1, {"01A", "01B"})
+        bus.publish(delta)
+
+        da = sub_a.poll(timeout=0)
+        db = sub_b.poll(timeout=0)
+        assert da is not None
+        assert db is not None
+        assert "01A" in da.changed
+        assert "01B" not in da.changed  # scoped
+        assert "01A" not in db.changed  # scoped
+        assert "01B" in db.changed
+
+        sub_a.close()
+        sub_b.close()
+
+    def test_all_subscriber_receives_every_delta(self):
+        from tyo3.bus.bus import Bus
+        from tyo3.bus.interest import Interest
+
+        bus = Bus(capacity=10)
+        sub_all = bus.subscribe(Interest.ALL)
+        sub_ids = bus.subscribe(Interest.ids_of({"01X"}))
+
+        bus.publish(self._make_delta(1, {"01A"}))
+        bus.publish(self._make_delta(2, {"01B"}))
+
+        d1 = sub_all.poll(timeout=0)
+        d2 = sub_all.poll(timeout=0)
+        assert d1 is not None and d1.revision == 1
+        assert d2 is not None and d2.revision == 2
+
+        # The id-based subscriber should receive nothing (no match)
+        d3 = sub_ids.poll(timeout=0)
+        assert d3 is None
+
+        sub_all.close()
+        sub_ids.close()
+
+    def test_order_preserved(self):
+        from tyo3.bus.bus import Bus
+        from tyo3.bus.interest import Interest
+
+        bus = Bus(capacity=100)
+        sub = bus.subscribe(Interest.ALL)
+
+        for r in range(1, 101):
+            bus.publish(self._make_delta(r, {f"id{r}"}))
+
+        prev = 0
+        while True:
+            d = sub.poll(timeout=0)
+            if d is None:
+                break
+            assert d.revision > prev, f"revision {d.revision} after {prev}"
+            prev = d.revision
+
+        assert prev == 100
+        sub.close()
+
+    def test_non_matching_interest_receives_nothing(self):
+        from tyo3.bus.bus import Bus
+        from tyo3.bus.interest import Interest
+
+        bus = Bus(capacity=10)
+        sub = bus.subscribe(Interest.ids_of({"01Z"}))
+
+        bus.publish(self._make_delta(1, {"01A"}))
+        bus.publish(self._make_delta(2, {"01B"}))
+
+        assert sub.poll(timeout=0) is None
+        sub.close()
+
+    def test_has_subscribers(self):
+        from tyo3.bus.bus import Bus
+        from tyo3.bus.interest import Interest
+
+        bus = Bus()
+        assert not bus.has_subscribers()
+        sub = bus.subscribe(Interest.ALL)
+        assert bus.has_subscribers()
+        sub.close()
+        assert not bus.has_subscribers()
+
+    def test_rescan_delta_delivered_to_all(self):
+        from tyo3.bus.bus import Bus
+        from tyo3.bus.interest import Interest
+
+        bus = Bus(capacity=10)
+        sub_a = bus.subscribe(Interest.ids_of({"01A"}))
+        sub_b = bus.subscribe(Interest.ids_of({"01B"}))
+
+        delta = self._make_delta(1, {"wide"}, rescan=True)
+        bus.publish(delta)
+
+        da = sub_a.poll(timeout=0)
+        db = sub_b.poll(timeout=0)
+        assert da is not None and da.rescan is True
+        assert db is not None and db.rescan is True
+
+        sub_a.close()
+        sub_b.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Step 0 — Failing acceptance tests (full bus API, wired through session)
 # ═══════════════════════════════════════════════════════════════════════════
 
