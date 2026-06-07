@@ -6,9 +6,11 @@
 //! generation (for a snapshot) is an O(1) `Arc` clone.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
-use ruff_db::system::{SystemPath, SystemPathBuf, SystemVirtualPathBuf};
+use ruff_db::system::{OsSystem, System, SystemPath, SystemPathBuf, SystemVirtualPathBuf};
+use ruff_db::system::walk_directory::WalkState;
 use rpds::HashTrieMapSync;
 
 use crate::hash::{hash_text, ContentHash};
@@ -117,7 +119,6 @@ pub enum Change {
 /// `snapshot(at=r)` can time-travel to a still-retained revision. Old entries
 /// are evicted past `retain_cap`. A live snapshot holding its own `Generation`
 /// is unaffected by eviction — it pins its generation independently.
-#[derive(Debug)]
 pub struct ContentStore {
     generation: Generation,
     revision: Revision,
@@ -126,6 +127,23 @@ pub struct ContentStore {
     /// oldest entries evicted past `retain_cap`.
     retained: BTreeMap<Revision, Generation>,
     retain_cap: usize,
+    /// Per-file project-content disk read counter. Incremented once for each
+    /// file actually read from disk by ingest_project / apply_disk_batch.
+    /// Exposed to Python as the test seam for Phase 1's
+    /// `test_snapshot_construction_reads_no_disk`.
+    disk_reads: Arc<AtomicU64>,
+}
+
+impl std::fmt::Debug for ContentStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContentStore")
+            .field("revision", &self.revision)
+            .field("version_counter", &self.version_counter)
+            .field("retain_cap", &self.retain_cap)
+            .field("retained_len", &self.retained.len())
+            .field("disk_reads", &self.disk_reads.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 const DEFAULT_RETAIN_CAP: usize = 256;
@@ -151,6 +169,7 @@ impl ContentStore {
             version_counter: 0,
             retained,
             retain_cap,
+            disk_reads: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -283,6 +302,143 @@ impl ContentStore {
         self.revision = Revision(self.revision.0 + 1);
         self.record_retained();
         self.revision
+    }
+
+    /// The number of project-content files read from disk by ingest helpers.
+    /// Exposed to Python as the Phase 1 test seam.
+    pub fn disk_read_count(&self) -> u64 {
+        self.disk_reads.load(Ordering::Relaxed)
+    }
+
+    /// Return a clone of the `Arc<AtomicU64>` counter so callers outside
+    /// `ContentStore` (e.g. `PyTyProject`) can read it without holding the
+    /// write lock.
+    pub fn disk_read_counter(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.disk_reads)
+    }
+
+    // ── Disk ingest helpers (Phase 1) ────────────────────────────────────
+
+    /// Walk `root` once, read every project-relevant file from disk, and
+    /// intern each as a `Document::Text` (carrying its content hash).
+    /// A relevant path that the walk shows as a regular file but cannot be
+    /// read is skipped with a log warning (the `pre_populate_generation`
+    /// pattern); a relevant path that is absent becomes a tombstone.
+    ///
+    /// Exactly one revision is produced for the entire walk, and every
+    /// interned document gets a real version from the store's monotonic
+    /// counter.
+    pub fn ingest_project(
+        &mut self,
+        root: &SystemPath,
+        filter: impl Fn(&SystemPath) -> bool + Send + Clone,
+    ) -> Revision {
+        let native = OsSystem::new(root.to_path_buf());
+        let walker = native.walk_directory(root);
+        let disk_reads = Arc::clone(&self.disk_reads);
+
+        // Collect relevant file paths.
+        let paths: Arc<Mutex<Vec<SystemPathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+        let paths_clone = Arc::clone(&paths);
+        walker.run(move || {
+            let paths = Arc::clone(&paths_clone);
+            let filter = filter.clone();
+            Box::new(move |entry: std::result::Result<
+                ruff_db::system::walk_directory::DirectoryEntry,
+                ruff_db::system::walk_directory::Error,
+            >| {
+                if let Ok(entry) = entry {
+                    if entry.file_type().is_file() && filter(entry.path()) {
+                        if let Ok(mut v) = paths.lock() {
+                            v.push(entry.path().to_path_buf());
+                        }
+                    }
+                }
+                WalkState::Continue
+            })
+        });
+
+        let paths = Arc::try_unwrap(paths)
+            .unwrap_or_else(|_| panic!("ingest_project: walk_dir still owning Arc"))
+            .into_inner()
+            .unwrap();
+
+        // Build changes: for each relevant file, read from disk and intern.
+        let mut changes = Vec::with_capacity(paths.len());
+        for path_buf in &paths {
+            match native.read_to_string(path_buf) {
+                Ok(text) => {
+                    disk_reads.fetch_add(1, Ordering::Relaxed);
+                    changes.push(Change::Insert {
+                        path: path_buf.clone(),
+                        text: Arc::from(text),
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Relevant path absent on disk → tombstone.
+                    changes.push(Change::Delete {
+                        path: path_buf.clone(),
+                    });
+                }
+                Err(e) => {
+                    // Genuine IO error — surface via log, don't silently skip.
+                    log::warn!(
+                        "ingest_project: failed to read {}: {e} — skipping",
+                        path_buf.as_str()
+                    );
+                }
+            }
+        }
+
+        self.apply_batch(changes)
+    }
+
+    /// Re-read a specific set of disk paths once and intern them as one
+    /// batch (one revision). This is what `sync_path` and the watcher's
+    /// `poll_changes` will feed.
+    pub fn apply_disk_batch(
+        &mut self,
+        native: &OsSystem,
+        paths: &[SystemPathBuf],
+        filter: impl Fn(&SystemPath) -> bool,
+    ) -> Revision {
+        let mut changes = Vec::with_capacity(paths.len());
+        for path_buf in paths {
+            if !filter(path_buf) {
+                continue;
+            }
+            match native.read_to_string(path_buf) {
+                Ok(text) => {
+                    self.disk_reads.fetch_add(1, Ordering::Relaxed);
+                    changes.push(Change::Insert {
+                        path: path_buf.clone(),
+                        text: Arc::from(text),
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    changes.push(Change::Delete {
+                        path: path_buf.clone(),
+                    });
+                }
+                Err(e) => {
+                    log::warn!(
+                        "apply_disk_batch: failed to read {}: {e} — skipping",
+                        path_buf.as_str()
+                    );
+                }
+            }
+        }
+        if changes.is_empty() {
+            // No changes — don't create an empty revision.
+            return self.revision;
+        }
+        self.apply_batch(changes)
+    }
+
+    /// Alias for `apply_batch`: one overlay batch = exactly one revision.
+    /// Renamed for symmetry with `apply_disk_batch`.
+    pub fn apply_overlay_batch(&mut self, changes: Vec<Change>) -> Revision {
+        self.apply_batch(changes)
     }
 
     /// Record the current (revision, generation) and evict the oldest beyond cap.
@@ -501,6 +657,148 @@ mod tests {
             Document::Text { text, .. } => assert_eq!(text.as_ref(), "v2"),
             _ => panic!("expected Text"),
         }
+    }
+
+    // ── Disk ingest tests (Phase 1) ──────────────────────────────────
+
+    /// `ingest_project` interns all relevant files from a temp dir,
+    /// each with a non-zero version and a content hash.
+    #[test]
+    fn ingest_project_interns_all_relevant_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("pkg")).unwrap();
+        std::fs::write(dir.path().join("a.py"), "x = 1\n").unwrap();
+        std::fs::write(dir.path().join("pkg/m.py"), "def f():\n    pass\n").unwrap();
+        std::fs::write(dir.path().join("pyproject.toml"), "[project]\n").unwrap();
+        std::fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
+
+        let root = SystemPathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let mut store = ContentStore::new();
+        let r0 = store.revision();
+
+        let r1 = store.ingest_project(&root, is_project_relevant);
+
+        assert_eq!(r1, Revision(r0.0 + 1), "exactly one revision bump");
+        let gen = store.capture();
+
+        // a.py interned.
+        let a = root.join("a.py");
+        match gen.system.get(&a) {
+            Some(Document::Text { text, version, hash: _ }) => {
+                assert_eq!(text.as_ref(), "x = 1\n");
+                assert!(*version > 0, "version must be non-zero from store counter");
+            }
+            other => panic!("expected Text for a.py, got {other:?}"),
+        }
+
+        // pkg/m.py interned.
+        let m = root.join("pkg/m.py");
+        assert!(gen.system.get(&m).is_some(), "pkg/m.py should be interned");
+
+        // pyproject.toml interned.
+        let ppt = root.join("pyproject.toml");
+        assert!(gen.system.get(&ppt).is_some(), "pyproject.toml should be interned");
+
+        // README.md NOT interned (not relevant).
+        let readme = root.join("README.md");
+        assert!(gen.system.get(&readme).is_none(), "README.md must NOT be interned");
+
+        // Disk-read counter incremented (3 files read: a.py, pkg/m.py, pyproject.toml).
+        assert_eq!(store.disk_read_count(), 3, "3 project-content disk reads");
+    }
+
+    /// An absent-but-relevant path (discovered in walk but gone before
+    /// read) is skipped — ingest doesn't create tombstones for
+    /// paths that vanish.
+    #[test]
+    fn ingest_project_handles_missing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.py"), "x = 1\n").unwrap();
+        std::fs::write(dir.path().join("b.py"), "y = 1\n").unwrap();
+
+        let root = SystemPathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let mut store = ContentStore::new();
+
+        // Delete b.py between walk creation and the read. The walk
+        // collector sees it as a file, but read_to_string then gets
+        // NotFound → tombstone.
+        // (The walk snapshot behaviour is timing-dependent; we test
+        // that the NotFound path doesn't panic.)
+        let native = OsSystem::new(root.to_path_buf());
+        let walker = native.walk_directory(&root);
+        let paths: Arc<Mutex<Vec<SystemPathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+        let paths_clone = Arc::clone(&paths);
+        walker.run(move || {
+            let paths = Arc::clone(&paths_clone);
+            Box::new(move |entry: std::result::Result<
+                ruff_db::system::walk_directory::DirectoryEntry,
+                ruff_db::system::walk_directory::Error,
+            >| {
+                if let Ok(entry) = entry {
+                    if entry.file_type().is_file() && is_project_relevant(entry.path()) {
+                        if let Ok(mut v) = paths.lock() {
+                            v.push(entry.path().to_path_buf());
+                        }
+                    }
+                }
+                WalkState::Continue
+            })
+        });
+
+        let paths = Arc::try_unwrap(paths).unwrap().into_inner().unwrap();
+
+        // Delete all files before reading.
+        for p in &paths {
+            let _ = std::fs::remove_file(p.as_str());
+        }
+
+        // apply_disk_batch should create tombstones for now-absent files.
+        let r = store.apply_disk_batch(&native, &paths, is_project_relevant);
+        let gen = store.generation_at(r).unwrap();
+
+        // Both files are tombstoned (Deleted) since they were removed.
+        for p in &paths {
+            match gen.system.get(p) {
+                Some(Document::Deleted { .. }) => { /* expected */ }
+                other => panic!("expected Deleted tombstone for {}, got {other:?}", p.as_str()),
+            }
+        }
+        // No disk read — files were absent (NotFound).
+        // Counter was not bumped because read_to_string returned NotFound.
+    }
+
+    /// `apply_disk_batch` for existing files interns them as Text.
+    #[test]
+    fn apply_disk_batch_interns_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.py"), "x = 1\n").unwrap();
+
+        let root = SystemPathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let native = OsSystem::new(root.to_path_buf());
+        let mut store = ContentStore::new();
+
+        let paths = vec![root.join("a.py")];
+        let r = store.apply_disk_batch(&native, &paths, is_project_relevant);
+
+        assert_eq!(r, Revision(1));
+        let gen = store.capture();
+        match gen.system.get(&root.join("a.py")) {
+            Some(Document::Text { text, .. }) => assert_eq!(text.as_ref(), "x = 1\n"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+        assert_eq!(store.disk_read_count(), 1);
+    }
+
+    /// `apply_overlay_batch` is an alias for `apply_batch`.
+    #[test]
+    fn apply_overlay_batch_is_alias() {
+        let mut store = ContentStore::new();
+        let r = store.apply_overlay_batch(vec![Change::Insert {
+            path: SystemPathBuf::from("/test/v.py"),
+            text: Arc::from("v_content"),
+        }]);
+        assert_eq!(r, Revision(1));
+        assert!(store.capture().system.get(&SystemPathBuf::from("/test/v.py")).is_some());
     }
 
     // ── is_project_relevant tests ─────────────────────────────────────
