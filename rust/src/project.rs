@@ -1710,12 +1710,29 @@ impl PyTyProject {
         };
 
         let retain_cap = config.raw.spine.retain_cap;
+        let mut store = ContentStore::with_retain_cap(retain_cap);
+
+        // Phase 1: ingest project content into the initial revision before
+        // building the live database.  This makes the generation complete so
+        // no later read triggers a write, and snapshot construction can
+        // build frozen views directly from the generation without disk I/O.
+        //
+        // Convention: the store seeds Revision(0) as empty; ingest_project
+        // produces Revision(1) as the first populated generation, so the
+        // initial observable head revision is 1.
+        store.ingest_project(&system_root, is_project_relevant);
+
         let mut head = build_head_with_config(
             system_root,
-            ContentStore::with_retain_cap(retain_cap),
+            store,
             registry,
             config.clone(),
         );
+
+        // Phase 1: reconcile identity at open so the registry is populated
+        // before any read occurs.  Identity must already be resolved so a
+        // later graph read never calls sync_all (Phase 4).
+        run_identity_reconciliation(&mut head, None);
 
         // Load authored records for each declared authored layer (§11.3.2).
         head.authored = load_authored_records(&head.config, &head.sidecar)
