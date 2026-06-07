@@ -65,6 +65,21 @@ def make_module_durable_id(file: str) -> str:
     return f"<module>{file}"
 
 
+def is_entity_durable_id(durable_id: str) -> bool:
+    """True when *durable_id* refers to a code entity (not a synthetic node).
+
+    Synthetics include ``<module>`` module nodes and ``<external>`` stub
+    nodes.  Entity ids are ULID-based (26 uppercase alphanumeric chars).
+    """
+    if durable_id.startswith(("<module>", "<external>")):
+        return False
+    # ULIDs are 26 chars, uppercase alphanumeric.
+    if len(durable_id) == 26 and durable_id[:2].isalnum():
+        return True
+    # Fallback: treat as entity if it doesn't start with a special prefix.
+    return not durable_id.startswith("<")
+
+
 def file_from_durable_id(durable_id: str) -> str:
     """Extract the file path from a durable_id.
 

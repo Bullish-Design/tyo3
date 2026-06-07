@@ -550,6 +550,28 @@ class _ReadOps:
         except Exception:
             return None
 
+    def needs_review(self) -> list[str]:
+        """List durable ids currently flagged as NeedsReview.
+
+        Returns empty list if the native handle doesn't support it.
+        """
+        self._check_open()
+        try:
+            return self._native().needs_review()
+        except Exception:
+            return []
+
+    def orphaned(self) -> list[str]:
+        """List durable ids currently flagged as Orphaned.
+
+        Returns empty list if the native handle doesn't support it.
+        """
+        self._check_open()
+        try:
+            return self._native().orphaned()
+        except Exception:
+            return []
+
     # ── Hover ────────────────────────────────────────────────────────
 
     def hover(self, path: str | StdPath, line: int, column: int) -> HoverResult | None:
@@ -696,7 +718,8 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in latest: {e}") from e
-        return LatestView(native_head_view)
+        lv = LatestView(native_head_view, session=self)
+        return lv
 
     @property
     def graph(self):
@@ -766,6 +789,7 @@ class TyO3Session(_ReadOps):
         return Snapshot(
             native_snapshot,
             root=self._root,
+            config=self._config,
             head_graph_getter=self._head_graph_or_none,
             derivation_getter=self._get_derivation,
         )
@@ -1014,6 +1038,40 @@ class TyO3Session(_ReadOps):
             return
         dag.gc_orphans(self)
 
+    # ── Derived (Gate 5) ───────────────────────────────────────────
+
+    def derived(self, layer: str, durable_id: str) -> Any:
+        """Read a derived value from the HEAD snapshot.
+
+        Delegates to the head snapshot's Python-level derived method,
+        not the native handle (which doesn't expose derived directly).
+        """
+        self._check_open()
+        snap = self.snapshot()
+        try:
+            return snap.derived(layer, durable_id)
+        finally:
+            snap.close()
+
+    def nearest(
+        self, query_vector: list[float], k: int = 10, *, layer: str | None = None
+    ) -> list[tuple[str, float]]:
+        """Nearest-neighbour search from the HEAD snapshot."""
+        self._check_open()
+        snap = self.snapshot()
+        try:
+            return snap.nearest(query_vector, k, layer=layer)
+        finally:
+            snap.close()
+
+    def embedding(self, durable_id: str) -> Any:
+        """Convenience: derived value from the 'embeddings' layer."""
+        return self.derived("embeddings", durable_id)
+
+    def docstring(self, durable_id: str) -> Any:
+        """Convenience: derived value from the 'docstrings' layer."""
+        return self.derived("docstrings", durable_id)
+
     # ── Authored (Gate 6) ───────────────────────────────────────────
 
     def author(self, layer: str, durable_id: str, value: Any) -> SyncResult:
@@ -1095,6 +1153,45 @@ class TyO3Session(_ReadOps):
                     pass
         return sorted(set(ids))
 
+    # ── Convenience read sugar (delegates to a fresh head snapshot) ──
+
+    @property
+    def code(self):
+        """A ``CodeLayerView`` over a fresh head snapshot (consistent)."""
+        snap = self.snapshot()
+        # Return the code view directly; caller must close snapshot.
+        # For convenience, we close the snapshot proactively and cache the view.
+        code_view = snap.code
+        snap.close()
+        return code_view
+
+    def layer(self, name: str):
+        """Dispatch to the right ``LayerView`` by *name* (consistent)."""
+        snap = self.snapshot()
+        view = snap.layer(name)
+        snap.close()
+        return view
+
+    def entity(self, durable_id: str):
+        """An ``EntityView`` over a fresh head snapshot (consistent).
+
+        Sugar for ``session.snapshot().entity(id)``.
+        """
+        snap = self.snapshot()
+        ev = snap.entity(durable_id)
+        snap.close()
+        return ev
+
+    def diff(self, before: Snapshot) -> Any:
+        """A ``SnapshotDiff`` between *before* and a fresh head snapshot.
+
+        Sugar for ``Snapshot.diff(before)``.
+        """
+        after_snap = self.snapshot()
+        result = after_snap.diff(before)
+        after_snap.close()
+        return result
+
     def close(self) -> None:
         """Close the project and free Rust-side resources.
 
@@ -1147,15 +1244,19 @@ class Snapshot(_ReadOps):
         native_snapshot: Any,
         *,
         root: StdPath,
+        config: TyConfig | None = None,
         head_graph_getter: Any | None = None,
         derivation_getter: Any | None = None,
     ) -> None:
         self._inner = native_snapshot
         self._closed = False
         self._root = root
+        self._config = config
         self._head_graph_getter = head_graph_getter
         self._derivation_getter = derivation_getter
         self._graph: Any = None
+        self._code_view: Any = None
+        self._layer_views: dict[str, Any] = {}
 
     def _native(self) -> Any:
         self._check_open()
@@ -1166,6 +1267,57 @@ class Snapshot(_ReadOps):
         """The revision this snapshot is pinned to."""
         self._check_open()
         return self._inner.revision
+
+    @property
+    def code(self):
+        """A ``CodeLayerView`` pinned at this snapshot's revision."""
+        if self._code_view is None:
+            from tyo3.layers.code import CodeLayerView
+            self._code_view = CodeLayerView(self)
+        return self._code_view
+
+    def layer(self, name: str):
+        """Dispatch to the right ``LayerView`` by *name* via config origin.
+
+        Raises ``KeyError`` if *name* is not a declared layer.
+        """
+        if name == "code":
+            return self.code
+        if name in self._layer_views:
+            return self._layer_views[name]
+        if self._config is None:
+            raise KeyError(f"No config available — cannot resolve layer '{name}'")
+        layer_cfg = self._config.layers.get(name)
+        if layer_cfg is None:
+            raise KeyError(f"Layer '{name}' is not declared in config")
+        if layer_cfg.origin == "derived":
+            from tyo3.layers.derived import DerivedLayerView
+            view = DerivedLayerView(self, name, layer_cfg)
+        elif layer_cfg.origin == "authored":
+            from tyo3.layers.authored import AuthoredLayerView
+            view = AuthoredLayerView(self, name, layer_cfg)
+        else:
+            raise KeyError(f"Layer '{name}' has unknown origin '{layer_cfg.origin}'")
+        self._layer_views[name] = view
+        return view
+
+    def entity(self, durable_id: str):
+        """Return an ``EntityView`` — the cross-layer join for *durable_id* at this revision.
+
+        Members: ``code``, ``content_hash``, ``location``, ``status``,
+        ``derived``, ``authored`` — all describing the pinned revision.
+        """
+        from tyo3.models.view import EntityView
+        return EntityView.from_snapshot(self, durable_id)
+
+    def diff(self, before: Snapshot) -> Any:
+        """Return a ``SnapshotDiff`` — the combined, id-keyed diff across all layers.
+
+        *before* must be a snapshot from the same session; *self* is *after*.
+        Raises ``ValueError`` when snapshots are from incompatible sessions.
+        """
+        from tyo3.models.diff import SnapshotDiff
+        return SnapshotDiff.compute(self, before)
 
     def graph(self):
         """Return an immutable CodeGraph pinned at this snapshot's revision."""
@@ -1210,15 +1362,15 @@ class Snapshot(_ReadOps):
         key = L.keys_for(input_hash)
         art = L.cache.get(key)
         if art is not None:
-            return DerivedValue(art, "fresh", self.revision, layer)
+            return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
 
         # Miss at current hash.
         if L.serving == "block":
             scheduler = dag._get_scheduler()
             art = scheduler.recompute_now(dag, L, self, durable_id)
             if art is not None:
-                return DerivedValue(art, "fresh", self.revision, layer)
-            return DerivedValue(None, "failed", self.revision, layer)
+                return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
+            return DerivedValue(artifact=None, status="failed", revision=self.revision, layer=layer)
 
         # serving == "stale": serve last-good, schedule lazy recompute.
         scheduler = dag._get_scheduler()
@@ -1228,8 +1380,8 @@ class Snapshot(_ReadOps):
             last_art = L.cache._store.get(last_key)
             if last_art is not None:
                 status = "failed" if durable_id in L._failed else "stale"
-                return DerivedValue(last_art, status, self.revision, layer)
-        return DerivedValue(None, "absent", self.revision, layer)
+                return DerivedValue(artifact=last_art, status=status, revision=self.revision, layer=layer)
+        return DerivedValue(artifact=None, status="absent", revision=self.revision, layer=layer)
 
     def nearest(
         self, query_vector: list[float], k: int = 10, *, layer: str | None = None
@@ -1362,15 +1514,48 @@ class LatestView(_ReadOps):
     it can briefly delay a concurrent write (until the read notices the write
     and retries). For isolated, repeatable reads that never perturb the
     writer, use :meth:`TyO3Session.snapshot` instead — distinct by intent.
+
+    Honest boundary: cross-layer consistency and diff require a pinned
+    revision, so ``entity()`` and ``diff()`` are **not** available here.
+    Use :meth:`TyO3Session.snapshot` for consistent multi-layer joins.
     """
 
-    def __init__(self, native_head_view: Any) -> None:
+    def __init__(self, native_head_view: Any, session: Any = None) -> None:
         self._inner = native_head_view
         self._closed = False
+        self._session = session  # weak reference for derived/authored warm reads
 
     def _native(self) -> Any:
         self._check_open()
         return self._inner
 
-    # No close()/revision: a LatestView pins nothing and has no fixed revision
-    # (it floats). It is valid as long as the owning session is open.
+    def graph(self):
+        """The live HEAD graph. Maintained incrementally by the write path;
+        warm, no copy-on-pin."""
+        self._check_open()
+        if self._session is not None:
+            return self._session.graph
+        raise InternalTyError("No session reference for latest graph")
+
+    def derived(self, layer: str, durable_id: str) -> Any:
+        """Warm derived read against the live HEAD. Cancellation-retried.
+
+        Resolves through the session's head snapshot (consistent, not
+        floating) — each call is internally consistent but two successive
+        calls may straddle a write.
+        """
+        self._check_open()
+        if self._session is not None:
+            return self._session.derived(layer, durable_id)
+        raise InternalTyError("No session reference for latest derived read")
+
+    def authored(self, layer: str, durable_id: str) -> Any:
+        """Warm authored read against the live HEAD. Cancellation-retried."""
+        self._check_open()
+        if self._session is not None:
+            return self._session.authored(layer, durable_id)
+        raise InternalTyError("No session reference for latest authored read")
+
+    # No close()/revision/entity/diff: a LatestView pins nothing and has no
+    # fixed revision (it floats). It is valid as long as the owning session
+    # is open. entity() and diff() are NOT exposed — the honest boundary.
