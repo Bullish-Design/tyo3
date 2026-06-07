@@ -694,6 +694,9 @@ class TyO3Session(_ReadOps):
         self._sidecar = Sidecar(str(root_str))
         # Read coordination config from sidecar (defaults if absent).
         self._coord_cfg = self._read_coordination_config()
+        # Auto-start watcher if configured (Step 7).
+        if self._coord_cfg.get("watcher_enabled"):
+            self._start_watcher_loop()
 
     @property
     def root(self) -> StdPath:
@@ -788,6 +791,42 @@ class TyO3Session(_ReadOps):
 
     # ── Watcher lifecycle (Gate 8 Step 7) ──────────────────────────
 
+    def _start_watcher_loop(self) -> None:
+        """Start the file watcher and a daemon auto-poll thread.
+
+        Called automatically if ``[coordination.watcher].enabled = true``.
+        Idempotent — a second call stops the previous loop first.
+        """
+        import threading
+
+        # Stop any existing loop.
+        self._stop_watcher_loop()
+
+        # Start the native watcher.
+        self.watch()
+
+        # Start the auto-poll daemon thread.
+        self._watcher_stop = threading.Event()
+        debounce = self._coord_cfg.get("watcher_debounce_ms", 200) / 1000.0
+
+        def _poll_loop() -> None:
+            while not self._watcher_stop.is_set():
+                # Wait with interruptible sleep.
+                if self._watcher_stop.wait(timeout=debounce):
+                    break
+                if self._closed:
+                    break
+                try:
+                    result = self.poll_changes()
+                    # poll_changes already calls _apply_graph_delta + _publish_delta.
+                except Exception:
+                    pass
+
+        self._watcher_thread = threading.Thread(
+            target=_poll_loop, daemon=True, name="tyo3-watcher"
+        )
+        self._watcher_thread.start()
+
     def _stop_watcher_loop(self) -> None:
         """Stop the watcher auto-poll daemon thread (Step 7).
 
@@ -803,6 +842,11 @@ class TyO3Session(_ReadOps):
                 wt.join(timeout=2.0)
             self._watcher_thread = None
             self._watcher_stop = None
+        # Also stop the native watcher.
+        try:
+            self.unwatch()
+        except Exception:
+            pass
 
     # ── Subscription bus (Gate 8) ──────────────────────────────────
 
@@ -1043,6 +1087,7 @@ class TyO3Session(_ReadOps):
             return None
         result = SyncResult.model_validate(native_result)
         self._apply_graph_delta(result)
+        self._publish_delta(result)
         return result
 
     def _inject_changes(self, changes: list[tuple[str, str]]) -> None:
