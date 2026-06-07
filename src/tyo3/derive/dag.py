@@ -95,6 +95,13 @@ class DerivationDAG:
     def is_empty(self) -> bool:
         return len(self._layers) == 0
 
+    def _get_scheduler(self):
+        """Lazily build the recompute scheduler."""
+        if not hasattr(self, "_scheduler"):
+            from tyo3.derive.scheduler import RecomputeScheduler
+            object.__setattr__(self, "_scheduler", RecomputeScheduler())
+        return self._scheduler
+
     def layer(self, name: str) -> DerivedLayer:
         """Get a layer by name."""
         if name not in self._layer_map:
@@ -106,6 +113,56 @@ class DerivationDAG:
         for name in self._topo_order:
             if name in self._layer_map:
                 yield self._layer_map[name]
+
+    def invalidate(
+        self,
+        session,
+        dirty: set[str],
+        deleted: set[str],
+        revision: int,
+    ) -> None:
+        """Invalidate exactly hash-affected artifacts from a delta.
+
+        Precision mechanism (§8.2.3, §8.3): for each entity in
+        ``dirty`` that a layer applies to, compute the new input_hash
+        and compare to the layer's last-served binding. Unchanged →
+        do nothing (reuse). Changed/missing → mark stale and (if eager)
+        enqueue recompute. No over-fire, no miss.
+        """
+        if self.is_empty:
+            return
+
+        scheduler = self._get_scheduler()
+        snap = session.snapshot()
+        try:
+            for layer in self.iter_layers():
+                for durable_id in dirty:
+                    if not layer.applies_to(_kind_for_id(snap, durable_id)):
+                        continue
+                    try:
+                        gen_input, input_hash = self.resolve_input(
+                            layer, snap, durable_id
+                        )
+                    except (KeyError, AttributeError):
+                        continue
+
+                    prior = layer.binding(durable_id)
+                    if prior == input_hash:
+                        # Input hash unchanged → reuse (cache hit).
+                        continue
+
+                    # Changed or missing → stale.
+                    layer.mark_stale(durable_id)
+                    if layer.recompute == "eager":
+                        scheduler.enqueue(layer, durable_id, input_hash)
+
+                for durable_id in deleted:
+                    layer.drop(durable_id)
+        finally:
+            snap.close()
+
+        # Process eager items.
+        scheduler.process_all(self, session.snapshot())
 
     def resolve_input(
         self, layer: DerivedLayer, snapshot: "Snapshot", durable_id: str
@@ -187,6 +244,17 @@ class DerivationDAG:
 def _hash_bytes(data: bytes) -> str:
     """SHA-256 hex of data, truncated to 32 chars for readability."""
     return hashlib.sha256(data).hexdigest()[:32]
+
+
+def _kind_for_id(snapshot: "Snapshot", durable_id: str) -> str:
+    """Return the entity kind for a durable_id from the graph."""
+    try:
+        node = snapshot.graph().symbol(durable_id)
+        if node is not None:
+            return node.kind.value
+    except Exception:
+        pass
+    return ""
 
 
 def _entity_source(snapshot: "Snapshot", durable_id: str) -> str:

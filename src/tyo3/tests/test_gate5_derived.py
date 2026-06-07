@@ -237,7 +237,7 @@ def test_no_config_noop_content_hashes(tmp_path):
 class TestDerivedLayer:
     def test_from_config_populates_fields(self, tmp_path):
         from tyo3.config import LayerConfig
-        from tyo3.derive.layer import DerivedLayer, Generator
+        from tyo3.derive.layer import DerivedLayer
         from tyo3.stores.fs import FsStore
 
         cfg = LayerConfig(

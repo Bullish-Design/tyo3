@@ -35,6 +35,7 @@ from tyo3.exceptions import (
 from tyo3.config import TyConfig
 from tyo3.models.advanced import SemanticToken
 from tyo3.models.analysis import CheckResult, Range, SyncResult
+from tyo3.models.derived import DerivedValue
 from tyo3.models.editor import FoldingRange, Hint, InlayHint
 from tyo3.models.lsp import Completion, SignatureHelp
 from tyo3.models.navigation import (
@@ -661,6 +662,9 @@ class TyO3Session(_ReadOps):
         self._closed = False
         self._head_snap: Any = None  # cached native head snapshot (current revision)
         self._head_graph: Any = None  # lazily-built mutable CodeGraph for HEAD
+        self._derivation: Any = None  # lazily-built DerivationDAG
+        from tyo3.sidecar import Sidecar
+        self._sidecar = Sidecar(str(root_str))
 
     @property
     def root(self) -> StdPath:
@@ -706,6 +710,21 @@ class TyO3Session(_ReadOps):
         """Return the live HEAD graph if materialized; never build it."""
         return self._head_graph
 
+    def _get_derivation(self):
+        """Lazily build the DerivationDAG from session config."""
+        if self._derivation is None:
+            from tyo3.derive.dag import DerivationDAG
+            self._derivation = DerivationDAG.from_session(self)
+        return self._derivation
+
+    def _invalidate_derived(self, result: SyncResult) -> None:
+        """Invalidate derived artifacts from the write delta (Step 5)."""
+        dag = self._get_derivation()
+        if dag.is_empty:
+            return
+        dirty = set(result.created) | set(result.changed)
+        dag.invalidate(self, dirty, set(result.deleted), result.revision)
+
     # ── Head snapshot caching ───────────────────────────────────────
 
     def _native(self) -> Any:
@@ -746,6 +765,7 @@ class TyO3Session(_ReadOps):
             native_snapshot,
             root=self._root,
             head_graph_getter=self._head_graph_or_none,
+            derivation_getter=self._get_derivation,
         )
 
     # ── Write path ────────────────────────────────────────────────────
@@ -915,6 +935,8 @@ class TyO3Session(_ReadOps):
         # Pass self (TyO3Session) as the source so id_for/locate are available.
         # After the write, the session's head snapshot is already at result.revision.
         self._head_graph.apply_delta(self, result)
+        # Step 5: invalidate derived artifacts within the same write boundary.
+        self._invalidate_derived(result)
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -1031,11 +1053,13 @@ class Snapshot(_ReadOps):
         *,
         root: StdPath,
         head_graph_getter: Any | None = None,
+        derivation_getter: Any | None = None,
     ) -> None:
         self._inner = native_snapshot
         self._closed = False
         self._root = root
         self._head_graph_getter = head_graph_getter
+        self._derivation_getter = derivation_getter
         self._graph: Any = None
 
     def _native(self) -> Any:
@@ -1063,6 +1087,54 @@ class Snapshot(_ReadOps):
 
         self._graph = CodeGraph.build(self, root=self._root)._pin_at(self.revision)
         return self._graph
+
+    def derived(self, layer: str, durable_id: str) -> DerivedValue:
+        """Resolve a derived value for *durable_id* under *layer* at this revision.
+
+        Content-addressed: the artifact is looked up by the entity's content
+        hash at this revision, so the result is exact for R.
+
+        Honest staleness (§8.2.5):
+        - Fresh: artifact matches entity content at R.
+        - Stale: last-good artifact served (default policy).
+        - Failed: generator failed, prior artifact (if any) served.
+        - Absent: no artifact ever produced.
+        """
+        self._check_open()
+        if self._derivation_getter is None:
+            return DerivedValue(
+                artifact=None, status="absent", revision=self.revision, layer=layer
+            )
+        dag = self._derivation_getter()
+        if dag.is_empty:
+            return DerivedValue(
+                artifact=None, status="absent", revision=self.revision, layer=layer
+            )
+        L = dag.layer(layer)
+        gen_input, input_hash = dag.resolve_input(L, self, durable_id)
+        key = L.keys_for(input_hash)
+        art = L.cache.get(key)
+        if art is not None:
+            return DerivedValue(art, "fresh", self.revision, layer)
+
+        # Miss at current hash.
+        if L.serving == "block":
+            scheduler = dag._get_scheduler()
+            art = scheduler.recompute_now(dag, L, self, durable_id)
+            if art is not None:
+                return DerivedValue(art, "fresh", self.revision, layer)
+            return DerivedValue(None, "failed", self.revision, layer)
+
+        # serving == "stale": serve last-good, schedule lazy recompute.
+        scheduler = dag._get_scheduler()
+        scheduler.enqueue(L, durable_id, input_hash, lazy=True)
+        last_key = L.last_good_store_key(durable_id)
+        if last_key:
+            last_art = L.cache._store.get(last_key)
+            if last_art is not None:
+                status = "failed" if durable_id in L._failed else "stale"
+                return DerivedValue(last_art, status, self.revision, layer)
+        return DerivedValue(None, "absent", self.revision, layer)
 
     def close(self) -> None:
         """Release the pinned revision. Safe to call multiple times."""
