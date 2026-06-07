@@ -13,6 +13,7 @@ oracle is retired in Step 7.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path as StdPath
 
 from tyo3 import TyO3Session
@@ -32,6 +33,16 @@ def _native_full(s: TyO3Session) -> CodeGraph:
     return g
 
 
+def _full_delta_bytes(s: TyO3Session) -> str:
+    """Stable JSON representation of the native full delta."""
+    delta = CodeDelta.model_validate(s._inner.code_delta_full())
+    return json.dumps(
+        delta.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def test_commit_emits_code_delta(tmp_path: StdPath) -> None:
     """Every write carries a native code_delta stamped with the new revision."""
     (tmp_path / "app.py").write_text("x = 1\n")
@@ -44,19 +55,26 @@ def test_commit_emits_code_delta(tmp_path: StdPath) -> None:
         assert sync.code_delta.nodes_upserted, "expected the changed node upserted"
 
 
-def test_native_full_matches_read_surface(tmp_path: StdPath) -> None:
-    """The native full producer equals the legacy read-surface build (guards the
-    Step 5 producer refactor; removed when the oracle is retired in Step 7)."""
+def test_native_full_matches_codegraph_build(tmp_path: StdPath) -> None:
+    """The native full producer matches the Step 7 cold-start build path."""
     (tmp_path / "models.py").write_text("class User:\n    def save(self):\n        pass\n")
     (tmp_path / "app.py").write_text("from models import User\nu = User()\nu.save()\n")
     with TyO3Session(str(tmp_path)) as s:
         s.sync_all()
-        s._graph_identity_primed = True
         assert_graphs_equal(
             _native_full(s),
             CodeGraph.build(s),
-            label="native full vs read-surface",
+            label="native full vs CodeGraph.build",
         )
+
+
+def test_full_code_delta_is_byte_deterministic(tmp_path: StdPath) -> None:
+    """Same content + same identity registry state emits byte-identical deltas."""
+    (tmp_path / "models.py").write_text("class User:\n    def save(self):\n        pass\n")
+    (tmp_path / "app.py").write_text("from models import User\nu = User()\nu.save()\n")
+    with TyO3Session(str(tmp_path)) as s:
+        s.sync_all()
+        assert _full_delta_bytes(s) == _full_delta_bytes(s)
 
 
 def test_incremental_matches_full_after_edit(tmp_path: StdPath) -> None:

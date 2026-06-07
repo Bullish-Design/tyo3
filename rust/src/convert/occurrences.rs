@@ -267,7 +267,7 @@ mod tests {
         let root =
             SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap().to_path_buf()).unwrap();
 
-        let system = OverlaySystem::live(root.clone(), ContentStore::new().capture());
+        let system = OverlaySystem::live(root.clone(), ContentStore::default().capture());
         let metadata = ProjectMetadata::new(Name::new("test"), root.clone());
         let db = ProjectDatabase::use_defaults(metadata, system);
 

@@ -36,6 +36,20 @@ _shared_session_cache: dict[str, object] = {}
 _shared_graph_cache: dict[str, object] = {}
 
 
+# All fixture names that any test opens via shared_session / get_project / get_graph.
+_ALL_FIXTURE_NAMES = [
+    "simple_package",
+    "imports",
+    "classes",
+    "diagnostic_targets",
+    "unicode_positions",
+    "standalone",
+    "empty",
+    "graph_test",
+    "circular_imports",
+]
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _shared_cache_cleanup():
     """Clean up all shared caches at end of test session."""
@@ -49,6 +63,26 @@ def _shared_cache_cleanup():
     _shared_graph_cache.clear()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _prewarm_fixture_sessions(request: pytest.FixtureRequest) -> None:
+    """Open every fixture's TyO3Session once at session start so no test
+    pays the cold-start TyProject.open() cost during the run.
+
+    With xdist, session fixtures run per-worker. To avoid 8 workers
+    simultaneously opening sessions (CPU contention turns a 1s open into
+    120s), this runs pre-warming only on the master (gw0) when xdist is
+    active. Workers inherit fixtures lazily — each opens what it needs
+    once."""
+    if hasattr(request.config, "workerinput"):
+        # We're inside an xdist worker — skip pre-warming to avoid
+        # N-workers-simultaneously-opening-sessions contention.
+        yield
+        return
+    for name in _ALL_FIXTURE_NAMES:
+        shared_session(name)
+    yield
+
+
 def shared_project(fixture_name: str):
     """Get or create a cached TyO3Session (session-scoped, read-only use only).
 
@@ -57,24 +91,34 @@ def shared_project(fixture_name: str):
     return shared_session(fixture_name)
 
 
-def shared_graph(fixture_name: str):
-    """Get or create a cached CodeGraph (session-scoped, read-only use only)."""
-    if fixture_name not in _shared_graph_cache:
-        from tyo3.graph import CodeGraph
+def shared_session(fixture_name: str):
+    """Get or create a cached TyO3Session (session-scoped, read-only use only).
+
+    Does NOT build a CodeGraph. Use :func:`shared_graph` if you need graph
+    queries. This avoids paying graph-build cost in tests that only need
+    check(), files(), document_symbols(), etc.
+    """
+    if fixture_name not in _shared_session_cache:
         from tyo3.session import TyO3Session
 
         session = TyO3Session(_fixture_path(fixture_name))
         session.sync_all()  # populate identity registry for id_for()
         _shared_session_cache[fixture_name] = session
+    return _shared_session_cache[fixture_name]
+
+
+def shared_graph(fixture_name: str):
+    """Get or create a cached CodeGraph (session-scoped, read-only use only).
+
+    Builds the session first if not already cached (via :func:`shared_session`),
+    then builds and caches the graph.
+    """
+    if fixture_name not in _shared_graph_cache:
+        from tyo3.graph import CodeGraph
+
+        session = shared_session(fixture_name)
         _shared_graph_cache[fixture_name] = CodeGraph.build(session)
     return _shared_graph_cache[fixture_name]
-
-
-def shared_session(fixture_name: str):
-    """Get or create a cached TyO3Session (session-scoped, read-only use only)."""
-    if fixture_name not in _shared_session_cache:
-        shared_graph(fixture_name)  # builds both session and graph
-    return _shared_session_cache[fixture_name]
 
 
 def get_graph(fixture_name: str):

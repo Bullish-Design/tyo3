@@ -1,2 +1,12 @@
 # Build configuration for tyo3 Rust extension.
 # The build.rs handles Python linking for test binaries.
+
+[target.x86_64-unknown-linux-gnu]
+# Use mold for dramatically faster linking
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+# Fallback if mold isn't installed — use LLD instead:
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[build]
+# sccache: caches compiled artifacts across clean builds / branch switches
+rustc-wrapper = "sccache"

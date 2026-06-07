@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict, deque
+from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -20,29 +20,14 @@ from tyo3.graph.models import (
     GraphDiff,
     SymbolNode,
 )
-from tyo3.models.advanced import SemanticTokenModifier, SemanticTokenType
 from tyo3.models.analysis import CodeDelta, Diagnostic, EdgeDelta, Range, SymbolNodeDelta, SyncResult
 from tyo3.models.navigation import ReferenceRole
-from tyo3.models.symbols import Symbol, SymbolKind
+from tyo3.models.symbols import SymbolKind
 
 if TYPE_CHECKING:
     from tyo3.session import TyO3Session
 
 logger = logging.getLogger(__name__)
-
-
-def _prime_identity_registry(session: Any) -> None:
-    """Ensure mutable sessions have reconciled identity before graph build."""
-    if getattr(session, "_graph_identity_primed", False):
-        return
-    sync_all = getattr(session, "sync_all", None)
-    if sync_all is None:
-        return
-    sync_all()
-    try:
-        setattr(session, "_graph_identity_primed", True)
-    except Exception:
-        pass
 
 
 def _to_relative(root: Path, path: str) -> str:
@@ -85,8 +70,6 @@ def _range_size(t: tuple[int, int, int, int, str]) -> tuple[int, int]:
     return (end_line - start_line, end_col)
 
 
-_METHOD_KINDS = frozenset({SymbolKind.METHOD, SymbolKind.CONSTRUCTOR})
-
 DEPENDENCY_EDGE_KINDS: frozenset[EdgeKind] = frozenset(
     {
         EdgeKind.REFERENCES,
@@ -111,24 +94,24 @@ class CodeGraph:
         self._file_to_nodes: dict[str, list[int]] = defaultdict(list)
         self._file_to_edges: dict[str, list[int]] = defaultdict(list)
 
-        # Reverse-dependency index (Phase 6): target_file -> {source_files that import it}.
-        # Maintained in _add_import_edge (incremental) and rebuilt authoritatively in
-        # _rebuild_indexes. Drives inbound edge revalidation in apply_delta without a
-        # global rescan (architecture §5.1).
+        # Reverse-dependency index: target_file -> {source_files that import it}.
+        # Maintained by the CodeDelta applier (IMPORTS edges) and rebuilt
+        # authoritatively in _rebuild_indexes. Mirrors the native CodeLayer
+        # reverse-dep index for cross-file queries.
         self._file_importers: dict[str, set[str]] = defaultdict(set)
 
-        # The resolved project root, set at build() time. apply_delta needs it to map
-        # the delta's absolute paths to project-relative graph paths, and `source` may
-        # be a Snapshot (no .root). None until build() runs.
+        # The resolved project root, set at build() time. Used to map paths to
+        # project-relative graph paths for diagnostics normalisation; `source`
+        # may be a Snapshot (no .root). None until build() runs.
         self._root: Path | None = None
 
-        # Pre-materialized range cache for _find_enclosing_symbol (B1)
+        # Range cache by file (rebuilt in _rebuild_indexes).
         #   file_str -> list of (start_line, start_col, end_line, end_col, durable_id)
         #   sorted by range size ascending (smallest first)
         self._file_node_ranges: dict[str, list[tuple[int, int, int, int, str]]] = {}
 
         # Secondary index: (file, qualified_name) -> durable_id
-        # Populated during node materialisation and used by _find_symbol_in_file
+        # Populated by the CodeDelta applier and used by _find_symbol_in_file
         # to resolve engine-returned names (which lack DurableIds) to graph nodes.
         self._name_to_id: dict[tuple[str, str], str] = {}
 
@@ -137,8 +120,15 @@ class CodeGraph:
         #   (file, name_prefix) -> durable_id
         self._name_prefix_index: dict[tuple[str, str], str] = {}
 
-        # Diagnostics (separate from graph)
+        # Diagnostics (separate from the structural graph). Type-check output is
+        # NOT part of the CodeDelta, so it is collected lazily from the source on
+        # first access — keeping the structural build/apply path free of any
+        # session/snapshot read call (Gate 3N §6.3.1). `_diag_source` is the
+        # session/snapshot the graph was built from; `_diag_loaded` gates the
+        # one-time collection.
         self._diagnostics: dict[str, list[Diagnostic]] = {}
+        self._diag_source: Any = None
+        self._diag_loaded: bool = False
 
         # Dependency graph cache for external packages
         self._dependency_cache: dict[str, DependencyGraph] = {}
@@ -162,98 +152,39 @@ class CodeGraph:
         report: GraphBuildReport | None = None,
         root: Path | None = None,
     ) -> CodeGraph:
-        """Build a complete code graph from a TyO3 session or Snapshot.
+        """Build a complete code graph by applying a native ``CodeDelta`` (Gate 3N).
 
-        Six-pass deterministic construction: all project nodes and all
-        range caches exist before any reference is resolved.  This
-        guarantees references attach to innermost enclosing symbols
-        (not module fallback) and project-local targets are never
-        externalized because of file ordering.
+        The structural graph (nodes + typed edges) is produced authoritatively in
+        Rust — the ``CodeLayer`` — and applied here purely via
+        :meth:`apply_code_delta`. There are no read-surface passes and no
+        ``session``/``snapshot`` read calls on this path: for a live session the
+        delta describes the current HEAD layer; for a ``Snapshot`` it is computed
+        over the snapshot's own frozen database at its pinned revision.
 
-        First-party paths are normalized to project-relative POSIX
-        paths so symbol IDs are portable and snapshot-friendly.
+        Diagnostics (type-check output, not part of the ``CodeDelta``) are
+        collected lazily from *source* on first access (see
+        :meth:`diagnostics_for_file`).
 
-        *root* overrides the project root when *session* is a Snapshot
-        (which has no ``.root`` attribute). Defaults to ``session.root``
-        for TyO3Session.
-
-        If *report* is provided, failures are recorded on it so
-        callers can programmatically inspect whether the graph is
-        complete.
+        *root* overrides the project root when *source* is a ``Snapshot`` (which
+        has no ``.root``). Defaults to ``source.root`` for a ``TyO3Session``. The
+        optional *report* records the (now single-pass) file totals.
         """
-        _prime_identity_registry(session)
         graph = cls()
-        if root is not None:
-            root_resolved = root
-        else:
-            root_resolved = session.root.resolve()
-        graph._root = root_resolved
-        native_paths = [str(p) for p in session.files()]
-        graph_paths = [_to_relative(root_resolved, p) for p in native_paths]
-        native_by_graph = dict(zip(graph_paths, native_paths, strict=True))
-        project_files = set(graph_paths)
-
+        graph._root = root if root is not None else session.root.resolve()
+        delta = CodeDelta.model_validate(session._inner.code_delta_full())
+        graph.apply_code_delta(delta)
+        # Diagnostics are loaded lazily; remember the source to check against.
+        graph._diag_source = session
+        graph._diag_loaded = False
         if report is not None:
-            report.files_total = len(graph_paths)
-
-        # ── Pass 1: collect symbols ───────────────────────────
-        symbols_by_file: dict[str, list[Symbol]] = {}
-        for graph_path in graph_paths:
-            native_path = native_by_graph[graph_path]
-            symbols = graph._collect_symbols_for_file(session, native_path, report=report)
-            if symbols is not None:
-                symbols_by_file[graph_path] = symbols
-
-        if report is not None:
-            report.files_indexed = len(symbols_by_file)
-
-        # ── Pass 2: materialize all project nodes ─────────────
-        for file_str, symbols in symbols_by_file.items():
-            graph._materialize_file_nodes(session, file_str, symbols)
-
-        # ── Pass 3: structural edges + range caches ───────────
-        for file_str, symbols in symbols_by_file.items():
-            graph._add_containment_edges_for_file(session, file_str, symbols)
-            graph._build_range_cache_for_file(file_str)
-
-        # ── Pass 4: semantic references ───────────────────────
-        for file_str in symbols_by_file:
-            graph._resolve_references_via_occurrences(
-                session,
-                file_str,
-                project_files,
-                report=report,
-                root=root_resolved,
-                native_by_graph=native_by_graph,
-            )
-
-        # ── Pass 5: inheritance — two passes (§6.4) ─────
-        # Pass I: all INHERITS edges for all classes in the project
-        graph._inherits_pass_I(
-            session,
-            symbols_by_file,
-            report=report,
-            root=root_resolved,
-            native_by_graph=native_by_graph,
-            project_files=project_files,
-        )
-        # Pass II: all OVERRIDES edges (BFS walks complete INHERITS chains)
-        graph._overrides_pass_II(
-            symbols_by_file,
-            report=report,
-            native_by_graph=native_by_graph,
-        )
-
-        # ── Pass 6: diagnostics (single check, distribute per-file)
-        graph._collect_all_diagnostics(
-            session,
-            report=report,
-            root=root_resolved,
-            project_files=project_files,
-        )
-
-        graph._revision = getattr(session, "revision", getattr(session, "head", None))
-
+            files = {
+                graph._graph[i].file
+                for i in graph._graph.node_indices()
+                if graph._graph[i].kind == SymbolKind.MODULE
+                and graph._graph[i].file != "<external>"
+            }
+            report.files_total = len(files)
+            report.files_indexed = len(files)
         return graph
 
     @classmethod
@@ -270,156 +201,6 @@ class CodeGraph:
         report = GraphBuildReport()
         graph = cls.build(session, report=report)
         return graph, report
-
-    # ── Pass helpers ──────────────────────────────────────────
-
-    def _collect_symbols_for_file(
-        self,
-        session: TyO3Session,
-        file_str: str,
-        *,
-        report: GraphBuildReport | None = None,
-    ) -> list[Symbol] | None:
-        """Collect symbols for one file from the session.
-
-        Returns ``None`` when the file cannot be symbol-collected,
-        so the caller can skip it for the remaining passes.
-        """
-        try:
-            return session.document_symbols(file_str)
-        except Exception as e:
-            logger.warning("Failed to get symbols for %s, skipping: %s", file_str, e)
-            if report is not None:
-                report.failures.append(
-                    GraphBuildFailure(
-                        file=file_str,
-                        phase="symbols",
-                        error_type=type(e).__name__,
-                        message=str(e),
-                    )
-                )
-            return None
-
-    def _materialize_file_nodes(
-        self,
-        session,
-        file_str: str,
-        symbols: list[Symbol],
-    ) -> None:
-        """Create module and symbol nodes for one file in the graph.
-
-        Entity symbols must carry their registry DurableId and content hash
-        from the Rust DTO. Graph construction does not re-derive identity.
-        """
-        self._assert_mutable()
-        module_id = make_module_durable_id(file_str)
-        module_node = SymbolNode(
-            durable_id=module_id,
-            name=PurePosixPath(file_str).stem,
-            qualified_name="<module>",
-            kind=SymbolKind.MODULE,
-            file=file_str,
-            range=Range.model_validate(
-                {
-                    "start": {"line": 1, "column": 1},
-                    "end": {"line": 1, "column": 1},
-                }
-            ),
-        )
-
-        new_nodes: list[SymbolNode] = []
-        if module_id not in self._id_to_index:
-            new_nodes.append(module_node)
-            self._name_to_id[(file_str, "<module>")] = module_id
-
-        for symbol in symbols:
-            did = self._require_symbol_durable_id(file_str, symbol)
-            if did not in self._id_to_index:
-                qn = symbol.qualified_name or symbol.name
-                node = SymbolNode(
-                    durable_id=did,
-                    name=symbol.name,
-                    qualified_name=qn,
-                    kind=symbol.kind,
-                    file=file_str,
-                    range=symbol.location.range,
-                    selection_range=symbol.selection_range,
-                    content_hash=symbol.content_hash,
-                )
-                new_nodes.append(node)
-                # Only register short-name → id when there is no collision.
-                # Qualified names are always unique within a file, but short
-                # names can collide (e.g. two classes each define a ``save``
-                # method).  A definitive short-name lookup that silently
-                # overwrites a prior entry would make reference resolution
-                # non-deterministic — the incremental and rebuild paths
-                # could pick different colliding symbols.
-                short_key = (file_str, symbol.name)
-                if short_key not in self._name_to_id:
-                    self._name_to_id[short_key] = did
-                else:
-                    # Collision: mark the short name as ambiguous so
-                    # callers fall back to qualified-name-only lookup.
-                    self._name_to_id[short_key] = ""
-                self._name_to_id[(file_str, qn)] = did
-
-        if new_nodes:
-            indices = self._graph.add_nodes_from(new_nodes)
-            for node, idx in zip(new_nodes, indices, strict=True):
-                self._id_to_index[node.durable_id] = idx
-                self._file_to_nodes[node.file].append(idx)
-
-    def _require_symbol_durable_id(self, file_str: str, symbol: Symbol) -> str:
-        """Return the symbol's registry DurableId or fail the build contract."""
-        if symbol.durable_id is None:
-            raise RuntimeError(
-                f"symbol DTO for {file_str}::{symbol.qualified_name or symbol.name} "
-                "is missing durable_id"
-            )
-        if symbol.content_hash is None:
-            raise RuntimeError(
-                f"symbol DTO for {file_str}::{symbol.qualified_name or symbol.name} "
-                "is missing content_hash"
-            )
-        return symbol.durable_id
-
-    def _add_containment_edges_for_file(
-        self,
-        session,
-        file_str: str,
-        symbols: list[Symbol],
-    ) -> None:
-        """Add DEFINES/CONTAINS edges for all symbols in one file."""
-        module_id = make_module_durable_id(file_str)
-        for symbol in symbols:
-            did = self._require_symbol_durable_id(file_str, symbol)
-            parent_id = self._resolve_parent_id(file_str, symbol, module_id)
-            if parent_id and parent_id in self._id_to_index:
-                edge_kind = EdgeKind.DEFINES if parent_id == module_id else EdgeKind.CONTAINS
-                edge = EdgeData(kind=edge_kind)
-                self._add_edge(parent_id, did, edge, file_str)
-
-    def _build_range_cache_for_file(self, file_str: str) -> None:
-        """Pre-materialize the range cache for one file.
-
-        Sorted by total span ascending so the first containment match
-        in ``_find_enclosing_symbol`` is the innermost symbol.
-        """
-        self._file_node_ranges[file_str] = sorted(
-            [
-                (
-                    node.range.start.line,
-                    node.range.start.column,
-                    node.range.end.line,
-                    node.range.end.column,
-                    node.durable_id,
-                )
-                for idx in self._file_to_nodes[file_str]
-                for node in [self._graph[idx]]
-                if node.kind != SymbolKind.MODULE
-            ],
-            key=_range_size,
-        )
 
     def _collect_all_diagnostics(
         self,
@@ -477,26 +258,6 @@ class CodeGraph:
         self._diagnostics.clear()
         self._collect_all_diagnostics(session, root=root, project_files=project_files)
 
-    # ── Parent resolution for containment ─────────────────────
-
-    def _resolve_parent_id(
-        self,
-        file_str: str,
-        symbol: Symbol,
-        module_id: str,
-    ) -> str | None:
-        """Determine the parent durable_id for containment edges.
-
-        Uses container_name from the Symbol to find the parent.
-        Falls back to the module node for top-level symbols.
-        """
-        if symbol.container_name:
-            # Use flexible lookup to handle both "name" and "name@line" formats
-            candidate_id = self._find_symbol_in_file(file_str, symbol.container_name)
-            if candidate_id is not None:
-                return candidate_id
-        return module_id
-
     def _find_symbol_in_file(self, file_path: str, name: str) -> str | None:
         """Find a durable_id for *name* in *file_path*.
 
@@ -520,619 +281,6 @@ class CodeGraph:
             node: SymbolNode = self._graph[idx]
             if node.name == name or node.qualified_name == name:
                 return node.durable_id
-        return None
-
-    # ── Reference resolution ──────────────────────────────────
-
-    def _resolve_references_via_occurrences(
-        self,
-        session: TyO3Session,
-        file_str: str,
-        project_files: set[str],
-        *,
-        report: GraphBuildReport | None = None,
-        root: Path | None = None,
-        native_by_graph: dict[str, str] | None = None,
-        restrict_targets: set[str] | None = None,
-    ) -> None:
-        """Resolve references using the batch file_occurrences API.
-
-        Makes a single Rust call per file that resolves every name-like
-        token to its definition target.  Replaces the per-token
-        ``goto_definition`` approach with O(1) FFI calls.
-
-        *project_files* distinguishes project-local targets (which
-        already exist as nodes from Pass 2) from external targets
-        (which need stub nodes).
-        """
-        native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
-        try:
-            occurrences = session.file_occurrences(native_file)
-        except Exception as e:
-            logger.warning(
-                "Failed to get file occurrences for %s, falling back: %s",
-                file_str,
-                e,
-            )
-            if report is not None:
-                report.failures.append(
-                    GraphBuildFailure(
-                        file=file_str,
-                        phase="references",
-                        error_type=type(e).__name__,
-                        message=str(e),
-                    )
-                )
-            # Fall back to the token-based approach
-            self._resolve_references_via_tokens(
-                session,
-                file_str,
-                root=root,
-                native_by_graph=native_by_graph,
-                project_files=project_files,
-            )
-            return
-
-        for occ in occurrences:
-            # Handle import occurrences that lack resolved targets.
-            # The file_occurrences API reports import-role tokens but may not
-            # resolve their definition targets (target_file is None). Fall back
-            # to goto_definition for these to build IMPORTS edges.
-            if occ.role == ReferenceRole.IMPORT and occ.target_file is None:
-                self._resolve_import_via_goto(
-                    session, native_file, occ.range, file_str,
-                    project_files, root, native_by_graph,
-                )
-                continue
-
-            if occ.target_file is None or occ.target_name is None:
-                continue
-
-            target_file_raw = occ.target_file
-            target_file = (
-                _normalize_result_path(root, target_file_raw, project_files) if root is not None else target_file_raw
-            )
-
-            # Phase 6 inbound revalidation: only (re-)add edges INTO the dirty set.
-            if restrict_targets is not None and target_file not in restrict_targets:
-                continue
-
-            # Resolve the target to its DurableId via the name→id map.
-            # The Rust engine returns file + name but not the DurableId,
-            # so we look it up in the graph's name→id index.
-            target_name = occ.target_name
-            target_qn = occ.target_qualified_name
-
-            # Primary: lookup by qualified_name, then by short name
-            target_did = None
-            if target_qn:
-                target_did = self._find_symbol_in_file(target_file, target_qn)
-            if target_did is None:
-                target_did = self._find_symbol_in_file(target_file, target_name)
-
-            # Ensure the target node exists — create a stub if external
-            if target_did is None:
-                if target_file in project_files:
-                    # Same-file local variables and parameters are valid
-                    # occurrence targets but are not graph nodes. Cross-file
-                    # misses, however, indicate path or identity drift.
-                    if target_file != file_str:
-                        msg = (
-                            "project-local occurrence target did not map to a graph node: "
-                            f"{file_str} -> {target_file}::{target_qn or target_name}"
-                        )
-                        logger.warning(msg)
-                        if report is not None:
-                            report.failures.append(
-                                GraphBuildFailure(
-                                    file=file_str,
-                                    phase="references",
-                                    error_type="ProjectLocalTargetMismatch",
-                                    message=msg,
-                                )
-                            )
-                    else:
-                        logger.debug(
-                            "Skipping non-graph local occurrence target %s in %s",
-                            target_qn or target_name,
-                            target_file,
-                        )
-                    # Project-local but not found — identity mismatch, skip.
-                    continue
-                # External: create a stub node
-                target_did = self._ensure_target_node_simple(
-                    target_file,
-                    f"{target_file}::{target_qn or target_name}",
-                    target_name,
-                    project_files,
-                )
-                if target_did is None:
-                    continue
-
-            # Determine the enclosing symbol at this occurrence's location
-            enclosing_id = self._find_enclosing_symbol(file_str, occ.range)
-            if enclosing_id is None:
-                continue
-
-            # Don't create self-references for definition sites
-            if enclosing_id == target_did:
-                continue
-
-            role = occ.role  # Already a ReferenceRole
-
-            # An import binding (`from models import User`) is a module-level
-            # dependency, not a reference from the enclosing symbol to the
-            # imported entity. Emit only the IMPORTS edge — never a REFERENCES
-            # edge that would attach the imported symbol to the module node.
-            if role == ReferenceRole.IMPORT:
-                if target_file and target_file != file_str:
-                    self._add_import_edge(file_str, target_file, occ.range, project_files)
-                continue
-
-            edge = EdgeData(
-                kind=EdgeKind.REFERENCES,
-                file=file_str,
-                range=occ.range,
-                role=role,
-            )
-            self._add_edge(enclosing_id, target_did, edge, file_str)
-
-            # A resolved cross-file reference implies a module-level import
-            # dependency; record it so the dependency graph is complete.
-            if target_file and target_file != file_str:
-                self._add_import_edge(file_str, target_file, occ.range, project_files)
-
-    def _add_import_edge(
-        self,
-        source_file: str,
-        target_file: str,
-        range: Range,
-        project_files: set[str],
-    ) -> None:
-        """Add a module-level IMPORTS edge between two files."""
-        source_module = make_module_durable_id(source_file)
-        target_module = make_module_durable_id(target_file)
-
-        if source_module not in self._id_to_index:
-            return
-
-        if target_module not in self._id_to_index:
-            if target_file in project_files:
-                return  # Project file without a module node — skip
-            package = self._infer_package(target_file) or "unknown"
-            target_module = f"{package}::<module>"
-            if target_module not in self._id_to_index:
-                self._add_stub_node(
-                    durable_id=target_module,
-                    name=package,
-                    qualified_name="<module>",
-                    kind=SymbolKind.MODULE,
-                    package=package,
-                )
-
-        self._add_edge(
-            source_module,
-            target_module,
-            EdgeData(kind=EdgeKind.IMPORTS, file=source_file, range=range),
-            source_file,
-        )
-
-        # Phase 6: reverse-dependency bookkeeping. Only record project→project
-        # imports; external targets (package::<module>) are never queried as dirty
-        # files.
-        if target_file in project_files and target_file != source_file:
-            self._file_importers[target_file].add(source_file)
-
-    def _resolve_import_via_goto(
-        self,
-        session,
-        native_file: str,
-        occ_range: Range,
-        file_str: str,
-        project_files: set[str],
-        root: Path | None,
-        native_by_graph: dict[str, str] | None,
-    ) -> None:
-        """Resolve an import occurrence by falling back to goto_definition.
-
-        When file_occurrences reports an import with target_file=None, use
-        goto_definition at the import position to find the target module.
-        Creates an IMPORTS edge if the target is a project file.
-        """
-        try:
-            targets = session.goto_definition(
-                native_file, occ_range.start.line, occ_range.start.column
-            )
-        except Exception:
-            return
-        if not targets:
-            return
-        target = targets[0]
-        target_file_raw = str(target.path)
-        target_file = (
-            _normalize_result_path(root, target_file_raw, project_files)
-            if root is not None and project_files is not None
-            else target_file_raw
-        )
-        if target_file and target_file != file_str:
-            self._add_import_edge(file_str, target_file, occ_range, project_files)
-
-    def _importers_of(self, files: set[str]) -> set[str]:
-        """Graph paths of project files that import any file in *files*.
-
-        Reads the reverse-dependency index built from IMPORTS edges. Used by
-        apply_delta to find inbound cross-file edges that must be revalidated when
-        *files* (the dirty set) change. Excludes the dirty files themselves — a file's
-        own out-edges are rebuilt by re-indexing it, not by inbound revalidation.
-        """
-        importers: set[str] = set()
-        for f in files:
-            importers |= self._file_importers.get(f, set())
-        return importers - files
-
-    def _ensure_target_node_simple(
-        self,
-        target_file: str,
-        target_did: str,
-        target_name: str,
-        project_files: set[str],
-    ) -> str | None:
-        """Ensure a reference target exists as a node.
-
-        When *target_file* is a project file, all nodes already exist
-        (Pass 2 guaranteed this).  If we cannot find the target by ID
-        or name lookup, it is a symbol-identity mismatch — log a
-        warning, do *not* create a stub.
-
-        When *target_file* is external, create a stub node keyed by
-        inferred package name.
-        """
-        if target_file in project_files:
-            # All project nodes exist (Pass 2).  If we can't find it,
-            # it's a symbol-identity mismatch.  Log and skip — do not
-            # create a stub.
-            logger.debug(
-                "Could not resolve project-local target %s in %s",
-                target_name,
-                target_file,
-            )
-            return None
-
-        package = self._infer_package(target_file)
-        ext_did = f"{package}::{target_name}" if package else target_did
-        if ext_did not in self._id_to_index:
-            self._add_stub_node(
-                durable_id=ext_did,
-                name=target_name,
-                qualified_name=target_name,
-                kind=SymbolKind.UNKNOWN,
-                package=package or "unknown",
-            )
-        return ext_did
-
-    def _resolve_references_via_tokens(
-        self,
-        session: TyO3Session,
-        file_str: str,
-        *,
-        root: Path | None = None,
-        native_by_graph: dict[str, str] | None = None,
-        project_files: set[str] | None = None,
-    ) -> None:
-        """Resolve references using semantic tokens + goto_definition.
-
-        For each name-like token in the file, call goto_definition to
-        find what symbol it refers to. Create a REFERENCES edge from
-        the enclosing symbol to the target symbol.
-        """
-        native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
-        try:
-            tokens = session.semantic_tokens(native_file)
-        except Exception as e:
-            logger.warning("Failed to get semantic tokens for %s: %s", file_str, e)
-            return
-
-        # Filter to name-like tokens (not keywords, strings, numbers)
-        NAME_TYPES = {
-            SemanticTokenType.NAMESPACE,
-            SemanticTokenType.CLASS_,
-            SemanticTokenType.PARAMETER,
-            SemanticTokenType.SELF_PARAMETER,
-            SemanticTokenType.CLS_PARAMETER,
-            SemanticTokenType.VARIABLE,
-            SemanticTokenType.PROPERTY,
-            SemanticTokenType.FUNCTION,
-            SemanticTokenType.METHOD,
-            SemanticTokenType.DECORATOR,
-            SemanticTokenType.BUILTIN_CONSTANT,
-            SemanticTokenType.TYPE_PARAMETER,
-        }
-
-        for token in tokens:
-            if token.token_type not in NAME_TYPES:
-                continue
-
-            start = token.range.start
-            try:
-                targets = session.goto_definition(native_file, start.line, start.column)
-            except Exception:
-                continue
-
-            if not targets:
-                continue
-
-            target = targets[0]
-            target_file_raw = str(target.path)
-            target_file = (
-                _normalize_result_path(root, target_file_raw, project_files)
-                if root is not None and project_files is not None
-                else target_file_raw
-            )
-
-            # Resolve target by name lookup into the graph's name→id map
-            target_did = None
-            if target.symbol:
-                if target.symbol.qualified_name:
-                    target_did = self._find_symbol_in_file(target_file, target.symbol.qualified_name)
-                if target_did is None:
-                    target_did = self._find_symbol_in_file(target_file, target.symbol.name)
-
-            if target_did is None:
-                # No symbol info or not found: use a location-free key.
-                if target.symbol and target.symbol.qualified_name:
-                    target_did = f"{target_file}::{target.symbol.qualified_name}"
-                elif target.symbol:
-                    target_did = f"{target_file}::{target.symbol.name}"
-                else:
-                    continue
-
-            # Ensure the target node exists — create a stub if external
-            if target_did not in self._id_to_index:
-                target_did = self._ensure_target_node(target_file, target_did, target)
-                if target_did is None:
-                    continue
-
-            # Determine the enclosing symbol at this token's location
-            enclosing_id = self._find_enclosing_symbol(file_str, token.range)
-            if enclosing_id is None:
-                continue
-
-            # Don't create self-references for definition sites
-            if enclosing_id == target_did:
-                continue
-
-            # Determine role from token modifiers
-            role = ReferenceRole.READ
-            if SemanticTokenModifier.DEFINITION in token.modifiers:
-                role = ReferenceRole.DEFINITION
-
-            edge = EdgeData(
-                kind=EdgeKind.REFERENCES,
-                file=file_str,
-                range=token.range,
-                role=role,
-            )
-            self._add_edge(enclosing_id, target_did, edge, file_str)
-
-    def _ensure_target_node(
-        self,
-        target_file: str,
-        target_did: str,
-        target: Any,
-    ) -> str | None:
-        """Ensure a reference target exists as a node.
-
-        If the target is external (not in project files), creates a stub
-        node for it. Returns the effective durable_id to use for edge
-        creation, or None if the target cannot be represented.
-        """
-        # Only create stubs for truly external paths
-        if target_file not in self._file_to_nodes:
-            package = self._infer_package(target_file)
-            kind = SymbolKind.UNKNOWN
-            name = target_did.split("::")[-1]
-            qn = name
-            if hasattr(target, "symbol") and target.symbol:
-                kind = target.symbol.kind
-                name = target.symbol.name
-                qn = target.symbol.qualified_name or name
-
-            ext_did = f"{package}::{qn}" if package else target_did
-            self._add_stub_node(
-                durable_id=ext_did,
-                name=name,
-                qualified_name=qn,
-                kind=kind,
-                package=package or "unknown",
-            )
-            return ext_did
-        # In-project — already exists or identity mismatch
-        return None
-
-    def _infer_package(self, file_path: str) -> str | None:
-        """Infer the package name from an external file path.
-
-        Heuristic: look for common patterns like site-packages/foo/...,
-        or lib/python3.x/... for stdlib.
-        """
-        if "site-packages/" in file_path:
-            parts = file_path.split("site-packages/")[1].split("/")
-            if parts:
-                return parts[0]
-        if "/lib/python" in file_path or "typeshed" in file_path:
-            return "stdlib"
-        # Look for .venv or venv patterns
-        if "/.venv/" in file_path or "/venv/" in file_path:
-            sep = "/.venv/" if "/.venv/" in file_path else "/venv/"
-            parts = file_path.split(sep)[1].split("/")
-            if len(parts) > 2 and parts[0] == "lib":
-                # .venv/lib/python3.x/site-packages/foo/...
-                for i, part in enumerate(parts):
-                    if part == "site-packages" and i + 1 < len(parts):
-                        return parts[i + 1]
-        return None
-
-    # ── Inheritance resolution (two-pass, §6.4) ───────────────
-
-    def _inherits_pass_I(
-        self,
-        session: TyO3Session,
-        symbols_by_file: dict[str, list[Symbol]],
-        *,
-        report: GraphBuildReport | None = None,
-        root: Path | None = None,
-        native_by_graph: dict[str, str] | None = None,
-        project_files: set[str] | None = None,
-    ) -> None:
-        """Pass I: Add INHERITS edges for ALL classes in the dirty set.
-
-        MUST complete for the entire set before _overrides_pass_II runs
-        anywhere (§6.4). Every class in every file in the set gets its
-        direct INHERITS edge to each supertype. After this pass, the
-        INHERITS chain is complete for BFS walks.
-        """
-        for file_str, symbols in symbols_by_file.items():
-            native_file = native_by_graph.get(file_str, file_str) if native_by_graph else file_str
-            for symbol in symbols:
-                if symbol.kind != SymbolKind.CLASS:
-                    continue
-
-                start = symbol.selection_range.start if symbol.selection_range else symbol.location.range.start
-                try:
-                    supertypes = session.class_supertypes(native_file, start.line, start.column)
-                except Exception as e:
-                    if report is not None:
-                        report.failures.append(
-                            GraphBuildFailure(
-                                file=file_str,
-                                phase="inheritance",
-                                error_type=type(e).__name__,
-                                message=str(e),
-                            )
-                        )
-                    continue
-
-                did = self._require_symbol_durable_id(file_str, symbol)
-
-                for supertype in supertypes:
-                    super_file_raw = str(supertype.path)
-                    super_file = (
-                        _normalize_result_path(root, super_file_raw, project_files)
-                        if root is not None and project_files is not None
-                        else super_file_raw
-                    )
-                    super_did = self._find_symbol_in_file(super_file, supertype.name)
-
-                    if super_did is None:
-                        package = self._infer_package(super_file)
-                        if package is None and super_file not in self._file_to_nodes:
-                            package = "unknown"
-                        if package:
-                            ext_did = f"{package}::{supertype.name}"
-                            super_did = ext_did
-                            if ext_did not in self._id_to_index:
-                                self._add_stub_node(
-                                    durable_id=ext_did,
-                                    name=supertype.name,
-                                    qualified_name=(f"{package}.{supertype.name}"),
-                                    kind=SymbolKind.CLASS,
-                                    package=package,
-                                )
-                        else:
-                            continue
-
-                    edge = EdgeData(kind=EdgeKind.INHERITS)
-                    self._add_edge(did, super_did, edge, file_str)
-
-    def _overrides_pass_II(
-        self,
-        symbols_by_file: dict[str, list[Symbol]],
-        *,
-        report: GraphBuildReport | None = None,
-        native_by_graph: dict[str, str] | None = None,
-    ) -> None:
-        """Pass II: Add OVERRIDES edges AFTER all INHERITS edges exist.
-
-        Runs only after _inherits_pass_I has completed for the entire
-        dirty set (§6.4). BFS-walks the now-complete INHERITS chain for
-        each class to collect ancestor methods, then adds OVERRIDES edges
-        for child methods that match ancestor methods by name.
-        """
-        for file_str, symbols in symbols_by_file.items():
-            for symbol in symbols:
-                if symbol.kind != SymbolKind.CLASS:
-                    continue
-
-                did = self._find_symbol_in_file(
-                    file_str,
-                    symbol.qualified_name or symbol.name,
-                )
-                if did is None:
-                    continue
-
-                # Collect methods from the child class
-                child_methods = [
-                    s for s in symbols
-                    if s.kind in _METHOD_KINDS and s.container_name == symbol.name
-                ]
-                if not child_methods:
-                    continue
-
-                # BFS walk the INHERITS chain (all edges exist from Pass I)
-                ancestor_methods: dict[str, str] = {}  # name -> durable_id
-                visited: set[str] = {did}
-                queue: deque[str] = deque([did])
-
-                while queue:
-                    current_did = queue.popleft()
-                    current_idx = self._id_to_index.get(current_did)
-                    if current_idx is None:
-                        continue
-
-                    for _src, succ_idx, edge_data in self._graph.out_edges(current_idx):
-                        if edge_data.kind != EdgeKind.INHERITS:
-                            continue
-
-                        parent_did = self._graph[succ_idx].durable_id
-                        if parent_did not in visited:
-                            visited.add(parent_did)
-                            queue.append(parent_did)
-
-                        for c in self.children(parent_did):
-                            if c.kind in _METHOD_KINDS and c.name not in ancestor_methods:
-                                ancestor_methods[c.name] = c.durable_id
-
-                for method in child_methods:
-                    if method.name in ancestor_methods:
-                        method_did = self._require_symbol_durable_id(file_str, method)
-                        parent_method_did = ancestor_methods[method.name]
-                        edge = EdgeData(kind=EdgeKind.OVERRIDES)
-                        self._add_edge(method_did, parent_method_did, edge, file_str)
-
-    def _find_enclosing_symbol(self, file_str: str, range: Range) -> str | None:
-        """Find the innermost symbol in *file_str* that contains *range*.
-
-        Uses the pre-materialized range cache (B1) to avoid per-node
-        FFI calls.  The cache is sorted by range size ascending, so the
-        first containment match is the smallest enclosing symbol.
-
-        Returns the durable_id, or the module node if no enclosing symbol
-        is found.
-        """
-        cached = self._file_node_ranges.get(file_str, [])
-        for start_line, start_col, end_line, end_col, did in cached:
-            # Check containment: node range must fully contain the target range
-            if (start_line, start_col) <= (
-                range.start.line,
-                range.start.column,
-            ) and (end_line, end_col) >= (range.end.line, range.end.column):
-                # First match is smallest due to sort order
-                return did
-
-        # Fall back to module node
-        module_id = make_module_durable_id(file_str)
-        if module_id in self._id_to_index:
-            return module_id
         return None
 
     # ── Internal graph mutation ───────────────────────────────
@@ -1248,6 +396,9 @@ class CodeGraph:
 
     def _pin_at(self, revision: int) -> CodeGraph:
         """Return an immutable copy of this graph pinned at *revision*."""
+        # Capture diagnostics at pin time so the frozen graph is self-consistent
+        # at its revision and never re-checks a moving source.
+        self._ensure_diagnostics()
         pinned = CodeGraph()
         pinned._graph = self._graph.copy()
         pinned._id_to_index = dict(self._id_to_index)
@@ -1259,6 +410,8 @@ class CodeGraph:
         pinned._name_to_id = dict(self._name_to_id)
         pinned._name_prefix_index = dict(self._name_prefix_index)
         pinned._diagnostics = {k: list(v) for k, v in self._diagnostics.items()}
+        pinned._diag_loaded = True  # captured above; a frozen graph never re-checks
+        pinned._diag_source = None
         pinned._dependency_cache = dict(self._dependency_cache)
         pinned._semantic_subgraph_cache = {}
         pinned._revision = revision
@@ -1312,101 +465,6 @@ class CodeGraph:
             added_edges=[after_edges[key] for key in sorted(after_edges.keys() - before_edges.keys(), key=repr)],
             removed_edges=[before_edges[key] for key in sorted(before_edges.keys() - after_edges.keys(), key=repr)],
         )
-
-    # ── Incremental update helpers (Phase 6) ──────────────────
-
-    def _index_files(
-        self,
-        session,
-        graph_paths: list[str],
-        project_files: set[str],
-        *,
-        root: Path,
-        native_by_graph: dict[str, str],
-        report: GraphBuildReport | None = None,
-        sort_key: Callable[[list[str]], list[str]] | None = None,
-    ) -> None:
-        """Run passes 1–5 over *graph_paths* (a subset of the project).
-
-        Mirrors CodeGraph.build's pass ordering for a subset: collect symbols for all
-        of them, materialize all their nodes, then structural edges + range caches,
-        then references, then inheritance. Keeping the sub-pass split (rather than a
-        per-file loop) is what lets two simultaneously-changed files that reference
-        each other resolve correctly — every dirty node exists before any reference is
-        resolved. Targets in *non*-dirty files already exist in the graph (they were
-        never removed), so cross-file references out of the dirty set resolve too.
-
-        *sort_key* controls the processing order of *graph_paths*.  Defaults to
-        ``sorted`` (alphabetical).  Parametrised tests can inject a different key
-        (e.g. reversed) to prove two-pass inheritance is genuinely order-independent
-        (§6.4).
-        """
-        if sort_key is not None:
-            graph_paths = sort_key(list(graph_paths))
-        symbols_by_file: dict[str, list[Symbol]] = {}
-        for graph_path in graph_paths:
-            native_path = native_by_graph.get(graph_path, graph_path)
-            symbols = self._collect_symbols_for_file(session, native_path, report=report)
-            if symbols is not None:
-                symbols_by_file[graph_path] = symbols
-
-        for file_str, symbols in symbols_by_file.items():
-            self._materialize_file_nodes(session, file_str, symbols)
-
-        for file_str, symbols in symbols_by_file.items():
-            self._add_containment_edges_for_file(session, file_str, symbols)
-            self._build_range_cache_for_file(file_str)
-
-        for file_str in symbols_by_file:
-            self._resolve_references_via_occurrences(
-                session,
-                file_str,
-                project_files,
-                report=report,
-                root=root,
-                native_by_graph=native_by_graph,
-            )
-
-        # Inheritance — two passes (§6.4)
-        self._inherits_pass_I(
-            session,
-            symbols_by_file,
-            report=report,
-            root=root,
-            native_by_graph=native_by_graph,
-            project_files=project_files,
-        )
-        self._overrides_pass_II(
-            symbols_by_file,
-            report=report,
-            native_by_graph=native_by_graph,
-        )
-
-    def _add_stub_node(
-        self,
-        durable_id: str,
-        name: str,
-        qualified_name: str,
-        kind: SymbolKind,
-        package: str,
-    ) -> int:
-        """Add a stub node for an external symbol."""
-        node = SymbolNode(
-            durable_id=durable_id,
-            name=name,
-            qualified_name=qualified_name,
-            kind=kind,
-            file="<external>",
-            range=Range.model_validate(
-                {
-                    "start": {"line": 1, "column": 1},
-                    "end": {"line": 1, "column": 1},
-                }
-            ),
-            external=True,
-            package=package,
-        )
-        return self._add_node(node)
 
     def _edges_of_kind(
         self,
@@ -1803,121 +861,18 @@ class CodeGraph:
 
     # ── Incremental updates ───────────────────────────────────
 
-    def _replace_with(self, fresh: CodeGraph) -> None:
-        """Replace all internal state with *fresh*'s (used by rescan / rebuild)."""
-        self._assert_mutable()
-        self.__dict__.update(fresh.__dict__)
-        self._frozen = False
+    def rebuild(self, session: TyO3Session, path: str | None = None) -> None:
+        """Re-apply the full native ``CodeDelta`` (Gate 3N rescan fallback).
 
-    def rebuild(self, session: TyO3Session, path: str) -> None:
-        """Full rebuild (the rescan fallback). *path* is accepted for API
-        compatibility but unused; prefer apply_delta for incremental updates."""
-        self._assert_mutable()
-        self._replace_with(CodeGraph.build(session))
-
-    def _handle_moved_entities(
-        self,
-        source,
-        moved: set[str],
-        root: Path,
-        native_by_graph: dict[str, str],
-    ) -> None:
-        """Update location payloads for moved entities (§6.3).
-
-        Moved entities keep the same DurableId but have a new location.
-        Update their file and range fields without dropping/re-adding nodes,
-        preserving out-edges and avoiding unnecessary edge churn.
+        *path* is accepted for API compatibility but unused — the native
+        producer always emits a coherent whole-graph delta, so a targeted
+        rebuild is unnecessary.
         """
-        if not moved:
-            return
-        for file_str in moved:
-            native_path = native_by_graph.get(file_str, file_str)
-            try:
-                symbols = source.document_symbols(native_path)
-            except Exception:
-                continue
-            for symbol in symbols:
-                durable_id = self._require_symbol_durable_id(file_str, symbol)
-                # Find the existing node by DurableId
-                idx = self._id_to_index.get(durable_id)
-                if idx is None:
-                    continue
-                node: SymbolNode = self._graph[idx]
-                if node.file == file_str:
-                    continue  # Already at the right location
-                # Update location — create a new node with updated fields and
-                # replace in-place using rustworkx's node substitution.
-                updated = SymbolNode(
-                    durable_id=node.durable_id,
-                    name=symbol.name,
-                    qualified_name=symbol.qualified_name or symbol.name,
-                    kind=symbol.kind,
-                    file=file_str,
-                    range=symbol.location.range,
-                    selection_range=symbol.selection_range,
-                    content_hash=symbol.content_hash,
-                    external=node.external,
-                    package=node.package,
-                )
-                self._graph[idx] = updated
-                # Update file→node index
-                old_file = node.file
-                if old_file in self._file_to_nodes and idx in self._file_to_nodes[old_file]:
-                    self._file_to_nodes[old_file].remove(idx)
-                self._file_to_nodes[file_str].append(idx)
-
-    def _revalidate_inbound_inheritance(
-        self,
-        source,
-        importers: set[str],
-        *,
-        native_by_graph: dict[str, str],
-        project_files: set[str],
-        root: Path,
-        report: GraphBuildReport | None = None,
-    ) -> None:
-        """Re-run inheritance passes for importer files after dirty nodes are
-        re-materialised.
-
-        When a base class file is edited, the derived classes in importer files
-        lose their INHERITS edges (the base-class nodes were dropped and
-        re-created in step 1).  This method re-runs Pass I (INHERITS) and
-        Pass II (OVERRIDES) for the importer files so they rediscover their
-        supertypes among the re-materialised dirty nodes.
-
-        Only processes classes whose supertypes map into *project_files* that
-        overlap the dirty set — a class inheriting only from non-dirty files
-        was unaffected by the drop.
-        """
-        importers_list = sorted(importers)
-        symbols_by_file: dict[str, list[Symbol]] = {}
-        for file_str in importers_list:
-            native_path = native_by_graph.get(file_str, file_str)
-            try:
-                symbols = source.document_symbols(native_path)
-            except Exception:
-                continue
-            if symbols:
-                symbols_by_file[file_str] = symbols
-
-        if not symbols_by_file:
-            return
-
-        # Pass I: re-add INHERITS edges for importer classes.
-        self._inherits_pass_I(
-            source,
-            symbols_by_file,
-            report=report,
-            root=root,
-            native_by_graph=native_by_graph,
-            project_files=project_files,
-        )
-        # Pass II: re-add OVERRIDES edges now that INHERITS chains are rebuilt.
-        self._overrides_pass_II(
-            symbols_by_file,
-            report=report,
-            native_by_graph=native_by_graph,
-        )
+        self._assert_mutable()
+        delta = CodeDelta.model_validate(session._inner.code_delta_full())
+        self.apply_code_delta(delta)
+        self._diag_source = session
+        self._diag_loaded = False
 
     # ── Pure CodeDelta application (Gate 3N) ──────────────────
 
@@ -1984,15 +939,21 @@ class CodeGraph:
         """Reconstruct a ``SymbolNode`` payload from a delta node entry."""
         kind = SymbolKind(nd.kind)
         qn = nd.qualified_name
-        if kind == SymbolKind.MODULE:
+        leaf = qn.rsplit("::", 1)[-1].rsplit(".", 1)[-1] if qn else nd.durable_id
+        external = nd.file == "<external>" or nd.durable_id.startswith("<external>")
+        if external:
+            name = leaf
+            if "::" in nd.durable_id:
+                package = nd.durable_id.split("::", 1)[0].removeprefix("<external>")
+            elif "." in qn:
+                package = qn.split(".", 1)[0]
+            else:
+                package = None
+        elif kind == SymbolKind.MODULE:
             name = PurePosixPath(nd.file).stem if nd.file else qn
             external, package = False, None
-        elif nd.durable_id.startswith("<external>"):
-            name = qn.rsplit("::", 1)[-1] if qn else nd.durable_id
-            package = qn.split("::", 1)[0] if "::" in qn else None
-            external = True
         else:
-            name = qn.rsplit("::", 1)[-1] if qn else nd.durable_id
+            name = leaf
             external, package = False, None
         return SymbolNode(
             durable_id=nd.durable_id,
@@ -2044,7 +1005,7 @@ class CodeGraph:
         """Map a delta edge kind string to an ``EdgeKind``.
 
         ``containment`` resolves to DEFINES from a module node and CONTAINS
-        otherwise, matching ``_add_containment_edges_for_file``.
+        otherwise (the native producer emits a single ``containment`` kind).
         """
         if kind_str == "containment":
             src = self.symbol(src_id)
@@ -2079,8 +1040,18 @@ class CodeGraph:
             ):
                 self._file_importers[tgt.file].add(src.file)
 
+    def _delta_edge_matches(self, data: EdgeData, e: EdgeDelta, kind: EdgeKind) -> bool:
+        """Return whether an existing edge has the exact delta identity."""
+        role = ReferenceRole(e.role) if e.role else None
+        return (
+            data.kind == kind
+            and data.role == role
+            and data.file == e.file
+            and data.range == e.range
+        )
+
     def _remove_delta_edge(self, e: EdgeDelta) -> None:
-        """Remove edges matching (src, dst, kind) between surviving nodes."""
+        """Remove edges matching the full edge identity between surviving nodes."""
         si = self._id_to_index.get(e.src_id)
         ti = self._id_to_index.get(e.dst_id)
         if si is None or ti is None:
@@ -2090,7 +1061,11 @@ class CodeGraph:
             ei
             for ei in self._graph.edge_indices()
             if self._graph.get_edge_endpoints_by_index(ei) == (si, ti)
-            and self._graph.get_edge_data_by_index(ei).kind == kind
+            and self._delta_edge_matches(
+                self._graph.get_edge_data_by_index(ei),
+                e,
+                kind,
+            )
         ]
         for ei in doomed:
             self._graph.remove_edge_from_index(ei)
@@ -2108,120 +1083,24 @@ class CodeGraph:
         report: GraphBuildReport | None = None,
         sort_key: Callable[[list[str]], list[str]] | None = None,
     ) -> None:
-        """Incrementally update the HEAD graph from a write's SyncResult.
+        """Apply a write's native ``CodeDelta`` to the replica (Gate 3N).
 
-        *source* is a consistent read surface for ``delta.revision`` — pass the
-        ``Snapshot`` pinned at that revision (``session.snapshot()`` right after the
-        edit) for true MVCC consistency; a ``TyO3Session`` also works ("latest", fine
-        because nothing mutates HEAD during one apply_delta).
-
-        Drops nodes owned by changed+deleted files, re-indexes created+changed files,
-        and revalidates inbound cross-file edges into the changed set. On a rescan
-        (``delta.rescan``) the delta is unknown, so it full-rebuilds. The result is
-        structurally equal to ``CodeGraph.build(source)`` over the same revision.
-
-        Requires ``self._root`` (set by build). Build the graph once with
-        ``CodeGraph.build`` before applying deltas.
-
-        *sort_key* controls the processing order of the dirty file set.
-        Defaults to ``sorted`` (alphabetical).  Parametrised tests can inject
-        a different key (e.g. reversed) to prove two-pass inheritance is
-        genuinely order-independent (§6.4).
+        A thin wrapper over :meth:`apply_code_delta`: the structural delta is
+        produced inside the native commit and carried on ``delta.code_delta``.
+        *source* and *sort_key* are accepted for API compatibility — ordering and
+        inbound revalidation are now handled in the native producer, so neither is
+        needed here. Diagnostics may shift in importers on any edit, so they are
+        re-collected lazily from *source* on next access.
         """
         self._assert_mutable()
-        if self._root is None:
-            raise RuntimeError("apply_delta requires a graph built via CodeGraph.build()")
-
-        # Rescan: delta unknown ⇒ rebuild wholesale (architecture §5.1).
-        if delta.rescan:
-            self._replace_with(CodeGraph.build(source, report=report, root=self._root))
+        if delta.code_delta is not None:
+            self.apply_code_delta(delta.code_delta)
+        else:
+            # A commit that carried no code_delta (e.g. a no-op) only advances
+            # the revision marker.
             self._revision = delta.revision
-            return
-
-        root = self._root
-        # Project-wide path maps from the CURRENT file set (includes created files,
-        # excludes deleted ones). Native (absolute) paths feed read calls; graph paths
-        # are project-relative. Mirrors build (graph.py:142-146).
-        native_paths = [str(p) for p in source.files()]
-        native_by_graph = {_to_relative(root, p): p for p in native_paths}
-        project_files = set(native_by_graph.keys())
-
-        created = {_to_relative(root, p) for p in delta.created}
-        changed = {_to_relative(root, p) for p in delta.changed}
-        deleted = {_to_relative(root, p) for p in delta.deleted}
-
-        dirty = changed | deleted  # nodes to drop
-        to_index = (sort_key or sorted)(sorted(created | changed))  # files to (re-)extract
-
-        # 0a. Handle moved entities: update location payload without changing
-        #     the DurableId or churning edges — preserves §5.5.1 at the graph
-        #     level and avoids needless edge churn.
-        moved = {_to_relative(root, p) for p in delta.moved}
-        self._handle_moved_entities(source, moved, root, native_by_graph)
-
-        # 0b. Snapshot inbound dependencies BEFORE removal — step 1 deletes the edges
-        #    that encode them (they are incident to dirty nodes).
-        importers = self._importers_of(dirty)
-        importers -= set(to_index)  # re-indexed files rebuild their own out-edges
-        importers &= project_files  # only files that still exist
-
-        # 1. Drop every node owned by a dirty file. rustworkx removes incident edges
-        #    (including inbound cross-file edges) automatically.
-        doomed = [idx for f in dirty for idx in self._file_to_nodes.get(f, [])]
-        if doomed:
-            self._graph.remove_nodes_from(doomed)
-        # swap-and-pop invalidated stored indices: rebuild every secondary index
-        # (incl. _file_importers) from the surviving graph.
-        self._rebuild_indexes()
-
-        # 2. Re-extract created + changed files (passes 1–5).
-        self._index_files(
-            source,
-            to_index,
-            project_files,
-            root=root,
-            native_by_graph=native_by_graph,
-            report=report,
-            sort_key=sort_key,
-        )
-
-        # 3. Revalidate INBOUND edges: re-resolve each importer's references
-        #    and inheritance INTO the dirty set (edges into non-dirty files
-        #    survived step 1 untouched).
-        for importer in sorted(importers):
-            self._resolve_references_via_occurrences(
-                source,
-                importer,
-                project_files,
-                report=report,
-                root=root,
-                native_by_graph=native_by_graph,
-                restrict_targets=dirty,
-            )
-
-        # 3b. Revalidate inbound INHERITS edges for importers of dirty files.
-        #     When a base class file changes, its derived classes in importers
-        #     lose their INHERITS edges (the base-class nodes were dropped in
-        #     step 1).  Re-run _inherits_pass_I for the importer files so they
-        #     rediscover their supertypes among the re-materialised dirty nodes.
-        if importers:
-            self._revalidate_inbound_inheritance(
-                source,
-                importers,
-                native_by_graph=native_by_graph,
-                project_files=project_files,
-                root=root,
-                report=report,
-            )
-
-        # 4. Diagnostics: one project-wide check(), redistributed. A change in one file
-        #    can alter diagnostics in others, so refresh wholesale (architecture §5 the
-        #    snapshot's check() is the same revision as the structural update).
-        self._refresh_diagnostics(source, root=root, project_files=project_files)
-
-        # Drop stale memoized subgraphs (defensive; _add_* already clear it).
-        self._semantic_subgraph_cache.clear()
-        self._revision = delta.revision
+        self._diag_source = source
+        self._diag_loaded = False
 
     # ── Previously implemented algorithms ─────────────────────
 
@@ -2296,12 +1175,35 @@ class CodeGraph:
 
     # ── Diagnostics ───────────────────────────────────────────
 
+    def _ensure_diagnostics(self) -> None:
+        """Lazily collect diagnostics from the build source on first access.
+
+        Type-check output is not part of the ``CodeDelta``, so it is kept off the
+        structural build/apply path and gathered here on demand via a single
+        ``check()`` over the source. A pinned graph captures its diagnostics at
+        pin time (see :meth:`_pin_at`) and never re-checks.
+        """
+        if self._diag_loaded:
+            return
+        self._diag_loaded = True
+        source = self._diag_source
+        if source is None:
+            return
+        project_files = {
+            self._graph[i].file
+            for i in self._graph.node_indices()
+            if self._graph[i].file and self._graph[i].file != "<external>"
+        }
+        self._collect_all_diagnostics(source, root=self._root, project_files=project_files)
+
     def diagnostics_for_file(self, path: str) -> list[Diagnostic]:
         """All diagnostics for a file."""
+        self._ensure_diagnostics()
         return self._diagnostics.get(path, [])
 
     def diagnostics_for_symbol(self, durable_id: str) -> list[Diagnostic]:
         """Diagnostics whose range overlaps this symbol's definition."""
+        self._ensure_diagnostics()
         node = self.symbol(durable_id)
         if node is None:
             return []
@@ -2310,6 +1212,7 @@ class CodeGraph:
 
     def all_diagnostics(self) -> list[Diagnostic]:
         """All diagnostics across all files."""
+        self._ensure_diagnostics()
         return [d for diags in self._diagnostics.values() for d in diags]
 
 

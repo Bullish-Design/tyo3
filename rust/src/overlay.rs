@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn overlay_text_shadows_disk() {
         let (_dir, root, a) = fixture("X = 1\n");
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
         store.insert_text(a.clone(), "Y = 2\n");
         let sys = OverlaySystem::live(root, store.capture());
         assert_eq!(sys.read_to_string(&a).unwrap(), "Y = 2\n");
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn overlay_delete_tombstone_hides_disk_file() {
         let (_dir, root, a) = fixture("X = 1\n");
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
         store.delete(a.clone());
         let sys = OverlaySystem::live(root, store.capture());
         assert!(sys.read_to_string(&a).is_err());
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn metadata_revision_changes_with_content() {
         let (_dir, root, a) = fixture("X = 1\n");
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
         store.insert_text(a.clone(), "v1");
         let r1 = OverlaySystem::live(root.clone(), store.capture())
             .path_metadata(&a)
@@ -480,7 +480,7 @@ mod tests {
     #[test]
     fn frozen_view_is_isolated_from_later_mutation() {
         let (_dir, root, a) = fixture("X = 1\n");
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
         let r0 = store.insert_text(a.clone(), "pinned\n");
 
         // Pin the generation at r0.
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn frozen_view_never_reads_disk_for_content() {
         let (_dir, root, a) = fixture("DISK_ORIGINAL\n");
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
 
         // Pre-populate the file in the generation (as snapshot builder will).
         store.insert_text(a.clone(), "PINNED_CONTENT\n");

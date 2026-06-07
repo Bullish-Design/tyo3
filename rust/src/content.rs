@@ -132,16 +132,12 @@ const DEFAULT_RETAIN_CAP: usize = 256;
 
 impl Default for ContentStore {
     fn default() -> Self {
-        Self::new()
+        Self::new(DEFAULT_RETAIN_CAP)
     }
 }
 
 impl ContentStore {
-    pub fn new() -> Self {
-        Self::with_retain_cap(DEFAULT_RETAIN_CAP)
-    }
-
-    pub fn with_retain_cap(retain_cap: usize) -> Self {
+    pub fn new(retain_cap: usize) -> Self {
         let generation: Generation = Arc::new(ContentMap::new());
         let mut retained = BTreeMap::new();
         retained.insert(Revision(0), Arc::clone(&generation));
@@ -369,7 +365,7 @@ mod tests {
     /// intermediate state (a inserted, b not yet) must never be observable.
     #[test]
     fn apply_batch_is_atomic_one_revision() {
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
         let r0 = store.revision();
         let a = SystemPathBuf::from("/test/a.py");
         let b = SystemPathBuf::from("/test/b.py");
@@ -405,7 +401,7 @@ mod tests {
     /// A single-change helper (`insert_text`) advances the revision by exactly 1.
     #[test]
     fn insert_text_advances_by_one() {
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
         let r0 = store.revision();
         store.insert_text(SystemPathBuf::from("/test/x.py"), "x");
         assert_eq!(store.revision().0, r0.0 + 1);
@@ -416,7 +412,7 @@ mod tests {
     /// `None` for evicted revisions.
     #[test]
     fn retain_cap_evicts_oldest() {
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
         store.retain_cap = 4;
         // seed has r0; 6 insertions create r1..r6 (total 7).
         // With cap 4, r0..r2 are evicted, r3..r6 retained.
@@ -442,7 +438,7 @@ mod tests {
     /// A captured generation remains independent after subsequent mutations.
     #[test]
     fn captured_generation_is_independent() {
-        let mut store = ContentStore::new();
+        let mut store = ContentStore::default();
         store.insert_text(SystemPathBuf::from("/test/a.py"), "v1");
         let gen_v1 = store.capture();
 

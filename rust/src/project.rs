@@ -1308,14 +1308,21 @@ fn compute_full_nodes_edges(
     // read-surface builder (`_materialize_file_nodes` always creates one).
     let mut source_files_abs: Vec<String> = {
         let project = state.db.project();
+        let root_str = root.as_str();
         project
             .files(&state.db)
             .iter()
             .filter(|f: &&File| {
-                f.path(&state.db)
-                    .extension()
-                    .and_then(ruff_python_ast::PySourceType::try_from_extension)
-                    .is_some()
+                let path = f.path(&state.db);
+                let path_str = path.as_str();
+                (path_str == root_str
+                    || path_str
+                        .strip_prefix(root_str)
+                        .is_some_and(|rest| rest.starts_with('/')))
+                    && path
+                        .extension()
+                        .and_then(ruff_python_ast::PySourceType::try_from_extension)
+                        .is_some()
             })
             .map(|f| f.path(&state.db).as_str().to_string())
             .collect()
@@ -1833,6 +1840,7 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
     // Run scoped reconciliation after the event is applied.
     let scope = identity_scope_from_events(std::slice::from_ref(&event));
     let identity = run_identity_reconciliation(head, scope.as_ref());
+    let code_delta = produce_incremental_code_delta(head);
 
     dto::SyncResultDto {
         revision: head.store.revision().0,
@@ -1847,7 +1855,7 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
-        code_delta: None,
+        code_delta: Some(code_delta),
     }
 }
 
@@ -1880,6 +1888,7 @@ fn apply_watch_events(
 
         // Run full reconciliation for rescans.
         let identity = run_identity_reconciliation(head, None);
+        let code_delta = produce_full_code_delta(head);
 
         return Some(dto::SyncResultDto {
             revision,
@@ -1894,7 +1903,7 @@ fn apply_watch_events(
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
-            code_delta: None,
+            code_delta: Some(code_delta),
         });
     }
 
@@ -1971,6 +1980,7 @@ fn apply_watch_events(
     // Run scoped reconciliation.
     let scope = identity_scope_from_events(&kept_events);
     let identity = run_identity_reconciliation(head, scope.as_ref());
+    let code_delta = produce_incremental_code_delta(head);
 
     Some(dto::SyncResultDto {
         revision,
@@ -1985,7 +1995,7 @@ fn apply_watch_events(
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
-        code_delta: None,
+        code_delta: Some(code_delta),
     })
 }
 
@@ -2044,7 +2054,7 @@ impl PyTyProject {
         let retain_cap = config.raw.spine.retain_cap;
         let mut head = build_head_with_config(
             system_root,
-            ContentStore::with_retain_cap(retain_cap),
+            ContentStore::new(retain_cap),
             registry,
             config,
         );
@@ -2086,7 +2096,7 @@ impl PyTyProject {
 
         let root = head.root.clone();
         // Preserve overlay content, identity registry, and validated config across the rebuild.
-        let store = std::mem::replace(&mut head.store, ContentStore::new());
+        let store = std::mem::replace(&mut head.store, ContentStore::default());
         let registry = std::mem::replace(&mut head.registry, IdentityRegistry::default());
         let config = head.config.clone();
 
@@ -2265,6 +2275,7 @@ impl PyTyProject {
 
         // Run full reconciliation for sync_all.
         let identity = run_identity_reconciliation(head, None);
+        let code_delta = produce_full_code_delta(head);
 
         let dto = dto::SyncResultDto {
             revision,
@@ -2279,7 +2290,7 @@ impl PyTyProject {
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
-            code_delta: None,
+            code_delta: Some(code_delta),
         };
         drop(guard);
         pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
@@ -3468,7 +3479,7 @@ mod phase2_tests {
     #[test]
     fn build_head_no_config_reads_disk() {
         let (_dir, root) = project(None, "VALUE = 42\n");
-        let head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
         let file = system_path_to_file(&head.db, &a).unwrap();
         assert!(source_text(&head.db, file).as_str().contains("VALUE = 42"));
@@ -3488,12 +3499,12 @@ mod phase2_tests {
 
         // Default (no config): system Python → 3.13 → no syntax error.
         let (_d1, root_default) = project(None, pep695);
-        let head_default = build_head(root_default.clone(), ContentStore::new(), IdentityRegistry::default());
+        let head_default = build_head(root_default.clone(), ContentStore::default(), IdentityRegistry::default());
         let diags_default = head_default.db.check();
 
         // Config forces Python 3.8 → syntax error on PEP 695 generics.
         let (_d2, root_38) = project(Some(toml_38), pep695);
-        let head_38 = build_head(root_38.clone(), ContentStore::new(), IdentityRegistry::default());
+        let head_38 = build_head(root_38.clone(), ContentStore::default(), IdentityRegistry::default());
         let diags_38 = head_38.db.check();
 
         assert!(
@@ -3509,7 +3520,7 @@ mod phase2_tests {
     #[test]
     fn malformed_config_falls_back_to_defaults() {
         let (_dir, root) = project(Some("this is not = valid toml ]["), "X = 1\n");
-        let head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default()); // must not panic
+        let head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default()); // must not panic
         // The db is usable despite the broken config.
         let a = root.join("a.py");
         let file = system_path_to_file(&head.db, &a).unwrap();
@@ -3540,7 +3551,7 @@ mod phase3_tests {
     #[test]
     fn edit_overlays_content_without_disk_write() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // baseline reads disk
@@ -3567,7 +3578,7 @@ mod phase3_tests {
     #[test]
     fn revision_advances() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let r0 = head.store.revision().0;
         head.store.insert_text(root.join("a.py"), "X = 2\n");
         assert!(head.store.revision().0 > r0);
@@ -3578,7 +3589,7 @@ mod phase3_tests {
     #[test]
     fn edit_creates_new_file() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let b = root.join("b.py");
         let ev = classify_overlay_edit(&head.system, &head.db, &b);
         assert!(matches!(ev, ChangeEvent::Created { .. }));
@@ -3594,7 +3605,7 @@ mod phase3_tests {
     #[test]
     fn edit_virtual_is_disk_free() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let vpath = SystemVirtualPathBuf::from("untitled:1".to_string());
         head.store.insert_virtual(vpath.clone(), "VV = 9\n");
         head.system.publish(head.store.capture());
@@ -3608,7 +3619,7 @@ mod phase3_tests {
     #[test]
     fn sync_path_reingests_disk() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
         // overlay it, then change disk underneath, then sync_path should win = disk
         head.store.insert_text(a.clone(), "OVERLAY = 1\n");
@@ -3631,7 +3642,7 @@ mod phase3_tests {
     #[test]
     fn edit_many_is_one_revision() {
         let (_d, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
         let b = root.join("b.py");
 
@@ -3661,7 +3672,7 @@ mod phase3_tests {
     #[test]
     fn content_observable_immediately_after_write() {
         let (_d, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         head.store.insert_text(a.clone(), "NEW_CONTENT = 42\n");
@@ -3714,7 +3725,7 @@ mod phase4_tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(".keep"), "").unwrap();
         let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
-        let head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let snap = build_frozen(root, head.store.capture(), head.store.revision());
 
         assert!(compute_files(&snap).is_empty());
@@ -3729,7 +3740,7 @@ mod phase4_tests {
     #[test]
     fn snapshot_is_isolated_from_later_head_edits() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the generation with the disk content at r0.
@@ -3758,7 +3769,7 @@ mod phase4_tests {
     #[test]
     fn pre_populated_content_survives_disk_mutation() {
         let (_dir, root) = project("DISK = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the disk content into the generation.
@@ -3777,7 +3788,7 @@ mod phase4_tests {
     #[test]
     fn snapshot_pins_overlay_buffer() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
         head.store.insert_text(a.clone(), "OVERLAY = 1\n");
         head.system.publish(head.store.capture());
@@ -3793,7 +3804,7 @@ mod phase4_tests {
     #[test]
     fn time_travel_to_retained_revision() {
         let (_dir, root) = project("X = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate r0's content.
@@ -3814,7 +3825,7 @@ mod phase4_tests {
     #[test]
     fn two_snapshots_same_revision_identical_after_disk_mutation() {
         let (_dir, root) = project("SHARED = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate and build first snapshot at r0.
@@ -3896,7 +3907,7 @@ mod phase5_concurrency_tests {
     #[test]
     fn held_snapshots_do_not_block_writer() {
         let (_dir, root) = project("x: int = 0\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the content so snapshots can read it (Design A).
@@ -3951,7 +3962,7 @@ mod phase5_concurrency_tests {
     #[test]
     fn snapshot_reads_never_cancel_while_writer_hammers_head() {
         let (_dir, root) = project("x: int = 0\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the content for snapshot reads (Design A).
@@ -4051,7 +4062,7 @@ mod phase5_concurrency_tests {
     #[test]
     fn concurrent_snapshot_reads_are_deterministic() {
         let (_dir, root) = project("CAPTURED = 1\n");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Pre-populate the content (Design A).
@@ -4125,7 +4136,7 @@ mod step7_ingest_tests {
     #[test]
     fn sync_path_records_content_for_snapshot_stability() {
         let (_dir, root) = project(&[("a.py", "FIRST = 1\n")]);
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Ingest the disk file via sync_path (records content in generation).
@@ -4158,7 +4169,7 @@ mod step7_ingest_tests {
     #[test]
     fn watcher_ingest_pins_content() {
         let (_dir, root) = project(&[("a.py", "WATCHER_FIRST = 1\n")]);
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Simulate a watcher event: Changed on a.py, disk is read, content
@@ -4188,7 +4199,7 @@ mod step7_ingest_tests {
     #[test]
     fn deleted_file_is_absent_in_snapshots() {
         let (_dir, root) = project(&[("a.py", "X = 1\n")]);
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
 
         // Ingest a Delete for a.py (file was deleted on disk).
@@ -4229,7 +4240,7 @@ mod phase8_watch_tests {
     #[test]
     fn empty_batch_is_noop() {
         let (_d, root) = project(&[("a.py", "x = 1\n")]);
-        let mut head = build_head(root, ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root, ContentStore::default(), IdentityRegistry::default());
         assert!(apply_watch_events(&mut head, vec![]).is_none());
     }
 
@@ -4241,7 +4252,7 @@ mod phase8_watch_tests {
         let a = root.join("a.py");
 
         // Watcher-driven head.
-        let mut head_w = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head_w = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let _ = head_w.db.apply_changes(&[ChangeEvent::Rescan], None); // warm discovery
         std::fs::write(a.as_std_path(), b"x: str = 'two'\n").unwrap();
         let via_watch =
@@ -4260,7 +4271,7 @@ mod phase8_watch_tests {
     fn overlaid_path_is_not_clobbered_by_disk_event() {
         let (_d, root) = project(&[("a.py", "DISK = 1\n")]);
         let a = root.join("a.py");
-        let mut head = build_head(root, ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root, ContentStore::default(), IdentityRegistry::default());
 
         // Agent overlay buffer (unsaved).
         head.store.insert_text(a.clone(), "BUFFER = 2\n".to_string());
@@ -4280,7 +4291,7 @@ mod phase8_watch_tests {
     #[test]
     fn rescan_event_short_circuits() {
         let (_d, root) = project(&[("a.py", "x = 1\n")]);
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let a = root.join("a.py");
         let r = apply_watch_events(
             &mut head,
@@ -4295,7 +4306,7 @@ mod phase8_watch_tests {
     fn burst_folds_into_one_revision() {
         let (_d, root) = project(&[("a.py", "x = 1\n")]);
         let a = root.join("a.py");
-        let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
+        let mut head = build_head(root.clone(), ContentStore::default(), IdentityRegistry::default());
         let before = head.store.revision().0;
         std::fs::write(a.as_std_path(), b"x = 2\n").unwrap();
         let r = apply_watch_events(

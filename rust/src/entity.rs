@@ -17,6 +17,13 @@ use ty_project::Db;
 use crate::hash::{hash_entity, normalise_entity_source, ContentHash, HashPolicy};
 use crate::project::TyProjectState;
 
+fn path_is_under_root(path: &str, root: &str) -> bool {
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 // ── SymbolKind (internal, not the DTO) ───────────────────────────────────
 
 /// The kind of an addressable symbol. Mirrors `ty_ide::SymbolKind`, kept as an
@@ -101,14 +108,17 @@ pub struct Entity {
 pub fn extract_entities(state: &TyProjectState) -> Vec<Entity> {
     let project = state.db.project();
     let indexed = project.files(&state.db);
+    let root = state.root.as_str();
 
     let source_files: HashSet<String> = indexed
         .iter()
         .filter(|f: &&File| {
-            f.path(&state.db)
-                .extension()
-                .and_then(ruff_python_ast::PySourceType::try_from_extension)
-                .is_some()
+            let path = f.path(&state.db);
+            path_is_under_root(path.as_str(), root)
+                && path
+                    .extension()
+                    .and_then(ruff_python_ast::PySourceType::try_from_extension)
+                    .is_some()
         })
         .map(|f| f.path(&state.db).as_str().to_string())
         .collect();
@@ -125,12 +135,14 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
     let policy = state.hash_policy;
     let project = state.db.project();
     let indexed = project.files(&state.db);
+    let root = state.root.as_str();
 
     let mut source_files: Vec<File> = indexed
         .iter()
         .filter(|f: &&File| {
             let path = f.path(&state.db);
-            files.contains(path.as_str())
+            path_is_under_root(path.as_str(), root)
+                && files.contains(path.as_str())
                 && path
                     .extension()
                     .and_then(ruff_python_ast::PySourceType::try_from_extension)
@@ -157,10 +169,40 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
         let line_index = LineIndex::from_source_text(source_str);
 
         // Walk the hierarchy from top-level entries, tracking visited ids to
-        // avoid double-processing symbols that appear both as a root entry and
-        // as a child.
+        // avoid double-processing symbols. `HierarchicalSymbols::iter()`
+        // includes children as well as roots, so first derive the roots from the
+        // inverse child set; otherwise a child seen early could be marked visited
+        // and skipped before its parent recurses into it.
         let mut visited: HashSet<ty_ide::SymbolId> = HashSet::new();
+        let mut child_ids: HashSet<ty_ide::SymbolId> = HashSet::new();
+        for (id, _) in hierarchical.iter() {
+            for (child_id, _) in hierarchical.children(id) {
+                child_ids.insert(child_id);
+            }
+        }
 
+        for (id, info) in hierarchical.iter() {
+            if child_ids.contains(&id) || visited.contains(&id) {
+                continue;
+            }
+            collect_entities_recursive(
+                &hierarchical,
+                id,
+                &info,
+                source_str,
+                &line_index,
+                &file_path,
+                None,
+                None,
+                None,
+                &policy,
+                &mut entities,
+                &mut visited,
+            );
+        }
+
+        // Defensive fallback for any detached/cyclic engine output: preserve
+        // coverage without letting it suppress normal parent-child recursion.
         for (id, info) in hierarchical.iter() {
             if visited.contains(&id) {
                 continue;
@@ -172,6 +214,7 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
                 source_str,
                 &line_index,
                 &file_path,
+                None,
                 None,
                 None,
                 &policy,
@@ -194,6 +237,7 @@ fn collect_entities_recursive(
     file_path: &str,
     parent_qualified: Option<&str>,
     parent_display: Option<&str>,
+    parent_kind: Option<SymbolKind>,
     policy: &HashPolicy,
     entities: &mut Vec<Entity>,
     visited: &mut HashSet<ty_ide::SymbolId>,
@@ -201,7 +245,14 @@ fn collect_entities_recursive(
     visited.insert(id);
 
     let name = info.name.clone();
-    let kind = SymbolKind::from(&info.kind);
+    let mut kind = SymbolKind::from(&info.kind);
+    if parent_kind == Some(SymbolKind::Class) && kind == SymbolKind::Function {
+        kind = if name == "__init__" {
+            SymbolKind::Constructor
+        } else {
+            SymbolKind::Method
+        };
+    }
     let qualified_name = match parent_qualified {
         Some(p) => format!("{}::{}", p, name),
         None => format!("{}::{}", file_path, name),
@@ -253,6 +304,7 @@ fn collect_entities_recursive(
             file_path,
             Some(&qualified_name),
             Some(own_display),
+            Some(kind),
             policy,
             entities,
             visited,
@@ -296,7 +348,7 @@ mod tests {
             dir.path().canonicalize().unwrap().to_path_buf(),
         ).unwrap();
 
-        let system = OverlaySystem::live(root.clone(), ContentStore::new().capture());
+        let system = OverlaySystem::live(root.clone(), ContentStore::default().capture());
         let metadata = ProjectMetadata::new(Name::new("test"), root.clone());
         let db = ProjectDatabase::use_defaults(metadata, system);
 

@@ -41,6 +41,8 @@ in
     pkgs.git 
     pkgs.uv
     pkgs.maturin         # Build Python extensions with PyO3
+    pkgs.mold            # Fast linker (replaces GNU ld for Rust LTO builds)
+    pkgs.sccache         # Compiler cache for Rust (survives cargo clean)
   ];
 
   # ── Languages (Rust + Python) ──────────────────────────────
@@ -127,17 +129,14 @@ in
     exit "$_pytest_rc"
   '';
 
-  scripts.test-quick.exec = ''
-    ${detailPrelude}
-    echo "═══ Running quick tests (no native extension needed) ═══"
+  scripts.test-fast.exec = ''
+    ${detailPreludePerTest}
+    echo "═══ Running all tests (no coverage, parallel) ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ \
-      --ignore=src/tyo3/tests/test_rust_integration.py \
-      --ignore=src/tyo3/tests/test_rust_snapshots.py \
-      --ignore=src/tyo3/tests/test_coordinate_conversion.py \
-      --ignore=src/tyo3/tests/test_property_based.py \
-      --ignore=src/tyo3/tests/test_rust_performance.py "$@" 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ -n 4 --dist loadscope --durations=0 "$@" 2>&1
   '';
+
+  # scripts.test-quick is retired — test-fast covers the fast dev loop now.
 
   scripts.test-rust.exec = ''
     ${detailPrelude}
@@ -164,7 +163,7 @@ in
     ${detailPrelude}
     echo "═══ Running all tests with coverage report ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing --cov-report=html "$@" 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing --cov-report=html -n auto "$@" 2>&1
     echo "═══ HTML coverage report: $DEVENV_ROOT/htmlcov/index.html ═══"
   '';
 
@@ -277,7 +276,7 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
     echo "    build-release      — build release + copy .so"
     echo "    build-wheel        — build maturin wheel"
     echo "    test               — full test suite"
-    echo "    test-quick         — unit tests only (no native needed)"
+
     echo "    test-rust          — Rust backend integration tests"
     echo "    test-property      — Hypothesis property-based tests"
     echo "    test-perf          — performance benchmarks"

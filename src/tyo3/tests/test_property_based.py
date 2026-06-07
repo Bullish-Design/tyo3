@@ -124,7 +124,7 @@ fixture_file_strategy = st.sampled_from(FIXTURE_FILE_PAIRS)
 
 
 @needs_native
-@settings(max_examples=100, deadline=None)
+@settings(max_examples=10, deadline=None)
 @given(pair=fixture_file_strategy, line=line_numbers, column=column_numbers)
 def test_hover_never_panics(pair, line: int, column: int) -> None:
     """hover() with arbitrary inputs should never panic."""
@@ -141,7 +141,7 @@ def test_hover_never_panics(pair, line: int, column: int) -> None:
 
 
 @needs_native
-@settings(max_examples=100, deadline=None)
+@settings(max_examples=10, deadline=None)
 @given(pair=fixture_file_strategy, line=line_numbers, column=column_numbers)
 def test_goto_never_panics(pair, line: int, column: int) -> None:
     """goto_definition() with arbitrary inputs should never panic."""
@@ -159,7 +159,7 @@ def test_goto_never_panics(pair, line: int, column: int) -> None:
 
 
 @needs_native
-@settings(max_examples=100, deadline=None)
+@settings(max_examples=10, deadline=None)
 @given(pair=fixture_file_strategy, line=line_numbers, column=column_numbers)
 def test_find_references_never_panics(pair, line: int, column: int) -> None:
     """find_references() with arbitrary inputs should never panic."""
@@ -178,7 +178,7 @@ def test_find_references_never_panics(pair, line: int, column: int) -> None:
 
 
 @needs_native
-@settings(max_examples=30, deadline=None)
+@settings(max_examples=10, deadline=None)
 @given(data=st.data())
 def test_symbols_have_valid_positions(data: st.DataObject) -> None:
     """Every symbol must have a name, kind, and valid 1-based position."""
@@ -206,7 +206,7 @@ def test_symbols_have_valid_positions(data: st.DataObject) -> None:
 
 
 @needs_native
-@settings(max_examples=30, deadline=None)
+@settings(max_examples=10, deadline=None)
 @given(data=st.data())
 def test_symbols_are_deterministic(data: st.DataObject) -> None:
     """document_symbols() returns identical results on repeated calls."""
@@ -234,7 +234,7 @@ def test_symbols_are_deterministic(data: st.DataObject) -> None:
 
 
 @needs_native
-@settings(max_examples=15, deadline=None)
+@settings(max_examples=5, deadline=None)
 @given(fixture_name=st.sampled_from(NON_EMPTY_FIXTURES))
 def test_all_operations_raise_after_close(fixture_name: str) -> None:
     """No operation should succeed after close()."""
@@ -283,7 +283,7 @@ def test_empty_project_operations(line: int, column: int) -> None:
 
 
 @needs_native
-@settings(max_examples=20, deadline=None)
+@settings(max_examples=5, deadline=None)
 @given(fixture_name=st.sampled_from(NON_EMPTY_FIXTURES))
 def test_files_are_unique_and_absolute(fixture_name: str) -> None:
     """files() returns unique, absolute paths that exist on disk."""

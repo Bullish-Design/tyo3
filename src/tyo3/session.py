@@ -734,18 +734,11 @@ class TyO3Session(_ReadOps):
         """Pin an explicit MVCC snapshot. ``at=None`` pins the current
         revision; ``at=r`` time-travels to a still-retained revision."""
         self._check_open()
-        # Prime the identity registry before capturing the snapshot. A snapshot
-        # clones the head registry at capture time (project.rs::snapshot), and a
-        # graph built over the snapshot requires every entity's DurableId. Since
-        # priming reconciles by committing — advancing the revision past any
-        # snapshot taken afterward — it cannot be deferred to ``Snapshot.graph``;
-        # the registry must already be populated when the native snapshot is
-        # captured. This is the snapshot-path analogue of the priming that
-        # ``CodeGraph.build`` already does for the live HEAD graph, and it is a
-        # once-per-session no-op after the first call.
-        from tyo3.graph.graph import _prime_identity_registry
-
-        _prime_identity_registry(self)
+        # No identity priming needed: the registry is reconciled by the native
+        # commit and primed at open (project.rs::prime_head_derived), and the
+        # snapshot's code layer is produced natively over its own frozen database
+        # (Gate 3N Step 7). The native snapshot clones the head registry at
+        # capture, so every entity's DurableId is already present.
         try:
             native_snapshot = self._inner.snapshot(at)
         except _NativeClosedError as e:

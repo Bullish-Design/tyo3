@@ -29,9 +29,15 @@ manifest-path = "rust/Cargo.toml"
 python-source = "src"
 
 [tool.uv]
+# Skip building the project during `uv sync` — the Rust extension is
+# built separately with `maturin develop` (or `devenv shell -- build`).
+package = false
 
 [tool.pytest.ini_options]
-addopts = "-q --cov=tyo3 --cov-report=term-missing --strict-markers -m 'not benchmark'"
+addopts = "--strict-markers -m 'not benchmark'"
+filterwarnings = [
+    "ignore::pluggy.PluggyTeardownRaisedWarning",
+]
 testpaths = ["src/tyo3/tests"]
 markers = [
     "benchmark: opt-in performance and CodeGraph benchmarks (not run in default suite)",
@@ -69,6 +75,7 @@ dev = [
     "hypothesis>=6.155.1",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.6.0",
     "ruff>=0.5.0",
     "ty>=0.0.40",
 ]

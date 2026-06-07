@@ -126,3 +126,108 @@ def test_apply_moved_does_not_churn_edges() -> None:
     # Edges identical — no churn.
     assert g.references_from("01A") == before
     assert g.revision == 2
+
+
+def test_remove_delta_edge_matches_full_identity() -> None:
+    """Removing one parallel edge keeps distinct surviving occurrences."""
+    file = "a.py"
+    g = CodeGraph()
+    g.apply_code_delta(
+        CodeDelta(
+            revision=1,
+            rescan=True,
+            nodes_upserted=[
+                _module(file),
+                SymbolNodeDelta(
+                    durable_id="01A",
+                    kind="function",
+                    qualified_name=f"{file}::a",
+                    file=file,
+                    range=_range(1, 1),
+                    content_hash="aaa",
+                ),
+                SymbolNodeDelta(
+                    durable_id="<external>a.py::int",
+                    kind="class_",
+                    qualified_name="a.py::int",
+                    file="<external>",
+                    range=_range(),
+                    content_hash=None,
+                ),
+            ],
+            edges_added=[
+                EdgeDelta(
+                    src_id="01A",
+                    dst_id="<external>a.py::int",
+                    kind="references",
+                    role="read",
+                    file=file,
+                    range=_range(2, 5),
+                ),
+                EdgeDelta(
+                    src_id="01A",
+                    dst_id="<external>a.py::int",
+                    kind="references",
+                    role="read",
+                    file=file,
+                    range=_range(3, 5),
+                ),
+            ],
+        )
+    )
+    assert g.edge_count == 2
+
+    g.apply_code_delta(
+        CodeDelta(
+            revision=2,
+            edges_removed=[
+                EdgeDelta(
+                    src_id="01A",
+                    dst_id="<external>a.py::int",
+                    kind="references",
+                    role="read",
+                    file=file,
+                    range=_range(2, 5),
+                ),
+            ],
+        )
+    )
+
+    refs = g.references_from("01A")
+    assert len(refs) == 1
+    assert refs[0][1].range == _range(3, 5)
+    assert g.revision == 2
+
+
+def test_external_stub_classified_by_file_payload() -> None:
+    """Native external stubs use package-style ids, not a fixed id prefix."""
+    g = CodeGraph()
+    g.apply_code_delta(
+        CodeDelta(
+            revision=1,
+            rescan=True,
+            nodes_upserted=[
+                SymbolNodeDelta(
+                    durable_id="unknown::object",
+                    kind="class_",
+                    qualified_name="unknown.object",
+                    file="<external>",
+                    range=_range(),
+                    content_hash=None,
+                ),
+                SymbolNodeDelta(
+                    durable_id="stdlib::<module>",
+                    kind="module",
+                    qualified_name="<module>",
+                    file="<external>",
+                    range=_range(),
+                    content_hash=None,
+                ),
+            ],
+        )
+    )
+
+    obj = g.symbol("unknown::object")
+    mod = g.symbol("stdlib::<module>")
+    assert obj is not None and obj.external and obj.package == "unknown"
+    assert mod is not None and mod.external and mod.package == "stdlib"

@@ -4,7 +4,7 @@
 //! normalised config tree. Validation is layered on top in Step 3.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::hash::HashPolicy;
@@ -67,6 +67,8 @@ pub struct RawConfig {
     pub coordination: CoordinationCfg,
     #[serde(default)]
     pub sidecar: SidecarCfg,
+    #[serde(skip)]
+    pub env_expanded_paths: BTreeSet<String>,
 }
 
 impl RawConfig {
@@ -83,6 +85,7 @@ impl RawConfig {
             stores: BTreeMap::new(),
             coordination: CoordinationCfg::default(),
             sidecar: SidecarCfg::default(),
+            env_expanded_paths: BTreeSet::new(),
         }
     }
 
@@ -105,11 +108,14 @@ impl RawConfig {
         }
 
         let secrets = load_secrets(sidecar)?;
-        expand_value(&mut value, &secrets)?;
+        let mut env_expanded_paths = BTreeSet::new();
+        expand_value(&mut value, "$", &secrets, &mut env_expanded_paths)?;
 
-        value
+        let mut raw: RawConfig = value
             .try_into()
-            .map_err(|e: toml::de::Error| ConfigError::Parse(e.to_string()))
+            .map_err(|e: toml::de::Error| ConfigError::Parse(e.to_string()))?;
+        raw.env_expanded_paths = env_expanded_paths;
+        Ok(raw)
     }
 }
 
@@ -471,7 +477,12 @@ fn shallow_merge(base: &mut toml::Value, overlay: toml::Value) {
     match (base, overlay) {
         (toml::Value::Table(base_table), toml::Value::Table(overlay_table)) => {
             for (key, value) in overlay_table {
-                base_table.insert(key, value);
+                match base_table.get_mut(&key) {
+                    Some(existing) => shallow_merge(existing, value),
+                    None => {
+                        base_table.insert(key, value);
+                    }
+                }
             }
         }
         (base_slot, overlay_value) => *base_slot = overlay_value,
@@ -498,20 +509,26 @@ fn load_secrets(sidecar: &Sidecar) -> Result<BTreeMap<String, String>, ConfigErr
 
 fn expand_value(
     value: &mut toml::Value,
+    path: &str,
     secrets: &BTreeMap<String, String>,
+    env_expanded_paths: &mut BTreeSet<String>,
 ) -> Result<(), ConfigError> {
     match value {
         toml::Value::String(s) => {
-            *s = expand_string(s, secrets)?;
+            let expanded = expand_string(s, secrets)?;
+            if expanded.used_env {
+                env_expanded_paths.insert(path.to_string());
+            }
+            *s = expanded.value;
         }
         toml::Value::Array(items) => {
-            for item in items {
-                expand_value(item, secrets)?;
+            for (idx, item) in items.iter_mut().enumerate() {
+                expand_value(item, &format!("{path}[{idx}]"), secrets, env_expanded_paths)?;
             }
         }
         toml::Value::Table(table) => {
-            for (_, item) in table.iter_mut() {
-                expand_value(item, secrets)?;
+            for (key, item) in table.iter_mut() {
+                expand_value(item, &format!("{path}.{key}"), secrets, env_expanded_paths)?;
             }
         }
         _ => {}
@@ -519,26 +536,41 @@ fn expand_value(
     Ok(())
 }
 
-fn expand_string(s: &str, secrets: &BTreeMap<String, String>) -> Result<String, ConfigError> {
+struct ExpandedString {
+    value: String,
+    used_env: bool,
+}
+
+fn expand_string(s: &str, secrets: &BTreeMap<String, String>) -> Result<ExpandedString, ConfigError> {
     let mut out = String::with_capacity(s.len());
+    let mut used_env = false;
     let mut rest = s;
     while let Some(start) = rest.find("${") {
         out.push_str(&rest[..start]);
         let after = &rest[start + 2..];
         let Some(end) = after.find('}') else {
             out.push_str(&rest[start..]);
-            return Ok(out);
+            return Ok(ExpandedString { value: out, used_env });
         };
         let name = &after[..end];
         let value = std::env::var(name)
             .ok()
-            .or_else(|| secrets.get(name).cloned())
+            .map(|value| {
+                used_env = true;
+                value
+            })
+            .or_else(|| {
+                secrets.get(name).cloned().map(|value| {
+                    used_env = true;
+                    value
+                })
+            })
             .ok_or_else(|| ConfigError::UndefinedEnv(name.to_string()))?;
         out.push_str(&value);
         rest = &after[end + 1..];
     }
     out.push_str(rest);
-    Ok(out)
+    Ok(ExpandedString { value: out, used_env })
 }
 
 fn default_true() -> bool {
@@ -665,24 +697,28 @@ fn is_known_kind(kind: &str) -> bool {
 
 fn lint_secrets(raw: &RawConfig) -> Result<(), ConfigError> {
     let value = serde_json::to_value(raw).map_err(|e| ConfigError::Parse(e.to_string()))?;
-    lint_secret_value("$", &value)
+    lint_secret_value("$", &value, &raw.env_expanded_paths)
 }
 
-fn lint_secret_value(path: &str, value: &serde_json::Value) -> Result<(), ConfigError> {
+fn lint_secret_value(
+    path: &str,
+    value: &serde_json::Value,
+    env_expanded_paths: &BTreeSet<String>,
+) -> Result<(), ConfigError> {
     match value {
         serde_json::Value::String(s) => {
-            if looks_like_secret(s) {
+            if !env_expanded_paths.contains(path) && looks_like_secret(s) {
                 return Err(ConfigError::SecretInline(path.to_string()));
             }
         }
         serde_json::Value::Array(items) => {
             for (idx, item) in items.iter().enumerate() {
-                lint_secret_value(&format!("{path}[{idx}]"), item)?;
+                lint_secret_value(&format!("{path}[{idx}]"), item, env_expanded_paths)?;
             }
         }
         serde_json::Value::Object(map) => {
             for (key, item) in map {
-                lint_secret_value(&format!("{path}.{key}"), item)?;
+                lint_secret_value(&format!("{path}.{key}"), item, env_expanded_paths)?;
             }
         }
         _ => {}
@@ -864,7 +900,6 @@ path = "cache/shared"
             sidecar.config_local_path(),
             r#"
 [stores.vectors]
-backend = "fs"
 path = "cache/local"
 "#,
         )
@@ -873,6 +908,7 @@ path = "cache/local"
         let cfg = RawConfig::load(&sidecar).unwrap();
 
         assert_eq!(cfg.stores["vectors"].path.as_deref(), Some("cache/local"));
+        assert_eq!(cfg.stores["vectors"].backend, "fs");
         assert!(cfg.hashing.profiles.contains_key("structure"));
     }
 
@@ -912,6 +948,30 @@ path = "${MISSING_TYO3_TEST_VAR}"
         let err = RawConfig::load(&sidecar).unwrap_err();
         assert!(matches!(err, ConfigError::UndefinedEnv(_)));
         std::env::remove_var("TYO3_TEST_VAR");
+    }
+
+    #[test]
+    fn env_expanded_secret_is_not_treated_as_inline_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = Sidecar::new(dir.path());
+        std::fs::create_dir_all(dir.path().join(".tyo3")).unwrap();
+        std::env::set_var("TYO3_TEST_SECRET", "sk-live_env_secret_value");
+        std::fs::write(
+            sidecar.config_path(),
+            r#"
+schema_version = 1
+[hashing.profiles.structure]
+[generators.g]
+type = "http"
+endpoint = "${TYO3_TEST_SECRET}"
+"#,
+        )
+        .unwrap();
+
+        let cfg = RawConfig::load(&sidecar).unwrap();
+        validate(cfg).unwrap();
+
+        std::env::remove_var("TYO3_TEST_SECRET");
     }
 
     fn parse_cfg(text: &str) -> RawConfig {
