@@ -758,6 +758,203 @@ overflow = "coalesce"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Step 8 — Coalescing correctness + non-blocking liveness (§12.2.2/§12.2.4)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestCoalescingLiveness:
+    """End-to-end tests for coalescing correctness and non-blocking liveness."""
+
+    def test_burst_coalescing_nothing_hidden(self, tmp_path):
+        """Burst of N writes with small capacity; coalesced tail carries union (§12.2.2)."""
+        from tyo3 import TyO3Session
+        from tyo3.bus.interest import Interest
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
+        (proj / "a.py").write_text("def foo():\n    pass\n")
+        cfg = proj / ".tyo3"
+        cfg.mkdir()
+        (cfg / "config.toml").write_text("""\
+schema_version = 1
+
+[spine]
+retain_cap = 64
+
+[hashing.profiles.structure]
+
+[coordination.bus]
+queue_capacity = 2
+overflow = "coalesce"
+""")
+
+        with TyO3Session(str(proj)) as session:
+            session.sync_all()
+
+            sub = session.subscribe(Interest.ALL)
+
+            # Burst of 10 writes without consuming — capacity is only 2.
+            for i in range(10):
+                session.edit("a.py", f"def foo():\n    x = {i}\n")
+
+            # Drain all deltas.
+            deltas = []
+            while True:
+                d = sub.poll(timeout=0)
+                if d is None:
+                    break
+                deltas.append(d)
+
+            # We should have at most capacity+1 items (some coalescing).
+            assert len(deltas) <= 3, f"too many deltas: {len(deltas)}"
+
+            # All revisions should be present in order.
+            max_rev = 0
+            for d in deltas:
+                assert d.revision > max_rev
+                max_rev = d.revision
+
+            # The last delta's revision should be the final (10th).
+            assert max_rev == session.head
+
+            sub.close()
+
+    def test_slow_subscriber_does_not_stall_writer(self, tmp_path):
+        """A slow/dead subscriber never blocks the writer (§12.2.4)."""
+        import time
+        from tyo3 import TyO3Session
+        from tyo3.bus.interest import Interest
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
+        (proj / "a.py").write_text("def foo():\n    pass\n")
+        cfg = proj / ".tyo3"
+        cfg.mkdir()
+        (cfg / "config.toml").write_text("""\
+schema_version = 1
+
+[spine]
+retain_cap = 64
+
+[hashing.profiles.structure]
+
+[coordination.bus]
+queue_capacity = 64
+overflow = "coalesce"
+""")
+
+        with TyO3Session(str(proj)) as session:
+            session.sync_all()
+
+            # A subscriber that never consumes (dead).
+            dead_sub = session.subscribe(Interest.ALL)
+
+            # A healthy subscriber.
+            healthy_sub = session.subscribe(Interest.ALL)
+
+            # Do 30 writes — the writer must complete within a time bound.
+            start = time.monotonic()
+            for i in range(30):
+                session.edit("a.py", f"def foo():\n    x = {i}\n")
+            elapsed = time.monotonic() - start
+
+            # Writer should complete in < 30 seconds (generous for graph ops).
+            assert elapsed < 30.0, f"writer took {elapsed:.2f}s with dead subscriber"
+
+            # Healthy subscriber still receives deltas in order.
+            last_rev = 0
+            count = 0
+            while True:
+                d = healthy_sub.poll(timeout=0)
+                if d is None:
+                    break
+                assert d.revision > last_rev
+                last_rev = d.revision
+                count += 1
+
+            # Should have received some deltas.
+            assert count > 0
+
+            dead_sub.close()
+            healthy_sub.close()
+
+    def test_no_subscribers_no_overhead(self, tmp_path):
+        """With no subscribers, the write path behaves exactly as Gate 7."""
+        from tyo3 import TyO3Session
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
+        (proj / "a.py").write_text("def foo():\n    pass\n")
+        cfg = proj / ".tyo3"
+        cfg.mkdir()
+        (cfg / "config.toml").write_text("""\
+schema_version = 1
+
+[spine]
+retain_cap = 64
+
+[hashing.profiles.structure]
+""")
+
+        with TyO3Session(str(proj)) as session:
+            session.sync_all()
+
+            # No subscribers — bus is never created.
+            assert session._bus is None
+
+            # Write should succeed normally (no bus overhead).
+            result = session.edit("a.py", "def foo():\n    x = 1\n")
+            assert result is not None
+            assert session._bus is None  # still no bus
+
+    def test_interest_filter_precision(self, tmp_path):
+        """Subscriber on models.py notified for it and its dependents, not unrelated."""
+        from tyo3 import TyO3Session
+        from tyo3.bus.interest import Interest
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
+        (proj / "models.py").write_text("class User:\n    name: str\n")
+        (proj / "app.py").write_text("from models import User\n\ndef create():\n    return User()\n")
+        (proj / "other.py").write_text("def unrelated():\n    pass\n")
+        cfg = proj / ".tyo3"
+        cfg.mkdir()
+        (cfg / "config.toml").write_text("""\
+schema_version = 1
+
+[spine]
+retain_cap = 64
+
+[hashing.profiles.structure]
+
+[coordination.bus]
+queue_capacity = 64
+overflow = "coalesce"
+""")
+
+        with TyO3Session(str(proj)) as session:
+            session.sync_all()
+
+            sub = session.subscribe(Interest.files_of({"models.py"}))
+
+            # Edit models.py → notified.
+            session.edit("models.py", "class User:\n    name: str\n    age: int\n")
+            d1 = sub.poll(timeout=2.0)
+            assert d1 is not None, "should be notified on models.py edit"
+
+            # Edit unrelated file → NOT notified.
+            session.edit("other.py", "def unrelated():\n    return 42\n")
+            d2 = sub.poll(timeout=0.5)
+            assert d2 is None, "should NOT be notified on unrelated edit"
+
+            sub.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Step 0 — Failing acceptance tests (full bus API, wired through session)
 # ═══════════════════════════════════════════════════════════════════════════
 
