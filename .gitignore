@@ -21,7 +21,8 @@ secretspec.toml
 devenv.local.yaml
 .vscode
 _index.md
-
+.claude/scheduled_tasks.lock
+.claude/**
 
 # C extensions
 *.so
