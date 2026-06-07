@@ -113,6 +113,12 @@ impl IdentityRegistry {
         self.by_id.len()
     }
 
+    /// Return the `IdentityStatus` for a given `DurableId`.
+    /// Returns `None` if the id is not known to the registry.
+    pub fn status_of(&self, id: &DurableId) -> Option<IdentityStatus> {
+        self.by_id.get(id).map(|a| a.status)
+    }
+
     // ── Mutators (keep indexes consistent) ──────────────────────────────
 
     /// Insert a new anchor.  Panics (debug) / overwrites (release) if an

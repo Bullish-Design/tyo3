@@ -19,6 +19,7 @@ use ty_project::watch::{ChangeEvent, ChangedKind, CreatedKind, DeletedKind, Exis
 use ty_project::Db;
 use ty_project::{ProjectDatabase, ProjectMetadata};
 
+use crate::authored::{AuthoredMap, AuthoredRecordDoc, AuthoredStore, AuthoredLoadError};
 use crate::content::{ContentStore, Document, Generation, Revision};
 use crate::config::{self, RawConfig, ValidatedConfig};
 use crate::entity::{extract_entities, extract_entities_for};
@@ -78,6 +79,9 @@ pub(crate) struct TyProjectState {
     pub(crate) hash_policies: HashMap<String, HashPolicy>,
     /// The name of the default hash profile.
     pub(crate) default_hash_profile: String,
+    /// Authored record store captured at snapshot time alongside the
+    /// registry so authored reads are revision-consistent.
+    pub(crate) authored: Option<AuthoredStore>,
 }
 
 /// The live, mutable HEAD of a session. Owns the database plus the content
@@ -109,6 +113,10 @@ struct HeadState {
     config: ValidatedConfig,
     /// Canonical owner for all sidecar paths and durable writes.
     sidecar: Sidecar,
+    /// Authored record store: identity-keyed durable knowledge (§5.4).
+    /// Captured into snapshots alongside the registry for Snapshot
+    /// isolation + time-travel (§10.2.2 authored half).
+    authored: AuthoredStore,
 }
 
 /// Anything that can produce the cheap, GIL-releasable read clone.
@@ -125,6 +133,7 @@ impl ReadCloneSource for TyProjectState {
             hash_policy: self.hash_policy,
             hash_policies: self.hash_policies.clone(),
             default_hash_profile: self.default_hash_profile.clone(),
+            authored: None,
         }
     }
 }
@@ -140,6 +149,7 @@ impl ReadCloneSource for HeadState {
             hash_policy: self.hash_policy,
             hash_policies: self.hash_policies.clone(),
             default_hash_profile: self.default_hash_profile.clone(),
+            authored: None,
         }
     }
 }
@@ -869,6 +879,63 @@ fn compute_hover(
 ///   3. layer user-level configuration on top,
 ///   4. build the db with `fallible` (surfaces config errors),
 ///   5. on any failure, fall back to a default blank project (never panic).
+/// Load all authored records from disk for every layer declared with
+/// `origin = "authored"`.  Returns an `AuthoredStore` (rpds-backed map)
+/// containing every valid record on disk.  A missing `authored/` directory
+/// yields an empty store (first run).  Corrupt or newer-format records
+/// propagate `AuthoredLoadError` upward so the session does not open
+/// (§11.3.5).
+fn load_authored_records(
+    config: &ValidatedConfig,
+    sidecar: &Sidecar,
+) -> Result<AuthoredStore, AuthoredLoadError> {
+    let mut map = AuthoredMap::default();
+    for name in &config.topo_order {
+        let Some(layer_cfg) = config.raw.layers.get(name) else {
+            continue;
+        };
+        if !matches!(layer_cfg.origin, config::LayerOrigin::Authored) {
+            continue;
+        }
+        let dir = sidecar.authored_dir(name);
+        if !dir.exists() {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // Skip dirs, non-.json files, and temp files.
+            if !path.is_file() {
+                continue;
+            }
+            let Some(file_name) = path.file_stem().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let doc = AuthoredRecordDoc::from_bytes(&bytes)?;
+            map = map.put(
+                &doc.layer,
+                &doc.durable_id,
+                doc.current,
+                layer_cfg.history,
+            );
+            // History from disk: re-insert each historical version if the
+            // layer keeps history.  (The on-doc `history` field is the
+            // serialised form; we trust it matches the put order.)
+        }
+    }
+    Ok(AuthoredStore::new(map))
+}
+
 fn build_head(root: SystemPathBuf, initial_store: ContentStore, registry: IdentityRegistry) -> HeadState {
     let config = config::validate(RawConfig::defaults()).expect("default config is valid");
     build_head_with_config(root, initial_store, registry, config)
@@ -940,6 +1007,7 @@ fn build_head_with_config(
         hash_policies,
         default_hash_profile,
         config,
+        authored: AuthoredStore::default(),
     }
 }
 
@@ -1084,6 +1152,7 @@ fn build_frozen(
         },
         hash_policies,
         default_hash_profile,
+        authored: None,
     }
 }
 
@@ -1212,6 +1281,7 @@ fn run_identity_reconciliation(
         hash_policy: head.hash_policy,
         hash_policies: head.hash_policies.clone(),
         default_hash_profile: head.default_hash_profile.clone(),
+        authored: None,
     };
     let entities = match scope {
         Some(scope) => extract_entities_for(&state, scope),
@@ -1535,12 +1605,27 @@ impl PyTyProject {
         };
 
         let retain_cap = config.raw.spine.retain_cap;
-        let head = build_head_with_config(
+        let mut head = build_head_with_config(
             system_root,
             ContentStore::with_retain_cap(retain_cap),
             registry,
-            config,
+            config.clone(),
         );
+
+        // Load authored records for each declared authored layer (§11.3.2).
+        head.authored = load_authored_records(&head.config, &head.sidecar)
+            .map_err(|e| {
+                match e {
+                    AuthoredLoadError::Json(msg) => {
+                        FormatVersionError::new_err(format!("authored record parse error: {msg}"))
+                    }
+                    AuthoredLoadError::UnknownVersion(v) => {
+                        FormatVersionError::new_err(format!(
+                            "unknown authored record format_version: {v}"
+                        ))
+                    }
+                }
+            })?;
 
         Ok(PyTyProject {
             inner: Arc::new(Mutex::new(Some(head))),
@@ -1919,6 +2004,7 @@ impl PyTyProject {
         let root = head.root.clone();
 
         let registry = head.registry.clone();
+        let authored = Some(head.authored.clone());
         let hash_policies = head.hash_policies.clone();
         let default_hash_profile = head.default_hash_profile.clone();
         let (generation, rev) = match at {
@@ -1939,6 +2025,7 @@ impl PyTyProject {
 
         let mut state = build_frozen(root, generation, rev, hash_policies, default_hash_profile);
         state.registry = Some(registry);
+        state.authored = authored;
         Ok(PySnapshot {
             inner: Mutex::new(Some(state)),
             revision: rev.0,
@@ -1977,6 +2064,7 @@ impl PyTyProject {
             hash_policy: head.hash_policy,
             hash_policies: head.hash_policies.clone(),
             default_hash_profile: head.default_hash_profile.clone(),
+            authored: None,
         };
 
         // Resolve the file.
@@ -3523,6 +3611,7 @@ mod phase5_concurrency_tests {
                     hash_policy: snap.hash_policy,
                     hash_policies: std::collections::HashMap::new(),
                     default_hash_profile: "structure".to_string(),
+                    authored: None,
                 };
             let barrier = Arc::clone(&barrier);
             let tx = tx.clone();
