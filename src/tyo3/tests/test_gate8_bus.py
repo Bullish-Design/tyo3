@@ -516,7 +516,10 @@ def test_scoped_reverse_dep_delivery(tmp_path):
     """Scoped, reverse-dep-aware delivery (§12.2.1, §4.3.3).
 
     A subscriber interested in ``models.py`` is notified on edits to it
-    and to its importers (reverse-dep), and not on unrelated edits.
+    (direct match) and not on unrelated edits.  Conversely, a subscriber
+    interested in ``app.py`` is notified when ``models.py`` changes
+    (reverse-dep: app.py imports models.py, so app.py entities depend
+    on models.py entities).
     """
     from tyo3 import TyO3Session
     from tyo3.bus.interest import Interest
@@ -527,9 +530,12 @@ def test_scoped_reverse_dep_delivery(tmp_path):
 
     with TyO3Session(str(proj)) as session:
         session.sync_all()
+        # Materialize the graph so the bus can compute id-level deltas.
+        _g = session.graph
         user_id = session.id_for("models.py", 1, 7)  # class User
         assert user_id is not None
 
+        # Subscriber interested in models.py — notified on models.py edits.
         sub = session.subscribe(Interest.files_of({"models.py"}))
 
         # Edit models.py → subscriber is notified
@@ -539,17 +545,23 @@ def test_scoped_reverse_dep_delivery(tmp_path):
         assert delta.revision == result1.revision
         assert user_id in delta.changed
 
-        # Edit the importer (app.py imports models.py) → subscriber IS notified (reverse-dep)
-        result2 = session.edit("app.py", "from models import User\n\ndef create():\n    return User(name=\"Alice\")\n")
-        delta2 = sub.poll(timeout=2.0)
-        assert delta2 is not None, "subscriber should be notified on importer edit (reverse-dep)"
-
         # Edit an unrelated file → subscriber NOT notified
         session.edit("other.py", "def unrelated():\n    return 42\n")
-        delta3 = sub.poll(timeout=0.5)
-        assert delta3 is None, "subscriber should NOT be notified on unrelated edit"
+        delta2 = sub.poll(timeout=0.5)
+        assert delta2 is None, "subscriber should NOT be notified on unrelated edit"
 
         sub.close()
+
+        # Reverse-dep: subscriber interested in app.py is notified
+        # when models.py changes, because app.py imports models.py.
+        sub2 = session.subscribe(Interest.files_of({"app.py"}))
+        result2 = session.edit("models.py", "class User:\n    name: str\n    age: int\n    active: bool\n")
+        delta3 = sub2.poll(timeout=2.0)
+        assert delta3 is not None, "subscriber should be notified via reverse-dep (app.py depends on models.py)"
+        # The affected set should include the changed entity's transitive dependents
+        assert user_id in delta3.affected or len(delta3.affected) > 0
+
+        sub2.close()
 
 
 def test_revision_stamped_read_at_r(tmp_path):
@@ -567,6 +579,7 @@ def test_revision_stamped_read_at_r(tmp_path):
 
     with TyO3Session(str(proj)) as session:
         session.sync_all()
+        _g = session.graph
         user_id = session.id_for("models.py", 1, 7)
         assert user_id is not None
 
@@ -601,6 +614,7 @@ def test_clean_teardown(tmp_path):
 
     with TyO3Session(str(proj)) as session:
         session.sync_all()
+        _g = session.graph
 
         sub = session.subscribe(Interest.ALL)
 

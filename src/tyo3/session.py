@@ -687,8 +687,13 @@ class TyO3Session(_ReadOps):
         self._head_snap: Any = None  # cached native head snapshot (current revision)
         self._head_graph: Any = None  # lazily-built mutable CodeGraph for HEAD
         self._derivation: Any = None  # lazily-built DerivationDAG
+        self._bus: Any = None  # lazily-built Bus (Gate 8)
+        self._watcher_thread: Any = None  # auto-poll daemon thread
+        self._watcher_stop: Any = None  # threading.Event for watcher stop
         from tyo3.sidecar import Sidecar
         self._sidecar = Sidecar(str(root_str))
+        # Read coordination config from sidecar (defaults if absent).
+        self._coord_cfg = self._read_coordination_config()
 
     @property
     def root(self) -> StdPath:
@@ -750,6 +755,97 @@ class TyO3Session(_ReadOps):
         dirty = set(result.created) | set(result.changed)
         dag.invalidate(self, dirty, set(result.deleted), result.revision)
 
+    # ── Coordination config (Gate 8) ───────────────────────────────
+
+    def _read_coordination_config(self) -> dict:
+        """Read coordination settings from the sidecar config.toml.
+
+        Returns defaults when the file is absent or the section is missing.
+        """
+        cfg = {
+            "bus_capacity": 1024,
+            "bus_overflow": "coalesce",
+            "watcher_enabled": False,
+            "watcher_debounce_ms": 200,
+        }
+        try:
+            import tomllib
+            config_path = self._sidecar.config_path()
+            if config_path.exists():
+                with open(config_path, "rb") as f:
+                    data = tomllib.load(f)
+                bus = data.get("coordination", {}).get("bus", {})
+                watcher = data.get("coordination", {}).get("watcher", {})
+                if isinstance(bus, dict):
+                    cfg["bus_capacity"] = bus.get("queue_capacity", cfg["bus_capacity"])
+                    cfg["bus_overflow"] = bus.get("overflow", cfg["bus_overflow"])
+                if isinstance(watcher, dict):
+                    cfg["watcher_enabled"] = watcher.get("enabled", cfg["watcher_enabled"])
+                    cfg["watcher_debounce_ms"] = watcher.get("debounce_ms", cfg["watcher_debounce_ms"])
+        except Exception:
+            pass
+        return cfg
+
+    # ── Watcher lifecycle (Gate 8 Step 7) ──────────────────────────
+
+    def _stop_watcher_loop(self) -> None:
+        """Stop the watcher auto-poll daemon thread (Step 7).
+
+        No-op if the watcher was never started or the attributes
+        don't exist (session constructed without __init__).
+        """
+        wt = getattr(self, "_watcher_thread", None)
+        ws = getattr(self, "_watcher_stop", None)
+        if wt is not None:
+            if ws is not None:
+                ws.set()
+            if wt.is_alive():
+                wt.join(timeout=2.0)
+            self._watcher_thread = None
+            self._watcher_stop = None
+
+    # ── Subscription bus (Gate 8) ──────────────────────────────────
+
+    def _get_bus(self):
+        """Lazily build the Bus from coordination config."""
+        if self._bus is None:
+            from tyo3.bus.bus import Bus
+            self._bus = Bus(
+                capacity=self._coord_cfg["bus_capacity"],
+                overflow=self._coord_cfg["bus_overflow"],
+            )
+        return self._bus
+
+    def subscribe(self, interest):
+        """Register a subscriber on the delta subscription bus.
+
+        Returns a ``Subscription`` that receives scoped deltas for
+        every committed revision whose transitive affected set
+        intersects *interest* (§12.2.1).
+        """
+        self._check_open()
+        return self._get_bus().subscribe(interest)
+
+    def _publish_delta(self, result: SyncResult) -> None:
+        """Publish a committed delta to the bus after publication.
+
+        Called from every write method after ``_apply_graph_delta``,
+        under the session-level write lock (single-threaded writes
+        guarantee revision order).
+
+        Fast no-op when no subscribers are registered.
+        """
+        bus = self._bus
+        if bus is None or not bus.has_subscribers():
+            return
+        from tyo3.bus.delta import Delta
+        # Use the head graph if it was already materialized (it was updated
+        # by _apply_graph_delta just before this call).  If not materialized,
+        # pass None — the delta will carry file paths as ids (acceptable
+        # when the graph was never built).
+        delta = Delta.from_sync_result(result, self._head_graph, root=str(self._root))
+        bus.publish(delta)
+
     # ── Head snapshot caching ───────────────────────────────────────
 
     def _native(self) -> Any:
@@ -809,6 +905,7 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in edit(): {e}") from e
         result = SyncResult.model_validate(native_result)
         self._apply_graph_delta(result)
+        self._publish_delta(result)
         return result
 
     def edit_many(self, edits: dict[str, str]) -> SyncResult:
@@ -823,6 +920,7 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in edit_many(): {e}") from e
         result = SyncResult.model_validate(native_result)
         self._apply_graph_delta(result)
+        self._publish_delta(result)
         return result
 
     def edit_virtual(self, uri: str, text: str) -> SyncResult:
@@ -838,6 +936,7 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in edit_virtual(): {e}") from e
         result = SyncResult.model_validate(native_result)
         self._apply_graph_delta(result)
+        self._publish_delta(result)
         return result
 
     def sync_path(self, path: str | StdPath) -> SyncResult:
@@ -853,6 +952,7 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in sync_path(): {e}") from e
         result = SyncResult.model_validate(native_result)
         self._apply_graph_delta(result)
+        self._publish_delta(result)
         return result
 
     def discard(self, path: str | StdPath) -> SyncResult:
@@ -882,6 +982,7 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in sync_all(): {e}") from e
         result = SyncResult.model_validate(native_result)
         self._apply_graph_delta(result)
+        self._publish_delta(result)
         return result
 
     # ── File watching (Phase 8) ────────────────────────────────────
@@ -1092,6 +1193,7 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in author(): {e}") from e
         result = SyncResult.model_validate(native)
         # Do NOT call _apply_graph_delta — authored writes produce no code/derived delta.
+        self._publish_delta(result)
         return result
 
     def authored(self, layer: str, durable_id: str) -> AuthoredValue:
@@ -1199,6 +1301,13 @@ class TyO3Session(_ReadOps):
         """
         if self._closed:
             return
+        # Stop watcher auto-poll loop (Step 7).
+        self._stop_watcher_loop()
+        # Close the bus (closes all subscriptions).
+        bus = getattr(self, "_bus", None)
+        if bus is not None:
+            bus.close()
+            self._bus = None
         self._invalidate_head_snap()
         self._head_graph = None
         self._inner.close()

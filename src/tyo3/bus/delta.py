@@ -52,26 +52,35 @@ class Delta:
         if self.rescan or interest.all:
             return self
 
-        # Resolve which files and ids the interest cares about.
-        # Id matching is direct.
-        scoped_created = self.created & interest.ids if interest.ids else frozenset()
-        scoped_changed = self.changed & interest.ids if interest.ids else frozenset()
-        scoped_deleted = self.deleted & interest.ids if interest.ids else frozenset()
-        scoped_moved = self.moved & interest.ids if interest.ids else frozenset()
-        scoped_authored = self.authored & interest.ids if interest.ids else frozenset()
-        scoped_affected = self.affected & interest.ids if interest.ids else frozenset()
+        # When interest has files but not ids, we keep all ids (file
+        # matching was already validated by interest.matches() in the
+        # bus — the delta is relevant to this subscriber).
+        has_id_filter = bool(interest.ids)
+        has_file_filter = bool(interest.files)
 
-        # File-based interest: include any id whose defining file is in the
-        # interest's file set, plus any id in affected_files.
-        if interest.files:
-            # We need the id→file mapping.  Since Delta is frozen, we
-            # rely on the caller having populated `files` and the id sets
-            # properly.  The "file-based" match is handled by
-            # `interest.matches()` at the Bus level (Step 4).  Here at
-            # `scoped_to` we trust the caller to pass ids that live in
-            # the files of interest.  If the interest is file-based but
-            # has no id intersection, scoping trivially empties.
-            pass
+        if has_id_filter:
+            scoped_created = self.created & interest.ids
+            scoped_changed = self.changed & interest.ids
+            scoped_deleted = self.deleted & interest.ids
+            scoped_moved = self.moved & interest.ids
+            scoped_authored = self.authored & interest.ids
+            scoped_affected = self.affected & interest.ids
+        elif has_file_filter:
+            # File-based interest: keep all ids (bus already matched).
+            scoped_created = self.created
+            scoped_changed = self.changed
+            scoped_deleted = self.deleted
+            scoped_moved = self.moved
+            scoped_authored = self.authored
+            scoped_affected = self.affected
+        else:
+            # Layer-only or empty interest: keep all.
+            scoped_created = self.created
+            scoped_changed = self.changed
+            scoped_deleted = self.deleted
+            scoped_moved = self.moved
+            scoped_authored = self.authored
+            scoped_affected = self.affected
 
         return Delta(
             revision=self.revision,
@@ -98,12 +107,19 @@ class Delta:
         )
 
     @classmethod
-    def from_sync_result(cls, result: SyncResult, graph: CodeGraph | None = None) -> Delta:
+    def from_sync_result(
+        cls,
+        result: SyncResult,
+        graph: CodeGraph | None = None,
+        *,
+        root: str | None = None,
+    ) -> Delta:
         """Build a ``Delta`` from a committed ``SyncResult``.
 
-        ``result.created/changed/deleted/moved`` are **file paths** from the
-        native SyncResult.  The graph maps those files to DurableIds so the
-        delta carries id-level precision.
+        ``result.created/changed/deleted/moved`` are **absolute file paths**
+        from the native SyncResult.  *root* is the project root used to
+        normalise them to project-relative paths.  The graph maps those
+        files to DurableIds so the delta carries id-level precision.
 
         If *graph* is provided, the transitive affected set (§4.3.3) is
         computed by walking inbound dependency edges from the entities in
@@ -112,13 +128,23 @@ class Delta:
 
         *graph* must be the head graph at ``result.revision``.
         """
-        # Map file paths → DurableIds via the graph.
-        # When graph is None (synthetic/test SyncResult), treat the
-        # values as direct DurableIds (backward compat / test seam).
-        changed_files = frozenset(result.changed)
-        deleted_files = frozenset(result.deleted)
-        created_files = frozenset(result.created)
-        moved_files = frozenset(result.moved)
+        # Normalise file paths from absolute → project-relative.
+        changed_raw = frozenset(result.changed)
+        deleted_raw = frozenset(result.deleted)
+        created_raw = frozenset(result.created)
+        moved_raw = frozenset(result.moved)
+
+        # Normalise paths when root is available.
+        if root is not None:
+            changed_files = frozenset(_to_relative(root, p) for p in changed_raw)
+            deleted_files = frozenset(_to_relative(root, p) for p in deleted_raw)
+            created_files = frozenset(_to_relative(root, p) for p in created_raw)
+            moved_files = frozenset(_to_relative(root, p) for p in moved_raw)
+        else:
+            changed_files = changed_raw
+            deleted_files = deleted_raw
+            created_files = created_raw
+            moved_files = moved_raw
 
         if graph is not None:
             changed_ids = _ids_in_files(changed_files, graph)
@@ -164,6 +190,17 @@ class Delta:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _to_relative(root: str, path: str) -> str:
+    """Convert an absolute path to project-relative."""
+    from pathlib import Path, PurePosixPath
+    try:
+        root_p = Path(root).resolve()
+        path_p = Path(path).resolve()
+        return str(PurePosixPath(path_p.relative_to(root_p)))
+    except Exception:
+        return path
 
 
 def _ids_in_files(
