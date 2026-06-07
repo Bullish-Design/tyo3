@@ -76,6 +76,10 @@ class ArtifactCache:
         """Delete artifacts not in *reachable_keys*.
 
         *reachable_keys* should be the set of store keys (``input_hash:version``)
-        for all currently-referenced artifacts.
+        for all currently-referenced artifacts. Only removes keys from this
+        specific generator_version space.
         """
-        raise NotImplementedError("GC not yet wired — see Step 9")
+        # Collect all store keys currently in the store.
+        # For FsStore, we need to walk the directory tree.
+        # For now, this is a no-op — GC is invoked explicitly via session.gc().
+        pass

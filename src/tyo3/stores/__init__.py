@@ -26,6 +26,18 @@ def open_store(store_cfg: Any, sidecar: Sidecar, layer: str | None = None) -> St
     if backend == "fs":
         root = _store_root(cfg, sidecar, layer)
         return FsStore(root)
+    if backend == "lancedb":
+        try:
+            importlib.import_module("lancedb")
+        except ImportError as exc:
+            raise StoreBackendUnavailable(
+                "Store backend 'lancedb' requires optional package 'lancedb'"
+            ) from exc
+        root = _store_root(cfg, sidecar, layer)
+        dim = cfg.get("dim", 1536)
+        metric = cfg.get("metric", "cosine")
+        from tyo3.stores.lancedb_store import LanceDbStore
+        return LanceDbStore(str(root), dim=dim, metric=metric)
     if backend in _OPTIONAL_BACKENDS:
         module = _OPTIONAL_BACKENDS[backend]
         try:

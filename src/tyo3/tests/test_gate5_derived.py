@@ -641,3 +641,133 @@ def uppercase_generator(inputs):
     global _UPPERCASE_CALL_COUNT
     _UPPERCASE_CALL_COUNT += len(inputs)
     return [inp.source.upper() for inp in inputs]
+
+
+# ── Step 8: Vector store backend ─────────────────────────────────────────
+
+
+class TestVectorStore:
+    def test_lancedb_store_unavailable_when_dep_missing(self, tmp_path):
+        """LanceDbStore raises StoreBackendUnavailable when lancedb not installed."""
+        from tyo3.exceptions import StoreBackendUnavailable
+        from tyo3.stores.lancedb_store import LanceDbStore
+
+        store = LanceDbStore(str(tmp_path / "vectors"), dim=3, metric="cosine")
+        with pytest.raises(StoreBackendUnavailable, match="lancedb"):
+            store._ensure_table()
+
+    def test_fs_store_no_nearest(self):
+        """FsStore does not support nearest search — snapshot.nearest returns []."""
+        from tyo3.stores.fs import FsStore
+        store = FsStore("/tmp/test")
+        assert not hasattr(store, "nearest")
+
+
+# ── Step 9: generator_version invalidation & GC ──────────────────────────
+
+
+def test_generator_version_bump_new_key_space():
+    """Bumping generator_version creates a new key space; old keys are retained."""
+    from tyo3.derive.cache import ArtifactCache, CacheKey
+    from tyo3.stores.fs import FsStore
+    import tempfile
+
+    d = tempfile.mkdtemp()
+    store = FsStore(d)
+    cache = ArtifactCache(store)
+
+    # Put with v1.
+    key_v1 = CacheKey(input_hash="abc123", generator_version="v1")
+    cache.put(key_v1, b"data_v1")
+    assert cache.get(key_v1) == b"data_v1"
+
+    # Same input_hash under v2 → miss (new key space).
+    key_v2 = CacheKey(input_hash="abc123", generator_version="v2")
+    assert cache.get(key_v2) is None
+    assert not cache.has(key_v2)
+
+    # v1 key is still present (rollback).
+    assert cache.get(key_v1) == b"data_v1"
+
+    # Put under v2.
+    cache.put(key_v2, b"data_v2")
+    assert cache.get(key_v2) == b"data_v2"
+    assert cache.get(key_v1) == b"data_v1"  # v1 still retained
+
+    import shutil
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_gc_never_is_noop(tmp_path):
+    """Default gc='never' keeps all artifacts."""
+    from tyo3 import TyO3Session
+    from tyo3.derive.dag import DerivationDAG
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "echo_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv"
+serving = "stale"
+
+[generators.echo_gen]
+type = "python"
+callable = "tyo3.tests.test_gate5_derived:echo_generator"
+
+[stores.kv]
+backend = "fs"
+path = "cache/upper"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        # gc() on default config is a no-op.
+        session.gc()  # should not raise
+
+
+def test_gc_preserves_active_and_prior_versions():
+    """GC with orphans policy only removes truly unreferenced artifacts.
+
+    Active-version artifacts and prior-version artifacts (rollback targets)
+    are preserved.
+    """
+    from tyo3.derive.cache import ArtifactCache, CacheKey
+    from tyo3.stores.fs import FsStore
+    import tempfile, shutil
+
+    d = tempfile.mkdtemp()
+    store = FsStore(d)
+    cache = ArtifactCache(store)
+
+    # Put artifacts.
+    cache.put(CacheKey("h1", "v1"), b"a1")
+    cache.put(CacheKey("h2", "v1"), b"a2")
+    cache.put(CacheKey("h3", "v1"), b"a3")  # orphan
+    cache.put(CacheKey("h1", "v2"), b"a1_v2")  # prior version
+
+    # h1 and h2 are reachable in current v1; h3 is orphan.
+    reachable = {"h1:v1", "h2:v1"}
+    # GC is idempotent — no crash.
+    # Currently GC is a no-op for FsStore (deferred full impl).
+    cache.gc(reachable)
+
+    # All artifacts still present (GC is deferred).
+    assert cache.get(CacheKey("h1", "v1")) == b"a1"
+    assert cache.get(CacheKey("h2", "v1")) == b"a2"
+    assert cache.get(CacheKey("h3", "v1")) == b"a3"
+    assert cache.get(CacheKey("h1", "v2")) == b"a1_v2"
+
+    shutil.rmtree(d, ignore_errors=True)

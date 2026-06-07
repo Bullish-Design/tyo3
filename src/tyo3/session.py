@@ -1000,6 +1000,18 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in orphaned(): {e}") from e
 
+    def gc(self) -> None:
+        """Explicit GC pass: evict orphaned derived artifacts (Step 9).
+
+        Only layers with ``gc = "orphans"`` are affected; ``gc = "never"``
+        (the default) keeps everything. GC is never run implicitly.
+        """
+        self._check_open()
+        dag = self._get_derivation()
+        if dag.is_empty:
+            return
+        dag.gc_orphans(self)
+
     def close(self) -> None:
         """Close the project and free Rust-side resources.
 
@@ -1135,6 +1147,71 @@ class Snapshot(_ReadOps):
                 status = "failed" if durable_id in L._failed else "stale"
                 return DerivedValue(last_art, status, self.revision, layer)
         return DerivedValue(None, "absent", self.revision, layer)
+
+    def nearest(
+        self, query_vector: list[float], k: int = 10, *, layer: str | None = None
+    ) -> list[tuple[str, float]]:
+        """Nearest-neighbour search against a vector-backed derived layer.
+
+        Returns list of ``(durable_id, score)`` for entities with the nearest
+        vectors at this revision.
+        """
+        self._check_open()
+        if self._derivation_getter is None:
+            return []
+        dag = self._derivation_getter()
+        if dag.is_empty:
+            return []
+
+        # Default to the first vector-backed layer.
+        if layer is None:
+            for name in dag._topo_order:
+                if name in dag._layer_map:
+                    L = dag._layer_map[name]
+                    if hasattr(L.cache._store, "nearest"):
+                        layer = name
+                        break
+        if layer is None:
+            return []
+
+        L = dag.layer(layer)
+        store = L.cache._store
+        if not hasattr(store, "nearest"):
+            return []
+
+        # Query the vector backend.
+        results: list[tuple[str, float]] = store.nearest(query_vector, k)  # type: ignore[union-attr]
+        if not results:
+            return []
+
+        # Map input_hash keys back to DurableIds at this revision.
+        g = self.graph()
+        hash_to_ids: dict[str, list[str]] = {}
+        for node_idx in g._graph.node_indices():
+            node = g._graph[node_idx]
+            for profile, h in node.content_hashes.items():
+                hash_to_ids.setdefault(h, []).append(node.durable_id)
+
+        mapped: list[tuple[str, float]] = []
+        seen: set[str] = set()
+        for store_key, score in results:
+            # Store key is "input_hash:version" — extract input_hash.
+            input_hash = store_key.split(":")[0] if ":" in store_key else store_key
+            ids = hash_to_ids.get(input_hash, [])
+            for did in ids:
+                if did not in seen:
+                    seen.add(did)
+                    mapped.append((did, score))
+
+        return mapped
+
+    def embedding(self, durable_id: str) -> DerivedValue:
+        """Convenience: derived value from the 'embeddings' layer."""
+        return self.derived("embeddings", durable_id)
+
+    def docstring(self, durable_id: str) -> DerivedValue:
+        """Convenience: derived value from the 'docstrings' layer."""
+        return self.derived("docstrings", durable_id)
 
     def close(self) -> None:
         """Release the pinned revision. Safe to call multiple times."""
