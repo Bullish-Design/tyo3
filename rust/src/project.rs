@@ -73,6 +73,11 @@ pub(crate) struct TyProjectState {
     pub(crate) root: SystemPathBuf,
     pub(crate) registry: Option<IdentityRegistry>,
     pub(crate) hash_policy: HashPolicy,
+    /// Per-profile hash policies derived from the validated config.
+    /// Map key is the profile name (e.g. "structure", "semantic").
+    pub(crate) hash_policies: HashMap<String, HashPolicy>,
+    /// The name of the default hash profile.
+    pub(crate) default_hash_profile: String,
 }
 
 /// The live, mutable HEAD of a session. Owns the database plus the content
@@ -96,6 +101,10 @@ struct HeadState {
     /// Code-layer identity hash policy. Defaults to Gate 2 behavior until
     /// Step 5 loads it from validated config.
     hash_policy: HashPolicy,
+    /// Per-profile hash policies derived from the validated config.
+    hash_policies: HashMap<String, HashPolicy>,
+    /// The name of the default hash profile.
+    default_hash_profile: String,
     /// Validated, defaulted project config loaded once on open.
     config: ValidatedConfig,
     /// Canonical owner for all sidecar paths and durable writes.
@@ -114,6 +123,8 @@ impl ReadCloneSource for TyProjectState {
             root: self.root.clone(),
             registry: self.registry.clone(),
             hash_policy: self.hash_policy,
+            hash_policies: self.hash_policies.clone(),
+            default_hash_profile: self.default_hash_profile.clone(),
         }
     }
 }
@@ -127,6 +138,8 @@ impl ReadCloneSource for HeadState {
             root: self.root.clone(),
             registry: Some(self.registry.clone()),
             hash_policy: self.hash_policy,
+            hash_policies: self.hash_policies.clone(),
+            default_hash_profile: self.default_hash_profile.clone(),
         }
     }
 }
@@ -287,6 +300,16 @@ fn compute_document_symbols(
     let line_index = ruff_source_file::LineIndex::from_source_text(&source_str);
 
     let mut symbols: Vec<dto::SymbolDto> = Vec::new();
+    let policies_ref = if state.hash_policies.is_empty() {
+        None
+    } else {
+        Some(&state.hash_policies)
+    };
+    let default_profile = if state.hash_policies.is_empty() {
+        None
+    } else {
+        Some(state.default_hash_profile.as_str())
+    };
     for (id, info) in hierarchical.iter() {
         convert::symbols::collect_symbols_recursive(
             &hierarchical,
@@ -298,6 +321,8 @@ fn compute_document_symbols(
             None,
             None,
             state.registry.as_ref(),
+            policies_ref,
+            default_profile,
             &mut symbols,
         );
     }
@@ -344,6 +369,7 @@ fn compute_workspace_symbols(
             None,
             None,
             None,
+            std::collections::HashMap::new(),
         );
         symbols.push(sym);
     }
@@ -894,6 +920,15 @@ fn build_head_with_config(
         }
     };
 
+    let hash_policies: HashMap<String, HashPolicy> = config
+        .raw
+        .hashing
+        .profiles
+        .iter()
+        .map(|(name, profile)| (name.clone(), HashPolicy::from(profile)))
+        .collect();
+    let default_hash_profile = config.raw.spine.default_hash_profile.clone();
+
     HeadState {
         db,
         sidecar: Sidecar::new(root.as_std_path()),
@@ -902,6 +937,8 @@ fn build_head_with_config(
         system,
         registry,
         hash_policy: config.hash_policy_for("code"),
+        hash_policies,
+        default_hash_profile,
         config,
     }
 }
@@ -995,7 +1032,13 @@ fn pre_populate_generation(
     Arc::new(map)
 }
 
-fn build_frozen(root: SystemPathBuf, generation: Generation, rev: Revision) -> TyProjectState {
+fn build_frozen(
+    root: SystemPathBuf,
+    generation: Generation,
+    rev: Revision,
+    hash_policies: HashMap<String, HashPolicy>,
+    default_hash_profile: String,
+) -> TyProjectState {
     // Pre-populate so the frozen overlay has no need for disk fallback.
     let gen_full = pre_populate_generation(&root, &generation);
     let system = OverlaySystem::frozen(root.clone(), gen_full, rev);
@@ -1034,7 +1077,13 @@ fn build_frozen(root: SystemPathBuf, generation: Generation, rev: Revision) -> T
         db,
         root,
         registry: None,
-        hash_policy: HashPolicy::default(),
+        hash_policy: if let Some(p) = hash_policies.get(&default_hash_profile) {
+            *p
+        } else {
+            HashPolicy::default()
+        },
+        hash_policies,
+        default_hash_profile,
     }
 }
 
@@ -1161,6 +1210,8 @@ fn run_identity_reconciliation(
         root: head.root.clone(),
         registry: None,
         hash_policy: head.hash_policy,
+        hash_policies: head.hash_policies.clone(),
+        default_hash_profile: head.default_hash_profile.clone(),
     };
     let entities = match scope {
         Some(scope) => extract_entities_for(&state, scope),
@@ -1868,6 +1919,8 @@ impl PyTyProject {
         let root = head.root.clone();
 
         let registry = head.registry.clone();
+        let hash_policies = head.hash_policies.clone();
+        let default_hash_profile = head.default_hash_profile.clone();
         let (generation, rev) = match at {
             None => (head.store.capture(), head.store.revision()),
             Some(r) => {
@@ -1884,7 +1937,7 @@ impl PyTyProject {
         };
         drop(guard); // release the head lock BEFORE the (cold) db build
 
-        let mut state = build_frozen(root, generation, rev);
+        let mut state = build_frozen(root, generation, rev, hash_policies, default_hash_profile);
         state.registry = Some(registry);
         Ok(PySnapshot {
             inner: Mutex::new(Some(state)),
@@ -1922,6 +1975,8 @@ impl PyTyProject {
             root: head.root.clone(),
             registry: Some(head.registry.clone()),
             hash_policy: head.hash_policy,
+            hash_policies: head.hash_policies.clone(),
+            default_hash_profile: head.default_hash_profile.clone(),
         };
 
         // Resolve the file.

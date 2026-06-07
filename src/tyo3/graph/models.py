@@ -36,6 +36,7 @@ class SymbolNode(BaseModel):
     range: Range
     selection_range: Range | None = None
     content_hash: str | None = None
+    content_hashes: dict[str, str] = {}
     external: bool = False
     package: str | None = None
 

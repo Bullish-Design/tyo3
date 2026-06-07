@@ -36,4 +36,6 @@ pub struct SymbolDto {
     pub deprecated: bool,
     pub durable_id: Option<String>,
     pub content_hash: Option<String>,
+    #[serde(default)]
+    pub content_hashes: std::collections::HashMap<String, String>,
 }

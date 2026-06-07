@@ -41,6 +41,7 @@ pub fn convert_symbol(
     qualified_name: Option<String>,
     durable_id: Option<String>,
     content_hash: Option<String>,
+    content_hashes: std::collections::HashMap<String, String>,
 ) -> SymbolDto {
     let name_range_dto = coordinates::range_to_dto_with_index(source, line_index, name_range);
     let full_range_dto = coordinates::range_to_dto_with_index(source, line_index, full_range);
@@ -58,6 +59,7 @@ pub fn convert_symbol(
         deprecated,
         durable_id,
         content_hash,
+        content_hashes,
     }
 }
 
@@ -72,6 +74,8 @@ pub fn collect_symbols_recursive(
     parent_name: Option<&str>,
     parent_identity_path: Option<&str>,
     registry: Option<&IdentityRegistry>,
+    hash_policies: Option<&std::collections::HashMap<String, crate::hash::HashPolicy>>,
+    default_profile_name: Option<&str>,
     symbols: &mut Vec<dto::SymbolDto>,
 ) {
     let qualified = match parent_name {
@@ -83,6 +87,22 @@ pub fn collect_symbols_recursive(
         None => format!("{}::{}", file_path, info.name),
     };
     let anchor = registry.and_then(|r| r.by_path(&identity_path).and_then(|id| r.get(id)));
+
+    // Compute per-profile content hashes from the entity source text.
+    let mut content_hashes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let entity_source = extract_range(source, info.full_range);
+    let default_hash = if let Some(policies) = hash_policies {
+        for (profile_name, policy) in policies {
+            let nf = crate::hash::normalise_entity_source(&entity_source, policy);
+            let h = crate::hash::hash_entity(&nf);
+            content_hashes.insert(profile_name.clone(), h.0.to_string());
+        }
+        // The default content_hash is the one under the default profile.
+        default_profile_name.and_then(|pn| content_hashes.get(pn).cloned())
+    } else {
+        // No per-profile hashes configured: use the identity anchor hash.
+        anchor.map(|a| a.content_hash.0.to_string())
+    };
 
     let sym = convert_symbol(
         source,
@@ -96,7 +116,8 @@ pub fn collect_symbols_recursive(
         parent_name,
         qualified.clone(),
         anchor.map(|a| a.id.0.clone()),
-        anchor.map(|a| a.content_hash.0.to_string()),
+        default_hash,
+        content_hashes,
     );
     symbols.push(sym);
 
@@ -116,7 +137,18 @@ pub fn collect_symbols_recursive(
             Some(own_name),
             Some(&identity_path),
             registry,
+            hash_policies,
+            default_profile_name,
             symbols,
         );
     }
+}
+
+/// Extract the source text within a `TextRange` from the full source.
+fn extract_range(source: &str, range: ruff_text_size::TextRange) -> String {
+    let start = range.start().to_usize();
+    let end = range.end().to_usize();
+    let start = start.min(source.len());
+    let end = end.min(source.len());
+    source[start..end].to_string()
 }

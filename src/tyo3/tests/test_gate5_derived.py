@@ -1,11 +1,15 @@
 """Gate 5 — Derived Layers acceptance tests.
 
 Step 0: Pin the API with a failing self-healing test FIRST.
+Step 1: Per-profile content hashes + ArtifactCache.
 """
 
 from __future__ import annotations
 
 import pytest
+
+from tyo3.derive.cache import ArtifactCache, CacheKey
+from tyo3.stores.fs import FsStore
 
 
 @pytest.mark.xfail(reason="Gate 5 Step 0: API does not exist yet — pinned for implementation")
@@ -117,6 +121,114 @@ path = "cache/upper"
             f"but calls went from {call_count_before} to {_UPPERCASE_CALL_COUNT}"
         )
         snap3.close()
+
+
+# ── Step 1: ArtifactCache tests ──────────────────────────────────────────
+
+
+class TestArtifactCache:
+    def test_put_get_round_trip(self, tmp_path):
+        store = FsStore(tmp_path / "cache")
+        cache = ArtifactCache(store)
+        key = CacheKey(input_hash="abc123", generator_version="v1")
+        cache.put(key, b"hello")
+        assert cache.get(key) == b"hello"
+        assert cache.has(key)
+
+    def test_put_same_key_equal_bytes_is_noop(self, tmp_path):
+        store = FsStore(tmp_path / "cache")
+        cache = ArtifactCache(store)
+        key = CacheKey(input_hash="abc123", generator_version="v1")
+        cache.put(key, b"hello")
+        cache.put(key, b"hello")  # no-op, should not raise
+        assert cache.get(key) == b"hello"
+
+    def test_put_same_key_different_bytes_raises(self, tmp_path):
+        store = FsStore(tmp_path / "cache")
+        cache = ArtifactCache(store)
+        key = CacheKey(input_hash="abc123", generator_version="v1")
+        cache.put(key, b"hello")
+        with pytest.raises(AssertionError, match="conflicting re-put"):
+            cache.put(key, b"different")
+
+    def test_key_serialisation_round_trip(self):
+        key = CacheKey(input_hash="abc123", generator_version="v1")
+        sk = key.to_store_key()
+        assert CacheKey.from_store_key(sk) == key
+
+
+# ── Step 1: Per-profile content hashes ───────────────────────────────────
+
+
+def test_content_hashes_on_symbols(tmp_path):
+    """Symbols from a project with profiles carry per-profile content_hashes."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text(
+        "def foo():\n"
+        "    \"\"\"A docstring.\"\"\"\n"
+        "    return 1\n"
+    )
+
+    # Config with two profiles: structure (no docstrings) and semantic (with docstrings)
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+whitespace_insensitive = true
+normalize_trailing_commas = true
+include_comments = false
+include_docstrings = false
+
+[hashing.profiles.semantic]
+whitespace_insensitive = true
+normalize_trailing_commas = true
+include_comments = true
+include_docstrings = true
+""")
+
+    with TyO3Session(str(proj)) as session:
+        symbols = session.document_symbols("a.py")
+        foo = next(s for s in symbols if s.name == "foo")
+
+        # Should have per-profile hashes.
+        assert "structure" in foo.content_hashes
+        assert "semantic" in foo.content_hashes
+
+        # Structure and semantic should differ because docstring is included in semantic.
+        assert foo.content_hashes["structure"] != foo.content_hashes["semantic"], (
+            f"structure and semantic hashes should differ when docstring changes: "
+            f"structure={foo.content_hashes['structure']}, "
+            f"semantic={foo.content_hashes['semantic']}"
+        )
+
+        # content_hash should match the default profile (structure).
+        assert foo.content_hash == foo.content_hashes["structure"]
+
+
+def test_no_config_noop_content_hashes(tmp_path):
+    """With no derived layers configured, content_hashes reflection is empty."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    with TyO3Session(str(proj)) as session:
+        symbols = session.document_symbols("a.py")
+        foo = next(s for s in symbols if s.name == "foo")
+
+        # With no config override, the default profile "structure" exists.
+        # content_hashes should contain at least structure (the default).
+        assert "structure" in foo.content_hashes
+        # content_hash should match.
+        assert foo.content_hash == foo.content_hashes["structure"]
 
 
 # ── Test generator (call-counting seam) ──────────────────────────────────

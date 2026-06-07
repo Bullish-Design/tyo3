@@ -49,6 +49,7 @@ class Symbol(BaseModel):
     deprecated: bool = False
     durable_id: str | None = None
     content_hash: str | None = None
+    content_hashes: dict[str, str] = {}
 
 
 __all__ = [

@@ -345,6 +345,7 @@ class CodeGraph:
                     range=symbol.location.range,
                     selection_range=symbol.selection_range,
                     content_hash=symbol.content_hash,
+                    content_hashes=getattr(symbol, "content_hashes", {}),
                 )
                 new_nodes.append(node)
                 # Only register short-name → id when there is no collision.
@@ -1856,6 +1857,7 @@ class CodeGraph:
                     range=symbol.location.range,
                     selection_range=symbol.selection_range,
                     content_hash=symbol.content_hash,
+                    content_hashes=getattr(symbol, "content_hashes", node.content_hashes),
                     external=node.external,
                     package=node.package,
                 )
