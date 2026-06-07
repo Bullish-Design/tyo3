@@ -2204,6 +2204,7 @@ impl PyTyProject {
         let head = guard.as_ref().unwrap();
         let root = head.root.clone();
 
+        let is_head = at.is_none();
         let registry = head.registry.clone();
         let authored = Some(head.authored.clone());
         let config = head.config.clone();
@@ -2232,6 +2233,7 @@ impl PyTyProject {
             inner: Mutex::new(Some(state)),
             revision: rev.0,
             config,
+            is_head,
         })
     }
 
@@ -2364,6 +2366,11 @@ pub struct PySnapshot {
     revision: u64,
     /// Validated config needed for derived status computation.
     config: ValidatedConfig,
+    /// True if this snapshot was taken at the current HEAD (not time-travel).
+    /// When true, authored reads may use the current (latest) value as a
+    /// fallback after value_at — the session revision counter may not align
+    /// with stored revisions across close/reopen cycles.
+    is_head: bool,
 }
 
 #[pymethods]
@@ -2806,7 +2813,18 @@ impl PySnapshot {
 
         let (value, rev, status_str) = match authored_store {
             Some(store) => {
-                match store.value_at(layer, id, self.revision) {
+                // For time-travel reads, use value_at strictly.
+                // For HEAD reads, fall back to value() because the session
+                // revision counter may not align with stored revisions
+                // (e.g., after close/reopen).
+                let version_opt = if self.is_head {
+                    store
+                        .value_at(layer, id, self.revision)
+                        .or_else(|| store.value(layer, id))
+                } else {
+                    store.value_at(layer, id, self.revision)
+                };
+                match version_opt {
                     Some(version) => {
                         let rev = version.revision;
                         let status_str = derive_authored_status(

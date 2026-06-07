@@ -144,6 +144,14 @@ impl AuthoredMap {
         }
     }
 
+    /// Get the current (latest) version unconditionally — used for HEAD reads
+    /// where the session revision counter may not align with stored revisions
+    /// (e.g., after close/reopen).
+    pub fn value(&self, layer: &str, id: &str) -> Option<&AuthoredVersion> {
+        let key = (layer.to_string(), id.to_string());
+        self.records.get(&key).map(|rec| &rec.current)
+    }
+
     /// Time-travel read: the version with the greatest revision ≤ `at`, or
     /// `None` if the record did not exist at `at`.
     ///
