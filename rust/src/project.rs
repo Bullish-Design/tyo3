@@ -1261,6 +1261,54 @@ struct IdentityDelta {
     orphaned: Vec<String>,
     extracted: usize,
     scope_files: usize,
+    /// DurableIds flagged `needs_review` that also have an authored record
+    /// in a `review_on_change = true` layer.
+    authored_needs_review: Vec<String>,
+    /// DurableIds flagged `orphaned` that also have an authored record
+    /// in a `review_on_change = true` layer.
+    authored_orphaned: Vec<String>,
+}
+
+/// Intersect the reconciliation `needs_review`/`orphaned` ids with the set
+/// of ids that have an authored record in a `review_on_change = true` layer.
+///
+/// A layer with `review_on_change = false` contributes nothing here — its
+/// records always report status `present` regardless of registry status.
+fn compute_authored_lifecycle(
+    config: &ValidatedConfig,
+    authored: &AuthoredStore,
+    nr_ids: &[String],
+    orph_ids: &[String],
+) -> (Vec<String>, Vec<String>) {
+    // Collect the set of all durable ids that have an authored record in a
+    // review_on_change layer.
+    let mut monitored: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for name in &config.topo_order {
+        let Some(layer_cfg) = config.raw.layers.get(name) else {
+            continue;
+        };
+        if !matches!(layer_cfg.origin, config::LayerOrigin::Authored) {
+            continue;
+        }
+        if !layer_cfg.review_on_change {
+            continue;
+        }
+        for id in authored.ids_in_layer(name) {
+            monitored.insert(id.to_string());
+        }
+    }
+
+    let authored_nr: Vec<String> = nr_ids
+        .iter()
+        .filter(|id| monitored.contains(id.as_str()))
+        .cloned()
+        .collect();
+    let authored_orph: Vec<String> = orph_ids
+        .iter()
+        .filter(|id| monitored.contains(id.as_str()))
+        .cloned()
+        .collect();
+    (authored_nr, authored_orph)
 }
 
 /// Shared identity reconciliation: extract entities, reconcile against
@@ -1298,8 +1346,13 @@ fn run_identity_reconciliation(
             .map(|a| a.qualified_path.clone())
             .unwrap_or_default()
     }).collect();
-    let needs_review = recon.needs_review.iter().map(|id| id.0.clone()).collect();
-    let orphaned = recon.retired.iter().map(|id| id.0.clone()).collect();
+    let needs_review: Vec<String> = recon.needs_review.iter().map(|id| id.0.clone()).collect();
+    let orphaned: Vec<String> = recon.retired.iter().map(|id| id.0.clone()).collect();
+
+    // Authored lifecycle surfacing: intersect reconciliation output with
+    // authored record ids in `review_on_change = true` layers.
+    let (authored_needs_review, authored_orphaned) =
+        compute_authored_lifecycle(&head.config, &head.authored, &needs_review, &orphaned);
 
     // Persist.
     match head.registry.to_bytes() {
@@ -1318,6 +1371,8 @@ fn run_identity_reconciliation(
         orphaned,
         extracted,
         scope_files: scope.map_or(0, |scope| scope.len()),
+        authored_needs_review,
+        authored_orphaned,
     }
 }
 
@@ -1351,6 +1406,8 @@ fn commit_head(
         moved: identity.moved,
         needs_review: identity.needs_review,
         orphaned: identity.orphaned,
+        authored_needs_review: identity.authored_needs_review,
+        authored_orphaned: identity.authored_orphaned,
         identity_extracted: identity.extracted,
         identity_scope_files: identity.scope_files,
         project_changed: result.project_changed(),
@@ -1409,11 +1466,11 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
         moved: identity.moved,
         needs_review: identity.needs_review,
         orphaned: identity.orphaned,
+        authored_needs_review: identity.authored_needs_review,
+        authored_orphaned: identity.authored_orphaned,
         identity_extracted: identity.extracted,
         identity_scope_files: identity.scope_files,
         authored: vec![],
-        authored_needs_review: vec![],
-        authored_orphaned: vec![],
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
@@ -1461,8 +1518,8 @@ fn apply_watch_events(
             identity_extracted: identity.extracted,
             identity_scope_files: identity.scope_files,
             authored: vec![],
-            authored_needs_review: vec![],
-            authored_orphaned: vec![],
+            authored_needs_review: identity.authored_needs_review,
+            authored_orphaned: identity.authored_orphaned,
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
@@ -1554,8 +1611,8 @@ fn apply_watch_events(
         identity_extracted: identity.extracted,
         identity_scope_files: identity.scope_files,
         authored: vec![],
-        authored_needs_review: vec![],
-        authored_orphaned: vec![],
+        authored_needs_review: identity.authored_needs_review,
+        authored_orphaned: identity.authored_orphaned,
         project_changed: result.project_changed(),
         custom_stdlib_changed: result.custom_stdlib_changed(),
         rescan: false,
@@ -1943,8 +2000,8 @@ impl PyTyProject {
             identity_extracted: identity.extracted,
             identity_scope_files: identity.scope_files,
             authored: vec![],
-            authored_needs_review: vec![],
-            authored_orphaned: vec![],
+            authored_needs_review: identity.authored_needs_review,
+            authored_orphaned: identity.authored_orphaned,
             project_changed: result.project_changed(),
             custom_stdlib_changed: result.custom_stdlib_changed(),
             rescan: true,
