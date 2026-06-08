@@ -763,6 +763,8 @@ class TyO3Session(_ReadOps):
             g._root = self._root
             self._head_graph = g
         g.apply_code_delta(self._inner.full_code_delta())
+        # Read-only diagnostics refresh (check() is a read, never sync_all).
+        g.refresh_diagnostics(self, root=self._root)
 
     def _head_graph_or_none(self) -> Any:
         """Return the live HEAD graph if materialized; never build it."""
@@ -1553,6 +1555,7 @@ class Snapshot(_ReadOps):
         g = CodeGraph()
         g._root = self._root
         g.apply_code_delta(self._inner.full_code_delta())  # frozen-db delta (4.4)
+        g.refresh_diagnostics(self, root=self._root)  # read-only (snapshot.check())
         self._graph = g._pin_at(self.revision)
         return self._graph
 

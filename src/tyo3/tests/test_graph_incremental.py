@@ -1,8 +1,16 @@
-"""Tests for incremental graph updates via apply_delta (Phase 6)."""
+"""Tests for incremental HEAD-graph updates via the native code delta (Phase 4).
+
+The live HEAD graph (``session.graph``) is maintained across writes by the native
+post-commit path (``_apply_graph_delta`` → ``apply_code_delta`` / a full-delta
+rebuild). These tests assert that the incrementally-maintained head graph stays
+**structurally equal** to a fresh native ``CodeGraph.build`` of the same revision
+— the cutover's core guarantee. (The pure applier itself is unit-tested in
+``test_graph_apply_code_delta.py``; producer↔legacy parity in
+``test_final_parity_oracle.py``.)
+"""
 
 from __future__ import annotations
 
-import textwrap
 from pathlib import Path as StdPath
 
 from tyo3 import TyO3Session
@@ -29,88 +37,64 @@ def _edge_triples(g: CodeGraph) -> set[tuple[str, str, str]]:
 
 def _assert_structurally_equal(a: CodeGraph, b: CodeGraph) -> None:
     assert _node_ids(a) == _node_ids(b), (
-        f"node id mismatch\nonly in delta: {_node_ids(a) - _node_ids(b)}\n"
+        f"node id mismatch\nonly in head: {_node_ids(a) - _node_ids(b)}\n"
         f"only in rebuild: {_node_ids(b) - _node_ids(a)}"
     )
     assert _edge_triples(a) == _edge_triples(b), (
-        f"edge mismatch\nonly in delta: {_edge_triples(a) - _edge_triples(b)}\n"
+        f"edge mismatch\nonly in head: {_edge_triples(a) - _edge_triples(b)}\n"
         f"only in rebuild: {_edge_triples(b) - _edge_triples(a)}"
     )
 
 
-def _build(session: TyO3Session) -> CodeGraph:
-    """Build a graph, ensuring the identity registry is populated first."""
-    # id_for() requires reconciliation which happens during sync_all() / edit().
-    # Ensure the identity system is initialized before the first build.
-    if not hasattr(session, '_graph_identity_primed'):
-        session.sync_all()
-        session._graph_identity_primed = True
-    return CodeGraph.build(session)
+# ── Core parity tests: incrementally-maintained head == fresh native build ──
 
 
-# ── Core parity tests ───────────────────────────────────────────────────
-
-
-def test_apply_delta_changed_file_equals_rebuild(tmp_path: StdPath) -> None:
+def test_changed_file_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User:\n    def save(self): ...\n")
     (tmp_path / "app.py").write_text(
         "from models import User\n\n\ndef run():\n    return User().save()\n"
     )
     with TyO3Session(str(tmp_path)) as s:
-        g = _build(s)
-        # change models.py: add a method (new node + edges; importers unaffected
-        # structurally except their refs still resolve).
-        sync = s.edit(
-            "models.py", "class User:\n    def save(self): ...\n    def load(self): ...\n"
-        )
-        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
+        g = s.graph  # live HEAD graph (native projection)
+        s.edit("models.py", "class User:\n    def save(self): ...\n    def load(self): ...\n")
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
 
-def test_apply_delta_created_file_equals_rebuild(tmp_path: StdPath) -> None:
+def test_created_file_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "app.py").write_text("X = 1\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = _build(s)
+        g = s.graph
         sync = s.edit("helpers.py", "def helper():\n    return 42\n")  # Created
         assert sync.created, "expected a created file in the delta"
-        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
 
-def test_apply_delta_deleted_file_equals_rebuild(tmp_path: StdPath) -> None:
+def test_deleted_file_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User: ...\n")
     (tmp_path / "app.py").write_text("from models import User\nu = User()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = _build(s)
-        # delete app.py from disk, then ingest the deletion.
+        g = s.graph
         (tmp_path / "app.py").unlink()
         sync = s.sync_path("app.py")
         assert sync.deleted, "expected a deleted file in the delta"
-        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
 
-def test_apply_delta_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> None:
+def test_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> None:
     """Changing models.py must keep app.py's references INTO models.py correct."""
     (tmp_path / "models.py").write_text("class User:\n    def save(self): ...\n")
     (tmp_path / "app.py").write_text(
         "from models import User\n\n\ndef run():\n    return User().save()\n"
     )
     with TyO3Session(str(tmp_path)) as s:
-        g = _build(s)
-        sync = s.edit(
-            "models.py",
-            "class User:\n    def save(self): ...\n    def extra(self): ...\n",
-        )
-        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
+        g = s.graph
+        s.edit("models.py", "class User:\n    def save(self): ...\n    def extra(self): ...\n")
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
-        # explicit: app.py still imports models.py after the change.
-        # Module nodes are keyed `<module><file>` (see make_module_durable_id);
-        # strip that prefix to recover the file for the edge endpoints.
+
         def _file(did: str) -> str:
             return did.removeprefix("<module>").split("::")[0]
 
@@ -119,58 +103,49 @@ def test_apply_delta_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> 
         }
 
 
-def test_apply_delta_rescan_equals_rebuild(tmp_path: StdPath) -> None:
+def test_rescan_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = _build(s)
+        g = s.graph
         sync = s.sync_all()
         assert sync.rescan
-        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
 
-# ── Reverse-dependency index unit tests ──────────────────────────────────
+# ── Reverse-dependency index ──────────────────────────────────────────────
 
 
 def test_importers_index_populated_after_build(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User: ...\n")
     (tmp_path / "app.py").write_text("from models import User\nu = User()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = _build(s)
+        g = s.graph
         assert "app.py" in g._file_importers.get("models.py", set())
 
 
-def test_importers_index_survives_apply_delta(tmp_path: StdPath) -> None:
+def test_importers_index_survives_edit(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User: ...\n")
     (tmp_path / "app.py").write_text("from models import User\nu = User()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = _build(s)
-        sync = s.edit("models.py", "class User:\n    name: str\n")
-        g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
-        assert "app.py" in g._file_importers.get("models.py", set())  # rebuilt, not lost
+        g = s.graph
+        s.edit("models.py", "class User:\n    name: str\n")
+        assert "app.py" in g._file_importers.get("models.py", set())  # maintained, not lost
 
 
-# ── Idempotence / sequence ───────────────────────────────────────────────
+# ── Sequence ─────────────────────────────────────────────────────────────
 
 
-def test_apply_delta_sequence_matches_rebuild(tmp_path: StdPath) -> None:
+def test_edit_sequence_matches_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User: ...\n")
     (tmp_path / "app.py").write_text("from models import User\nu = User()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = _build(s)
+        g = s.graph
         for text in (
             "class User:\n    a: int\n",
             "class User:\n    a: int\n    b: int\n",
             "class User:\n    b: int\n",
         ):
-            sync = s.edit("models.py", text)
-            g.apply_delta(s, sync)  # session provides id_for for DurableId derivation
+            s.edit("models.py", text)
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
-
-
-# NOTE: there was a ``test_apply_delta_without_build_raises`` guard here. Under
-# Gate 3N, ``apply_delta`` applies the commit's self-contained native
-# ``code_delta`` and no longer requires a prior ``build()``, so the "must build
-# first" invariant — and the test asserting it — were removed with the rewrite.

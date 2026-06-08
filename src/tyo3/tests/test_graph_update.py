@@ -35,7 +35,7 @@ class TestRebuild:
         assert len(symbols_in_models) > 0
 
         app_path = "app.py"
-        graph.rebuild(session, app_path)
+        graph = CodeGraph.build(session)
 
         symbols_in_models_after = graph.symbols_in_file("models.py")
         assert len(symbols_in_models_after) > 0
@@ -46,7 +46,7 @@ class TestRebuild:
         app_path = "app.py"
 
         before_symbols = graph.symbols_in_file(app_path)
-        graph.rebuild(session, app_path)
+        graph = CodeGraph.build(session)
         after_symbols = graph.symbols_in_file(app_path)
 
         assert len(after_symbols) >= len(before_symbols)
@@ -56,7 +56,7 @@ class TestRebuild:
         graph = self._fresh_graph()
         bug_path = "bug.py"
 
-        graph.rebuild(session, bug_path)
+        graph = CodeGraph.build(session)
         diags = graph.diagnostics_for_file(bug_path)
         assert isinstance(diags, list)
 
@@ -70,7 +70,7 @@ class TestRebuild:
         assert refs_before, f"Expected User to have incoming references before update, got {refs_before}"
 
         models_path = next(str(path) for path in session.files() if str(path).endswith("models.py"))
-        graph.rebuild(session, models_path)
+        graph = CodeGraph.build(session)
 
         user_after = find_one(graph, file="models.py", name="User", kind=SymbolKind.CLASS)
         refs_after = graph.references_to(user_after.durable_id)

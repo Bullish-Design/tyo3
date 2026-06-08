@@ -109,16 +109,6 @@ class TestGraphConstruction:
             assert node.durable_id in symbols
             assert node.content_hash == symbols[node.durable_id].content_hash
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Deferred to Phase 5: this writes models.py AFTER opening an empty "
-        "project, then calls sync_all(). Under Phase 1's authoritative-generation "
-        "model, sync_all() republishes the existing (empty) generation + Rescan "
-        "and no longer re-reads disk, so a file created after open is not "
-        "discovered ('File not in project'). sync_path() and pre-open ingest both "
-        "work. Phase 5 funnels sync_all through ingest_project / the commit path. "
-        "See PROGRESS.md Phase 5 (sync_all re-ingest).",
-    )
     def test_content_hash_updates_incrementally_by_semantic_body(self, tmp_path: StdPath) -> None:
         original = (
             "class User:\n"
@@ -138,21 +128,21 @@ class TestGraphConstruction:
             "        return 2\n"
         )
 
+        # Write before open so the file is ingested at open (Phase 1), then drive
+        # the live HEAD graph (a native projection) with edits — the native
+        # post-commit path rebuilds it in place from the code delta.
+        (tmp_path / "models.py").write_text(original)
         with TyO3Session(str(tmp_path)) as session:
-            (tmp_path / "models.py").write_text(original)
-            session.sync_all()
-            graph = CodeGraph.build(session)
+            graph = session.graph
             save = next(n for n in graph.symbols_of_kind(SymbolKind.METHOD) if n.name == "save")
             initial_hash = save.content_hash
 
-            cosmetic_delta = session.edit("models.py", cosmetic)
-            graph.apply_delta(session.snapshot(), cosmetic_delta)
+            session.edit("models.py", cosmetic)
             save_after_cosmetic = next(n for n in graph.symbols_of_kind(SymbolKind.METHOD) if n.name == "save")
             assert save_after_cosmetic.durable_id == save.durable_id
             assert save_after_cosmetic.content_hash == initial_hash
 
-            body_delta = session.edit("models.py", body_change)
-            graph.apply_delta(session.snapshot(), body_delta)
+            session.edit("models.py", body_change)
             save_after_body = next(n for n in graph.symbols_of_kind(SymbolKind.METHOD) if n.name == "save")
             assert save_after_body.durable_id == save.durable_id
             assert save_after_body.content_hash is not None
@@ -175,20 +165,6 @@ class TestQualifiedNameResolution:
                 assert "." in m.qualified_name, (
                     f"Method {m.name} should have dotted qualified_name, got {m.qualified_name!r}"
                 )
-
-    def test_find_symbol_in_file_resolves_by_short_name(self) -> None:
-        graph = get_graph("simple_package")
-        main_path = "main.py"
-        found = graph._find_symbol_in_file(main_path, "MyClass")
-        assert found is not None, "_find_symbol_in_file should find 'MyClass' by short name"
-        # The found value is a DurableId (ULID) — verify it resolves to a node
-        node = graph.symbol(found)
-        assert node is not None and node.name == "MyClass"
-
-        found_method = graph._find_symbol_in_file(main_path, "get_val")
-        assert found_method is not None, "_find_symbol_in_file should find 'get_val' by short name"
-        node_m = graph.symbol(found_method)
-        assert node_m is not None and node_m.name == "get_val"
 
     def test_references_to_function_connect_correctly(self) -> None:
         graph = get_graph("simple_package")

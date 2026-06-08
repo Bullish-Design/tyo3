@@ -174,12 +174,11 @@ class TestInheritanceOrderingIncremental:
         """Edit all three files in one batch — OVERRIDES survives in both orders."""
         _write_fixture(tmp_path)
         with TyO3Session(str(tmp_path)) as s:
-            g = CodeGraph.build(s)
+            g = s.graph  # native HEAD graph, maintained across edits
 
             # Edit all three files (append a comment so they register as CHANGED).
             edited = _edit_all(suffix="edited")
-            result = s.edit_many(edited)
-            g.apply_delta(s, result, sort_key=sort_order)
+            s.edit_many(edited)  # drives the native post-commit head-graph update
 
             exists = _check_override_a_greet_to_c(g)
             assert exists, (
@@ -195,12 +194,11 @@ class TestInheritanceOrderingIncremental:
         regardless of processing order."""
         _write_fixture(tmp_path)
         with TyO3Session(str(tmp_path)) as s:
-            g = CodeGraph.build(s)
+            g = s.graph  # native HEAD graph, maintained across edits
 
             for round_num in range(3):
                 suffix = f"round{round_num}"
-                result = s.edit_many(_edit_all(suffix=suffix))
-                g.apply_delta(s, result, sort_key=sort_order)
+                s.edit_many(_edit_all(suffix=suffix))
 
                 exists = _check_override_a_greet_to_c(g)
                 assert exists, (

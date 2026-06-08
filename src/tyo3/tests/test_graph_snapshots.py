@@ -61,7 +61,7 @@ def test_snapshot_graph_copy_does_not_mutate_head_graph(tmp_path: StdPath) -> No
         with session.snapshot() as snap:
             pinned = snap.graph()
             with pytest.raises(RuntimeError, match="revision-pinned"):
-                pinned.apply_delta(snap, session.sync_all())
+                pinned.apply_code_delta({"revision": 999, "rescan": False})
 
         assert session.graph is head_graph
 

@@ -463,6 +463,17 @@ impl<'a> Builder<'a> {
         let mut files: Vec<FileSymbols> = Vec::new();
         for native_path in compute_files(self.state) {
             let graph_path = self.to_graph_path(&native_path);
+            // Bound the producer to project *content* — files under the root.
+            // `compute_files` returns `project.files(db)`, which over a warm live
+            // head db includes every file the type-checker opened (stdlib /
+            // bundled typeshed / deps), none of which is project content (§5.1:
+            // the generation only holds files under root). Over a frozen snapshot
+            // the overlay already bounds this; over the live head it does not, so
+            // an unbounded producer would materialise thousands of stdlib nodes.
+            // A path outside the root has `to_graph_path` == the native path.
+            if graph_path == native_path {
+                continue;
+            }
             self.project_files.insert(graph_path.clone());
             match compute_document_symbols(self.state, &native_path) {
                 Ok(symbols) => files.push(FileSymbols {
