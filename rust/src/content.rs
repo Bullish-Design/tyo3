@@ -513,6 +513,18 @@ pub fn is_project_relevant(path: &SystemPath) -> bool {
     )
 }
 
+/// Whether `path` is a project *configuration* file (as opposed to source).
+///
+/// Syncing one of these is a **coarse change** (§5.4): the precise per-entity
+/// delta is unknown — project metadata, search paths, or hashing policy may have
+/// shifted — so the commit signals `rescan` and consumers rebuild everything.
+pub fn is_project_config_file(path: &SystemPath) -> bool {
+    matches!(
+        path.file_name(),
+        Some("pyproject.toml" | "ty.toml" | "setup.cfg" | "setup.py")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

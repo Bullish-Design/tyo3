@@ -218,6 +218,35 @@ impl CodeLayer {
         removed
     }
 
+    /// Transitive closure of `seeds` under inbound (who-depends-on-me) edges:
+    /// the seeds plus every id that reference/import/inherit-depends on them,
+    /// transitively. The result always contains the seeds themselves.
+    ///
+    /// BFS with a visited set so cycles terminate; `BTreeSet` makes the output
+    /// deterministic (§5.12).
+    ///
+    /// Phase 3 note: when `reverse_deps` is empty (the head layer is not yet
+    /// maintained in-commit — deferred to Phase 4), this returns exactly the
+    /// seeds, i.e. `changed ∪ deleted`. The transitive dependents light up once
+    /// the layer is authoritative.
+    pub fn affected_closure(&self, seeds: &BTreeSet<String>) -> BTreeSet<String> {
+        let mut visited: BTreeSet<String> = BTreeSet::new();
+        let mut queue: VecDeque<String> = seeds.iter().cloned().collect();
+        while let Some(id) = queue.pop_front() {
+            if !visited.insert(id.clone()) {
+                continue;
+            }
+            if let Some(sources) = self.reverse_deps.get(&id) {
+                for src in sources {
+                    if !visited.contains(src) {
+                        queue.push_back(src.clone());
+                    }
+                }
+            }
+        }
+        visited
+    }
+
     /// Diff `self` (the freshly-produced layer) against `prev`, emitting a
     /// minimal incremental delta. With an empty `prev` (cold start) this yields a
     /// full delta: every node upserted, every edge added.
@@ -1023,6 +1052,42 @@ mod tests {
             layer.reverse_deps.get("B").is_none(),
             "removing the only dependency edge prunes the reverse-dep entry"
         );
+    }
+
+    #[test]
+    fn affected_closure_walks_reverse_chain() {
+        // Forward refs a→b→c give reverse_deps c←b, b←a.
+        let mut layer = CodeLayer::new();
+        for id in ["a", "b", "c"] {
+            layer.upsert_node(id.into(), node("function", "m.py"));
+        }
+        layer.add_edge(ref_edge("a", "b"));
+        layer.add_edge(ref_edge("b", "c"));
+
+        let seeds: BTreeSet<String> = [String::from("c")].into_iter().collect();
+        let closure = layer.affected_closure(&seeds);
+        assert_eq!(
+            closure,
+            ["a", "b", "c"].iter().map(|s| s.to_string()).collect()
+        );
+
+        // An isolated id returns just itself.
+        let iso: BTreeSet<String> = [String::from("z")].into_iter().collect();
+        assert_eq!(layer.affected_closure(&iso), iso);
+
+        // A cyclic reverse chain still terminates.
+        layer.add_edge(ref_edge("c", "a"));
+        let seeds_b: BTreeSet<String> = [String::from("b")].into_iter().collect();
+        let cyc = layer.affected_closure(&seeds_b);
+        assert_eq!(cyc, ["a", "b", "c"].iter().map(|s| s.to_string()).collect());
+    }
+
+    #[test]
+    fn affected_closure_empty_reverse_deps_is_seeds_only() {
+        // Phase 3 reality: an empty/unmaintained layer yields exactly the seeds.
+        let layer = CodeLayer::new();
+        let seeds: BTreeSet<String> = ["01A", "01B"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(layer.affected_closure(&seeds), seeds);
     }
 
     #[test]

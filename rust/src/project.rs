@@ -117,12 +117,12 @@ struct HeadState {
     /// Captured into snapshots alongside the registry for Snapshot
     /// isolation + time-travel (§10.2.2 authored half).
     authored: AuthoredStore,
-    /// Canonical native code layer (nodes + edges + reverse-deps). Carried on
-    /// the head so Phase 3 can maintain it incrementally inside the commit. In
-    /// Phase 2 it stays empty: the producer is full-build and too expensive to
-    /// run eagerly per commit (see `run_identity_reconciliation`), and parity is
-    /// served on demand by `full_code_delta`. Hence "never read" for now.
-    #[allow(dead_code)]
+    /// Canonical native code layer (nodes + edges + reverse-deps). Phase 3 reads
+    /// its `reverse_deps` for the `affected_closure` in the commit. It stays
+    /// **empty** in Phase 3: the in-commit producer is full-build and too
+    /// expensive to run eagerly (see `run_identity_reconciliation`), so the layer
+    /// is not maintained until Phase 4 makes it authoritative. While empty,
+    /// `affected_closure` returns exactly the seeds (`changed ∪ deleted`).
     code_layer: crate::code_layer::CodeLayer,
 }
 
@@ -1202,7 +1202,17 @@ fn identity_scope_from_events(events: &[ChangeEvent]) -> Option<HashSet<String>>
 }
 
 struct IdentityDelta {
-    moved: Vec<String>,
+    /// Minted ids this revision.
+    created_ids: Vec<String>,
+    /// Ids whose content hash changed (no over-fire).
+    changed_ids: Vec<String>,
+    /// Retired ids this revision (== `orphaned`).
+    deleted_ids: Vec<String>,
+    /// Structured moves: id + old/new qualified path + old/new file.
+    moved: Vec<dto::MovedEntityDto>,
+    /// Closure of `changed ∪ deleted` under the head code layer's reverse-deps.
+    /// Phase 3: the layer is empty, so this equals the seeds.
+    affected_ids: Vec<String>,
     needs_review: Vec<String>,
     orphaned: Vec<String>,
     extracted: usize,
@@ -1213,6 +1223,52 @@ struct IdentityDelta {
     /// DurableIds flagged `orphaned` that also have an authored record
     /// in a `review_on_change = true` layer.
     authored_orphaned: Vec<String>,
+}
+
+/// Assemble the public `CommitDeltaDto` from the id-level identity classes and
+/// the path-shaped metadata the write method produced.
+///
+/// The nested `code_delta` is left default (empty) in Phase 3: the legacy graph
+/// build is still authoritative (cutover is Phase 4), and the in-commit code-layer
+/// producer is deferred (see `run_identity_reconciliation`). `touched_files` is
+/// the union of the path-level created/changed/deleted strings — metadata only.
+fn build_commit_delta(
+    revision: u64,
+    created: Vec<String>,
+    changed: Vec<String>,
+    deleted: Vec<String>,
+    identity: IdentityDelta,
+    rescan: bool,
+    project_changed: bool,
+    custom_stdlib_changed: bool,
+) -> dto::CommitDeltaDto {
+    let mut touched_files = created.clone();
+    touched_files.extend(changed.iter().cloned());
+    touched_files.extend(deleted.iter().cloned());
+
+    dto::CommitDeltaDto {
+        revision,
+        created_ids: identity.created_ids,
+        changed_ids: identity.changed_ids,
+        deleted_ids: identity.deleted_ids,
+        moved: identity.moved,
+        authored_ids: vec![],
+        affected_ids: identity.affected_ids,
+        code_delta: dto::CodeDeltaDto::default(),
+        touched_files,
+        created,
+        changed,
+        deleted,
+        needs_review: identity.needs_review,
+        orphaned: identity.orphaned,
+        authored_needs_review: identity.authored_needs_review,
+        authored_orphaned: identity.authored_orphaned,
+        identity_extracted: identity.extracted,
+        identity_scope_files: identity.scope_files,
+        rescan,
+        project_changed,
+        custom_stdlib_changed,
+    }
 }
 
 /// Intersect the reconciliation `needs_review`/`orphaned` ids with the set
@@ -1328,13 +1384,38 @@ fn run_identity_reconciliation(
         None => reconcile(&mut head.registry, &entities, head.store.revision()),
     };
 
-    let moved = recon.moved().iter().map(|id| {
-        head.registry.get(id)
-            .map(|a| a.qualified_path.clone())
-            .unwrap_or_default()
-    }).collect();
+    // Id-level classification (§5.4): created / changed (hash-based, no over-fire)
+    // / deleted / structured moves. Reads the old hashes captured on the bindings
+    // before the in-pass rebind overwrote them.
+    let classes = recon.classify(&entities);
+    let created_ids: Vec<String> = classes.created.iter().map(|id| id.0.clone()).collect();
+    let changed_ids: Vec<String> = classes.changed.iter().map(|id| id.0.clone()).collect();
+    let deleted_ids: Vec<String> = classes.deleted.iter().map(|id| id.0.clone()).collect();
+    let moved: Vec<dto::MovedEntityDto> = classes
+        .moved
+        .iter()
+        .map(|m| dto::MovedEntityDto {
+            id: m.id.0.clone(),
+            old_qualified_path: m.old_qualified_path.clone(),
+            new_qualified_path: m.new_qualified_path.clone(),
+            old_file: m.old_file.clone(),
+            new_file: m.new_file.clone(),
+        })
+        .collect();
+
     let needs_review: Vec<String> = recon.needs_review.iter().map(|id| id.0.clone()).collect();
     let orphaned: Vec<String> = recon.retired.iter().map(|id| id.0.clone()).collect();
+
+    // affected_ids = closure of changed ∪ deleted under the head code layer's
+    // reverse-deps. Phase 3 keeps the layer empty (in-commit producer deferred to
+    // Phase 4), so this is exactly the seeds; the transitive closure lights up
+    // once the layer is authoritative. See PROGRESS.md §6 / the Phase 3 guide.
+    let seeds: std::collections::BTreeSet<String> = changed_ids
+        .iter()
+        .chain(deleted_ids.iter())
+        .cloned()
+        .collect();
+    let affected_ids: Vec<String> = head.code_layer.affected_closure(&seeds).into_iter().collect();
 
     // Authored lifecycle surfacing: intersect reconciliation output with
     // authored record ids in `review_on_change = true` layers.
@@ -1362,7 +1443,11 @@ fn run_identity_reconciliation(
     // the commit is staged (Phase 5). See PROGRESS.md §5.
 
     IdentityDelta {
+        created_ids,
+        changed_ids,
+        deleted_ids,
         moved,
+        affected_ids,
         needs_review,
         orphaned,
         extracted,
@@ -1383,34 +1468,29 @@ fn commit_head(
     changed: Vec<String>,
     deleted: Vec<String>,
     rescan: bool,
-) -> dto::SyncResultDto {
+) -> dto::CommitDeltaDto {
     // 2. publish BEFORE apply so apply_changes re-reads new content.
     head.system.publish(head.store.capture());
     // 3. ty does all incremental work.
     let result = head.db.apply_changes(events, None);
+    let project_changed = result.project_changed();
+    let custom_stdlib_changed = result.custom_stdlib_changed();
 
     // 4. Run reconciliation (Gate 2).
     let scope = if rescan { None } else { identity_scope_from_events(events) };
     let identity = run_identity_reconciliation(head, scope.as_ref());
 
-    // 5. Build result.
-    dto::SyncResultDto {
-        revision: head.store.revision().0,
+    // 5. Build the id-level commit delta.
+    build_commit_delta(
+        head.store.revision().0,
         created,
         changed,
         deleted,
-        moved: identity.moved,
-        needs_review: identity.needs_review,
-        orphaned: identity.orphaned,
-        authored_needs_review: identity.authored_needs_review,
-        authored_orphaned: identity.authored_orphaned,
-        identity_extracted: identity.extracted,
-        identity_scope_files: identity.scope_files,
-        project_changed: result.project_changed(),
-        custom_stdlib_changed: result.custom_stdlib_changed(),
+        identity,
         rescan,
-        ..Default::default()
-    }
+        project_changed,
+        custom_stdlib_changed,
+    )
 }
 
 /// Shared body of `sync_path` and `discard`: forget the overlay for `abs`, publish
@@ -1419,7 +1499,7 @@ fn commit_head(
 /// produce a `Change::Insert` (with content) or `Change::Delete` (tombstone),
 /// apply it as a single-change batch so the revision's generation records the
 /// disk content (§1.3.2).  Then publish and apply to the engine.
-fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultDto {
+fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::CommitDeltaDto {
     // Read disk once.  The content (or its absence) is recorded in the
     // generation so a snapshot at the resulting revision is stable even if
     // disk changes again later.
@@ -1449,28 +1529,30 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
         _ => (vec![], vec![path_str], vec![]),
     };
     let result = head.db.apply_changes(std::slice::from_ref(&event), None);
+    let project_changed = result.project_changed();
+    let custom_stdlib_changed = result.custom_stdlib_changed();
 
-    // Run scoped reconciliation after the event is applied.
-    let scope = identity_scope_from_events(std::slice::from_ref(&event));
+    // Syncing a project-config file is a coarse change (§5.4): the precise
+    // per-entity delta is unknown, so signal rescan and reconcile the whole
+    // project (scope = None). Source-file syncs stay scoped/precise.
+    let rescan = crate::content::is_project_config_file(&abs);
+    let scope = if rescan {
+        None
+    } else {
+        identity_scope_from_events(std::slice::from_ref(&event))
+    };
     let identity = run_identity_reconciliation(head, scope.as_ref());
 
-    dto::SyncResultDto {
-        revision: head.store.revision().0,
+    build_commit_delta(
+        head.store.revision().0,
         created,
         changed,
         deleted,
-        moved: identity.moved,
-        needs_review: identity.needs_review,
-        orphaned: identity.orphaned,
-        authored_needs_review: identity.authored_needs_review,
-        authored_orphaned: identity.authored_orphaned,
-        identity_extracted: identity.extracted,
-        identity_scope_files: identity.scope_files,
-        authored: vec![],
-        project_changed: result.project_changed(),
-        custom_stdlib_changed: result.custom_stdlib_changed(),
-        rescan: false,
-    }
+        identity,
+        rescan,
+        project_changed,
+        custom_stdlib_changed,
+    )
 }
 
 // ── Phase 8: Watcher drain-and-apply core ───────────────────────────────
@@ -1489,7 +1571,7 @@ fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::SyncResultD
 fn apply_watch_events(
     head: &mut HeadState,
     events: Vec<ChangeEvent>,
-) -> Option<dto::SyncResultDto> {
+) -> Option<dto::CommitDeltaDto> {
     if events.is_empty() {
         return None;
     }
@@ -1498,28 +1580,23 @@ fn apply_watch_events(
     if events.iter().any(|e| e.is_rescan()) {
         head.system.publish(head.store.capture());
         let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
+        let project_changed = result.project_changed();
+        let custom_stdlib_changed = result.custom_stdlib_changed();
         let revision = head.store.bump_revision().0;
 
         // Run full reconciliation for rescans.
         let identity = run_identity_reconciliation(head, None);
 
-        return Some(dto::SyncResultDto {
+        return Some(build_commit_delta(
             revision,
-            created: vec![],
-            changed: vec![],
-            deleted: vec![],
-            moved: identity.moved,
-            needs_review: identity.needs_review,
-            orphaned: identity.orphaned,
-            identity_extracted: identity.extracted,
-            identity_scope_files: identity.scope_files,
-            authored: vec![],
-            authored_needs_review: identity.authored_needs_review,
-            authored_orphaned: identity.authored_orphaned,
-            project_changed: result.project_changed(),
-            custom_stdlib_changed: result.custom_stdlib_changed(),
-            rescan: true,
-        });
+            vec![],
+            vec![],
+            vec![],
+            identity,
+            true,
+            project_changed,
+            custom_stdlib_changed,
+        ));
     }
 
     // Filter: keep only real-path events whose path is NOT overlaid.
@@ -1591,28 +1668,23 @@ fn apply_watch_events(
 
     // 3. Apply the ty-level ChangeEvents for incremental analysis.
     let result = head.db.apply_changes(&kept_events, None);
+    let project_changed = result.project_changed();
+    let custom_stdlib_changed = result.custom_stdlib_changed();
 
     // Run scoped reconciliation.
     let scope = identity_scope_from_events(&kept_events);
     let identity = run_identity_reconciliation(head, scope.as_ref());
 
-    Some(dto::SyncResultDto {
+    Some(build_commit_delta(
         revision,
         created,
         changed,
         deleted,
-        moved: identity.moved,
-        needs_review: identity.needs_review,
-        orphaned: identity.orphaned,
-        identity_extracted: identity.extracted,
-        identity_scope_files: identity.scope_files,
-        authored: vec![],
-        authored_needs_review: identity.authored_needs_review,
-        authored_orphaned: identity.authored_orphaned,
-        project_changed: result.project_changed(),
-        custom_stdlib_changed: result.custom_stdlib_changed(),
-        rescan: false,
-    })
+        identity,
+        false,
+        project_changed,
+        custom_stdlib_changed,
+    ))
 }
 
 // ── PyO3 Methods ─────────────────────────────────────────────────────────
@@ -1959,9 +2031,9 @@ impl PyTyProject {
         }
 
         // 7. Build the delta — authored-only, no code/derived changes.
-        let dto = dto::SyncResultDto {
+        let dto = dto::CommitDeltaDto {
             revision: revision.0,
-            authored: vec![id.to_string()],
+            authored_ids: vec![id.to_string()],
             ..Default::default()
         };
         drop(guard);
@@ -1997,28 +2069,23 @@ impl PyTyProject {
 
         head.system.publish(head.store.capture());
         let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
+        let project_changed = result.project_changed();
+        let custom_stdlib_changed = result.custom_stdlib_changed();
         let revision = head.store.bump_revision().0;
 
         // Run full reconciliation for sync_all.
         let identity = run_identity_reconciliation(head, None);
 
-        let dto = dto::SyncResultDto {
+        let dto = build_commit_delta(
             revision,
-            created: vec![],
-            changed: vec![],
-            deleted: vec![],
-            moved: identity.moved,
-            needs_review: identity.needs_review,
-            orphaned: identity.orphaned,
-            identity_extracted: identity.extracted,
-            identity_scope_files: identity.scope_files,
-            authored: vec![],
-            authored_needs_review: identity.authored_needs_review,
-            authored_orphaned: identity.authored_orphaned,
-            project_changed: result.project_changed(),
-            custom_stdlib_changed: result.custom_stdlib_changed(),
-            rescan: true,
-        };
+            vec![],
+            vec![],
+            vec![],
+            identity,
+            true,
+            project_changed,
+            custom_stdlib_changed,
+        );
         drop(guard);
         pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
