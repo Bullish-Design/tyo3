@@ -16,7 +16,7 @@
 |---|--------|--------|
 | 1 | Snapshot construction reads live disk (`pre_populate_generation` at snapshot time) | ✅ **Phase 1 DONE** |
 | 2 | Transaction split across the lock boundary (Rust lock released before Python graph delta + bus) | 🔴 **Phase 5 + 6** |
-| 3 | Read accessor performs a write (`session.graph` → `sync_all` → advances head) | 🔴 **Phase 4** |
+| 3 | Read accessor performs a write (`session.graph` → `sync_all` → advances head) | ✅ **Phase 4 DONE** |
 | 4 | Delta is path-shaped not id-level (`SyncResultDto` has file-path strings, not `DurableId`s) | ✅ **Phase 3 DONE** |
 | 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | 🔴 **Phase 7** |
 | 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | 🔴 **Phase 6** |
@@ -35,7 +35,7 @@
 | **1** | Complete committed generations (content gate) | `test_final_content_spine.py` | `content.rs`, `project.rs`, `overlay.rs` | — | ✅ **DONE** (2 carry-overs → Phase 5) |
 | **2** | Native code layer + code delta (parity-only) | Parity suite | `code_layer.rs` (new), `entity.rs`, `dto/code_delta.rs` (new) | `graph/graph.py` (applier), `parity_oracle.py` (existing) | ✅ **DONE** |
 | **3** | Id-level commit delta | `test_final_commit_delta_contract.py` | `identity.rs`, `dto/commit_delta.rs` (new), `code_layer.rs`, `project.rs` | `models/delta.py` (new) | ✅ **DONE** |
-| **4** | Cutover: Python graph as pure applier | `test_final_no_read_side_writes.py`, parity suite | `project.rs`, snapshot code-delta accessor | `graph/graph.py` (heavily edit) | 🔴 **Not started** |
+| **4** | Cutover: Python graph as pure applier | `test_final_no_read_side_writes.py`, parity suite | `project.rs`, snapshot code-delta accessor, `code_layer.rs` (producer bound), `dto/commit_delta.rs` (`Option`) | `graph/graph.py` (~1140 lines deleted), `session.py` | ✅ **DONE** |
 | **5** | Single native `commit()` with staging + rollback | `test_final_transaction_rollback.py` | `project.rs`, `sidecar.rs`, `authored.rs` | — | 🔴 **Not started** |
 | **6** | One post-commit path; non-blocking bus | `test_final_bus_contract.py` | `config.rs` (overflow policy) | `session.py`, `bus/` | 🔴 **Not started** |
 | **7** | Repair derived layers | `test_final_derived_contract.py` | — | `derive/`, `stores/` | 🔴 **Not started** |
@@ -344,7 +344,52 @@ devenv shell -- pytest src/tyo3/tests/test_final_commit_delta_contract.py -q --n
 
 ---
 
-## 7. Phase 4 — Cutover: Python graph as pure applier 🟡 **In progress**
+## 7. Phase 4 — Cutover: Python graph as pure applier ✅ **DONE**
+
+> **Completed & verified 2026-06-07.** The native code delta is **authoritative**:
+> `CodeGraph.apply_code_delta` is the pure applier (no FFI/session/snapshot), and
+> the **only** mechanism that builds/updates a graph (head + snapshot), revision-
+> gated. The six-pass read-surface build, `apply_delta`, the resolution/
+> inheritance passes, the dead resolution indices, `_add_stub_node`, and
+> `_prime_identity_registry`/`_graph_identity_primed` are **deleted** (~1140 lines
+> from `graph/graph.py`). No read accessor advances head. Snapshot graph builds
+> over its own frozen db. Milestone gate green: **Rust 156/0**; **Python 647
+> passed, 16 xfailed, 3 failed** (the 3 = documented Phase 7×2 + Phase 9 baseline;
+> zero NEW failures). `test_concurrency` green (1:48 — no rebuild-per-commit
+> regression).
+>
+> **Commits:** `41b838a` (4.1 applier) · `13f2b08` (4.2a head/post-commit native +
+> `Option<CodeDeltaDto>` three-state) · `9bba822` (4.4 snapshot frozen-db delta) ·
+> `35d3e47` (4.2b+4.3 delete read-surface build + priming; producer bound).
+>
+> **What landed**
+> - **Applier (4.1):** rescan delta clears+rebuilds wholesale; a stale/duplicate
+>   incremental delta (`revision <= current`) is a no-op; edge removals
+>   symmetrically prune `_file_importers`. Unit-tested in
+>   `test_graph_apply_code_delta.py`.
+> - **Authoritative (4.2a):** `CommitDeltaDto.code_delta` is `Option<CodeDeltaDto>`;
+>   `build_commit_delta` emits `None` (producer deferred — see decision callout).
+>   Three-state consumer in `_apply_graph_delta`: `None`→rebuild from
+>   `full_code_delta()` (in place, so the head-graph instance is stable);
+>   `Some({})`→no-op; `Some({…})`→apply (gap→rebuild). `session.graph` /
+>   `_rebuild_head_graph_from_native()` build from the native delta — no priming,
+>   no `sync_all`.
+> - **Snapshot (4.4):** `PySnapshot::full_code_delta` produces over the snapshot's
+>   **frozen** db + pinned registry; `Snapshot.graph()` applies it (no session ref).
+> - **Delete + bound (4.2b/4.3):** deleted the read-surface build/updater/priming;
+>   **bounded the native producer to under-root files** — `compute_files` returns
+>   `project.files(db)`, unbounded over a warm live head (it includes every
+>   stdlib/typeshed file the type-checker opened: a 1-file fixture exploded to
+>   3965 nodes / 18363 ref edges); the frozen snapshot overlay already bounds it.
+>   Diagnostics re-homed to a read-only `refresh_diagnostics(source)` (one
+>   `source.check()`, never the applier). `CodeGraph.build` survives as a thin
+>   native builder (guide oracle-note); the apply_delta/rebuild tests were migrated
+>   to drive the native post-commit head path (`s.graph` vs a fresh `build`).
+>
+> **Deliberately deferred (user-confirmed 2026-06-07):** the in-commit incremental
+> producer — see the design-decision callout above. `head.code_layer` /
+> `reverse_deps` stay empty; `affected_ids` seeds-only until it lands.
+> [[phase4-producer-deferred]]
 
 > ### Design decision (user-confirmed 2026-06-07): defer the in-commit producer
 >
@@ -650,15 +695,20 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 | `test_final_content_spine.py` | 0 (✅ Phase 1 done) | — |
 | `test_watch.py` (Phase 1 carry-over) | 3 | Phase 5 |
 | `test_gate8_bus.py::test_inject_changes_fires_bus` (carry-over) | 1 | Phase 5 |
-| `test_graph_build.py::...incrementally...` (carry-over) | 1 | Phase 5 |
-| `test_final_no_read_side_writes.py` | 2 (was 3; `snapshot().graph()` went green via Phase 1.3) | Phase 4 |
+| `test_graph_build.py::...incrementally...` (carry-over) | 0 (✅ Phase 4 migrated it to the native head path; marker removed) | — |
+| `test_final_no_read_side_writes.py` | 0 (✅ Phase 4 done; all 3 reads side-effect-free) | — |
 | `test_final_commit_delta_contract.py` | 0 (✅ Phase 3 done) | — |
 | `test_final_transaction_rollback.py` | 3 (module-level) | Phase 5 |
 | `test_final_bus_contract.py` | 3 | Phase 6 |
 | `test_final_derived_contract.py` | 5 | Phase 7 |
 | `test_final_hash_ast.py` | 2 | Phase 9 |
 | `test_final_parity_oracle.py` | 0 (✅ Phase 2 done) | — |
-| **Total** | **21** (Phase 3 closed the 6 commit-delta xfails) | |
+| **Total** | **17** (Phase 4 closed the 2 no-read-side-writes xfails + the graph_build carry-over) | |
+
+> Note: `graph/tests/test_incremental_parity.py::test_moved_entity_...` carries a
+> **non-strict** xfail (move via `_inject_changes`/`poll_changes` — the same Phase
+> 1→5 watcher carry-over the `test_watch` inject tests xfail on). It is **not** in
+> the milestone `testpaths` (`src/tyo3/tests`), so it is outside the gated count.
 
 ---
 
@@ -669,8 +719,8 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 | 1 | `test: add final invariant tests + parity oracle harness` | **0 ✅** |
 | 2 | `refactor(content): complete generations; remove snapshot disk pre-population` | **1 ✅** |
 | 3 | `feat(rust): native code layer + code delta behind the parity oracle` | **2 ✅** |
-| 4 | `refactor(delta): id-level commit delta with structured moves + affected closure` | **3 🔴** |
-| 5 | `refactor(graph): cut over to a pure applier; remove read-surface build + priming` | **4 🔴** |
+| 4 | `refactor(delta): id-level commit delta with structured moves + affected closure` | **3 ✅** |
+| 5 | `refactor(graph): cut over to a pure applier; remove read-surface build + priming` | **4 ✅** |
 | 6 | `refactor(commit): single native commit() with staging + rollback` | **5 🔴** |
 | 7 | `fix(session/bus): one post-commit path; publish every write; non-blocking overflow` | **6 🔴** |
 | 8 | `fix(derived): id-level invalidation; read-time staleness; close snapshots; typed stores` | **7 🔴** |
@@ -715,4 +765,4 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 
 ---
 
-*Last updated: 2026-06-07 — Phases 0–2 complete. **Phase 3 (id-level commit delta) complete and verified**: `CommitDeltaDto`/`CommitDelta` with nested `code_delta`, precise hash-based `changed_ids` (no over-fire), structured `moved`, and the `affected_closure` helper. All 6 `test_final_commit_delta_contract.py` pass; milestone gate green (Rust 155/0; Python 639 passed / 3 pre-existing baseline failures / 19 xfailed). Live native reverse-dep maintenance deliberately deferred to Phase 4 (user-confirmed); `affected_ids` is seeds-only meanwhile. Phases 4–13 ahead.*
+*Last updated: 2026-06-07 — Phases 0–4 complete. **Phase 4 (cutover: pure applier) complete and verified**: the native code delta is authoritative; `CodeGraph.apply_code_delta` is the only graph builder/updater (head + snapshot), revision-gated; the read-surface build, `apply_delta`, and `_prime_identity_registry`/`_graph_identity_primed` are deleted (~1140 lines); no read accessor advances head (both no-read-side-writes xfails removed); the snapshot graph builds over its own frozen db; the native producer is bounded to project content. `CommitDeltaDto.code_delta` is `Option` with three-state semantics — the in-commit producer is deferred (user-confirmed); `head.code_layer`/`reverse_deps` empty, `affected_ids` seeds-only meanwhile. Milestone gate green (Rust 156/0; Python 647 passed / 3 pre-existing Phase 7×2 + Phase 9 baseline failures / 16 xfailed; `test_concurrency` green). Defect #3 closed. Phases 5–13 ahead.*
