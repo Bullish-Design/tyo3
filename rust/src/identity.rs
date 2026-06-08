@@ -467,14 +467,26 @@ pub struct Reconciliation {
 }
 
 /// How a single entity was bound to (or received) a `DurableId`.
+///
+/// Non-mint binds carry the anchor's `old_hash` **captured before the in-place
+/// rebind overwrites it** (§5.4) so the commit can classify changed-vs-unchanged
+/// precisely without a second registry read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Binding {
     /// Rule 1: exact qualified_path match.
-    Exact { id: DurableId },
+    Exact { id: DurableId, old_hash: ContentHash },
     /// Rule 2: content hash match at a new location.
-    Moved { id: DurableId, old_path: String },
+    Moved {
+        id: DurableId,
+        old_path: String,
+        old_hash: ContentHash,
+    },
     /// Rule 3: structural match (same name + kind + container), low confidence.
-    Struct { id: DurableId, confidence: Confidence },
+    Struct {
+        id: DurableId,
+        confidence: Confidence,
+        old_hash: ContentHash,
+    },
     /// Rule 4: no match — freshly minted id.
     Minted { id: DurableId },
 }
@@ -519,18 +531,99 @@ impl Reconciliation {
             .collect()
     }
 
-    /// Ids from `Exact` bindings whose hash changed (body-changed exacts).
-    pub fn changed(&self) -> Vec<&DurableId> {
-        // The reconciliation algorithm flags body-changed exacts in needs_review.
-        // For the delta we also need the full set of Exact bindings (changed or not).
-        self.bindings
+    /// Classify the reconciliation into the id-level commit-delta pieces
+    /// (§5.4 / §5.5): minted → created; retired → deleted; same id with a
+    /// **different content hash** → changed; same id at a new location with the
+    /// **same** hash → a structured `moved` entry.
+    ///
+    /// `entities` is the same slice that was reconciled; each binding is paired
+    /// with its entity by `qualified_path` (bindings are keyed by the new
+    /// entity's qualified_path). The result preserves the deterministic,
+    /// pre-sorted binding order (§5.12).
+    ///
+    /// **no-over-fire**: an `Exact` bind whose hash is unchanged is omitted from
+    /// `changed`. A `Moved` bind is the §5.5 rule-2 case (same hash, different
+    /// path) — by construction its hash is unchanged, so it is reported only in
+    /// `moved`, never in `changed`/`created`/`deleted`.
+    pub fn classify(&self, entities: &[Entity]) -> ReconcileClasses {
+        let by_path: HashMap<&str, &Entity> = entities
             .iter()
-            .filter_map(|(_, b)| match b {
-                Binding::Exact { id } => Some(id),
-                _ => None,
-            })
-            .collect()
+            .map(|e| (e.qualified_path.as_str(), e))
+            .collect();
+
+        let mut created = Vec::new();
+        let mut changed = Vec::new();
+        let mut moved = Vec::new();
+
+        for (path, binding) in &self.bindings {
+            let entity = by_path.get(path.as_str());
+            match binding {
+                Binding::Minted { id } => created.push(id.clone()),
+                Binding::Exact { id, old_hash } | Binding::Struct { id, old_hash, .. } => {
+                    let new_hash = entity.map(|e| e.content_hash);
+                    // Omit unchanged exacts (no-over-fire). A Struct re-bind is
+                    // low-confidence and its body almost always differs, so it
+                    // reports as changed when the hash differs (and it already
+                    // sits in needs_review).
+                    if new_hash.map_or(true, |h| h != *old_hash) {
+                        changed.push(id.clone());
+                    }
+                }
+                Binding::Moved { id, old_path, .. } => {
+                    let new_qualified_path = path.clone();
+                    let new_file = entity
+                        .map(|e| e.file.clone())
+                        .unwrap_or_else(|| file_of_qualified_path(&new_qualified_path).to_string());
+                    moved.push(MovedBinding {
+                        id: id.clone(),
+                        old_qualified_path: old_path.clone(),
+                        new_qualified_path,
+                        old_file: file_of_qualified_path(old_path).to_string(),
+                        new_file,
+                    });
+                }
+            }
+        }
+
+        ReconcileClasses {
+            created,
+            changed,
+            deleted: self.retired.clone(),
+            moved,
+        }
     }
+}
+
+/// The id-level classification of one reconciliation pass (§5.4).
+#[derive(Debug, Default, Clone)]
+pub struct ReconcileClasses {
+    /// Minted ids.
+    pub created: Vec<DurableId>,
+    /// Exact/Struct binds whose content hash changed (no over-fire).
+    pub changed: Vec<DurableId>,
+    /// Retired ids (== `Reconciliation::retired`).
+    pub deleted: Vec<DurableId>,
+    /// Structured moves: same id, new location, unchanged body.
+    pub moved: Vec<MovedBinding>,
+}
+
+/// A structured move binding: id + old/new qualified path + old/new file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MovedBinding {
+    pub id: DurableId,
+    pub old_qualified_path: String,
+    pub new_qualified_path: String,
+    pub old_file: String,
+    pub new_file: String,
+}
+
+/// The file component of a `qualified_path` (`file::qualified_name`): everything
+/// before the first `::`. The single authority for this split (§5.5 / Phase 2.4).
+pub fn file_of_qualified_path(qualified_path: &str) -> &str {
+    qualified_path
+        .split_once("::")
+        .map(|(file, _)| file)
+        .unwrap_or(qualified_path)
 }
 
 // ── Reconciliation algorithm (Step 5) ───────────────────────────────────
@@ -600,15 +693,15 @@ fn reconcile_impl(
             by_path.filter(|id| !bound_ids.contains(id)).cloned()
         };
         if let Some(id) = exact_id {
-            // If the content hash changed, flag for review.
-            if let Some(anchor) = registry.get(&id) {
-                if anchor.content_hash != e.content_hash {
-                    needs_review.push(id.clone());
-                }
+            // Capture the anchor's *old* hash before the apply phase rebinds it,
+            // and flag review if the content hash changed.
+            let old_hash = registry.get(&id).map(|a| a.content_hash).unwrap_or(e.content_hash);
+            if old_hash != e.content_hash {
+                needs_review.push(id.clone());
             }
             bound_ids.insert(id.clone());
             matched_entities.insert(idx);
-            let binding = Binding::Exact { id };
+            let binding = Binding::Exact { id, old_hash };
             bindings_by_path.insert(e.qualified_path.clone(), binding.clone());
             bindings.push((e.qualified_path.clone(), binding));
         }
@@ -644,13 +737,13 @@ fn reconcile_impl(
             ;
 
         if let Some(id) = best {
-            let old_path = registry
+            let (old_path, old_hash) = registry
                 .get(&id)
-                .map(|a| a.qualified_path.clone())
-                .unwrap_or_default();
+                .map(|a| (a.qualified_path.clone(), a.content_hash))
+                .unwrap_or_else(|| (String::new(), e.content_hash));
             bound_ids.insert(id.clone());
             matched_entities.insert(idx);
-            let binding = Binding::Moved { id, old_path };
+            let binding = Binding::Moved { id, old_path, old_hash };
             bindings_by_path.insert(e.qualified_path.clone(), binding.clone());
             bindings.push((e.qualified_path.clone(), binding));
         }
@@ -688,12 +781,14 @@ fn reconcile_impl(
             });
 
             let id = candidates[0].0.clone();
+            let old_hash = registry.get(&id).map(|a| a.content_hash).unwrap_or(e.content_hash);
             needs_review.push(id.clone());
             bound_ids.insert(id.clone());
             matched_entities.insert(idx);
             let binding = Binding::Struct {
                 id,
                 confidence: Confidence::Low,
+                old_hash,
             };
             bindings_by_path.insert(e.qualified_path.clone(), binding.clone());
             bindings.push((e.qualified_path.clone(), binding));
@@ -719,7 +814,7 @@ fn reconcile_impl(
             .get(&e.qualified_path)
             .expect("every sorted entity has a binding");
         match binding {
-            Binding::Exact { id }
+            Binding::Exact { id, .. }
             | Binding::Moved { id, .. }
             | Binding::Struct { id, .. } => {
                 registry.rebind(id, e.qualified_path.clone(), e.content_hash, revision);
@@ -1006,7 +1101,7 @@ mod tests {
 
         assert_eq!(recon.bindings.len(), 1);
         match &recon.bindings[0].1 {
-            Binding::Moved { id: bound_id, old_path } => {
+            Binding::Moved { id: bound_id, old_path, .. } => {
                 assert_eq!(*bound_id, id);
                 assert_eq!(old_path, "a.py::C");
             }
@@ -1034,7 +1129,7 @@ mod tests {
         let recon = reconcile(&mut reg, &entities, Revision(2));
 
         match &recon.bindings[0].1 {
-            Binding::Exact { id: bound_id } => assert_eq!(*bound_id, id),
+            Binding::Exact { id: bound_id, .. } => assert_eq!(*bound_id, id),
             other => panic!("expected Exact, got {:?}", other),
         }
         // Hash updated.
@@ -1346,7 +1441,7 @@ mod tests {
             let binding2 = bind2.get(path).expect("binding missing in recon2");
             // Compare binding variants for reused ids (Exact should have same id).
             match (binding1, binding2) {
-                (Binding::Exact { id: id1 }, Binding::Exact { id: id2 }) => {
+                (Binding::Exact { id: id1, .. }, Binding::Exact { id: id2, .. }) => {
                     assert_eq!(id1, id2, "Exact bind id should match for {}", path);
                 }
                 (Binding::Minted { .. }, Binding::Minted { .. }) => {
@@ -1423,11 +1518,137 @@ mod tests {
 
         // Should re-bind to the retained id.
         match &recon2.bindings[0].1 {
-            Binding::Exact { id: bound_id } => assert_eq!(*bound_id, id),
+            Binding::Exact { id: bound_id, .. } => assert_eq!(*bound_id, id),
             Binding::Moved { id: bound_id, .. } => assert_eq!(*bound_id, id),
             other => panic!("expected Exact or Moved, got {:?}", other),
         }
         assert_eq!(reg.get(&id).unwrap().status, IdentityStatus::Active);
+    }
+
+    // ── Phase 3: classify() — id-level commit delta ─────────────────────
+
+    /// Build a registry pre-seeded with one anchor at `(path::name, hash)`.
+    fn seeded(path: &str, name: &str, kind: SymbolKind, h: u128) -> (DurableId, IdentityRegistry) {
+        let mut reg = IdentityRegistry::default();
+        let id = DurableId::mint();
+        reg.insert(Anchor {
+            id: id.clone(),
+            qualified_path: format!("{path}::{name}"),
+            content_hash: hash(h),
+            kind,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+        (id, reg)
+    }
+
+    #[test]
+    fn classify_edit_one_function_reports_changed_id_only() {
+        let (id, mut reg) = seeded("a.py", "foo", SymbolKind::Function, 100);
+        let entities = vec![entity("a.py", "foo", SymbolKind::Function, hash(200), None)];
+        let recon = reconcile(&mut reg, &entities, Revision(2));
+        let c = recon.classify(&entities);
+        assert_eq!(c.changed, vec![id.clone()]);
+        assert!(c.created.is_empty());
+        assert!(c.deleted.is_empty());
+        assert!(c.moved.is_empty());
+    }
+
+    #[test]
+    fn classify_whitespace_only_edit_changes_nothing() {
+        // Same hash (cosmetic edit) → Exact with unchanged hash → not in changed.
+        let (_id, mut reg) = seeded("a.py", "foo", SymbolKind::Function, 100);
+        let entities = vec![entity("a.py", "foo", SymbolKind::Function, hash(100), None)];
+        let recon = reconcile(&mut reg, &entities, Revision(2));
+        let c = recon.classify(&entities);
+        assert!(c.changed.is_empty(), "no-over-fire: unchanged hash omitted");
+        assert!(c.created.is_empty());
+        assert!(c.deleted.is_empty());
+        assert!(c.moved.is_empty());
+    }
+
+    #[test]
+    fn classify_two_functions_edited_reports_two_ids() {
+        use std::collections::HashSet;
+        let mut reg = IdentityRegistry::default();
+        let id_foo = DurableId::mint();
+        let id_bar = DurableId::mint();
+        reg.insert(Anchor {
+            id: id_foo.clone(),
+            qualified_path: "a.py::foo".into(),
+            content_hash: hash(1),
+            kind: SymbolKind::Function,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+        reg.insert(Anchor {
+            id: id_bar.clone(),
+            qualified_path: "a.py::bar".into(),
+            content_hash: hash(2),
+            kind: SymbolKind::Function,
+            first_seen_rev: Revision(1),
+            last_seen_rev: Revision(1),
+            status: IdentityStatus::Active,
+        });
+        let entities = vec![
+            entity("a.py", "foo", SymbolKind::Function, hash(10), None),
+            entity("a.py", "bar", SymbolKind::Function, hash(20), None),
+        ];
+        let recon = reconcile(&mut reg, &entities, Revision(2));
+        let c = recon.classify(&entities);
+        let changed: HashSet<DurableId> = c.changed.iter().cloned().collect();
+        assert_eq!(changed.len(), 2);
+        assert!(changed.contains(&id_foo) && changed.contains(&id_bar));
+    }
+
+    #[test]
+    fn classify_pure_move_is_structured_not_create_delete() {
+        let (id, mut reg) = seeded("a.py", "helper", SymbolKind::Function, 77);
+        // Same body (hash 77) at a new file → Moved.
+        let entities = vec![entity("b.py", "helper", SymbolKind::Function, hash(77), None)];
+        let recon = reconcile(&mut reg, &entities, Revision(2));
+        let c = recon.classify(&entities);
+        assert_eq!(c.moved.len(), 1);
+        let m = &c.moved[0];
+        assert_eq!(m.id, id);
+        assert_eq!(m.old_qualified_path, "a.py::helper");
+        assert_eq!(m.new_qualified_path, "b.py::helper");
+        assert_eq!(m.old_file, "a.py");
+        assert_eq!(m.new_file, "b.py");
+        assert!(c.created.is_empty(), "a move is not a create");
+        assert!(c.deleted.is_empty(), "a move is not a delete");
+        assert!(c.changed.is_empty(), "a move with unchanged body is not changed");
+    }
+
+    #[test]
+    fn classify_deleted_entity_reports_deleted_id() {
+        let (id, mut reg) = seeded("a.py", "gone", SymbolKind::Function, 5);
+        let entities: Vec<Entity> = vec![];
+        let recon = reconcile(&mut reg, &entities, Revision(2));
+        let c = recon.classify(&entities);
+        assert_eq!(c.deleted, vec![id]);
+        assert!(c.changed.is_empty());
+        assert!(c.created.is_empty());
+        assert!(c.moved.is_empty());
+    }
+
+    #[test]
+    fn classify_new_entity_reports_created_id() {
+        let mut reg = IdentityRegistry::default();
+        let entities = vec![entity("a.py", "fresh", SymbolKind::Function, hash(9), None)];
+        let recon = reconcile(&mut reg, &entities, Revision(1));
+        let c = recon.classify(&entities);
+        assert_eq!(c.created.len(), 1);
+        assert!(c.changed.is_empty() && c.deleted.is_empty() && c.moved.is_empty());
+    }
+
+    #[test]
+    fn file_of_qualified_path_splits_on_first_separator() {
+        assert_eq!(file_of_qualified_path("a.py::Foo::bar"), "a.py");
+        assert_eq!(file_of_qualified_path("pkg/mod.py::C"), "pkg/mod.py");
+        assert_eq!(file_of_qualified_path("noseparator"), "noseparator");
     }
 
     // ── Step 7: Format tests ────────────────────────────────────────────
