@@ -1,9 +1,19 @@
 """Delta — the revision-stamped, scopable notification object.
 
-Packs a committed ``SyncResult`` into a ``Delta`` with the transitive
-affected set (§4.3.3) so the bus can scope delivery per-subscriber
-(§12.2.1) and subscribers can read exactly the notified revision
-(§12.2.3).
+A thin immutable projection of the id-level ``CommitDelta`` (§5.11): the
+``created``/``changed``/``deleted``/``moved``/``authored`` id sets are taken
+**straight from the commit delta's id fields** — no path→id reconstruction.
+
+The one graph-touch that survives is the *transitive affected closure*
+(§5.4 / §5.11): ``affected`` is the closure of ``changed ∪ deleted`` under
+reverse-deps, so a reverse-dependent (e.g. an importer of a changed entity) is
+notified even though its own body didn't change.  This is computed natively in
+the commit once the in-commit code-layer producer lands; while that producer is
+deferred (Phases 3–5), ``CommitDelta.affected_ids`` is the *seed* set only, so
+we expand it over the materialised head graph here — purely id→id and id→file,
+never path→id.  When the native producer lands, ``affected_ids`` is already
+transitive and these two helpers are deleted (the bus becomes a pure
+projection).
 """
 
 from __future__ import annotations
@@ -14,17 +24,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tyo3.bus.interest import Interest
     from tyo3.graph.graph import CodeGraph
-    from tyo3.models.analysis import SyncResult
+    from tyo3.models.delta import CommitDelta
 
 
 @dataclass(frozen=True)
 class Delta:
     """A revision-stamped delta produced by a single committed write.
 
-    ``affected`` is the transitive closure of ``changed ∪ deleted``
-    under the dependency graph's inbound edges (§4.3.3): an importer of
-    a changed file is in the affected set even though its own code
-    didn't change.  This is the set that determines whether a
+    ``affected`` is the transitive closure of ``changed ∪ deleted`` under the
+    dependency graph's inbound edges (§5.4): the set that determines whether a
     subscriber is notified.
 
     Immutable — the bus delivers these to subscriber queues.
@@ -36,7 +44,7 @@ class Delta:
     deleted: frozenset[str]   # DurableIds deleted
     moved: frozenset[str]     # DurableIds moved (same hash, new location)
     authored: frozenset[str]  # authored-record ids edited (Gate 6)
-    affected: frozenset[str]  # transitive closure of changed∪deleted (§4.3.3)
+    affected: frozenset[str]  # transitive closure of changed∪deleted (§5.4)
     rescan: bool
     files: frozenset[str]     # project-relative paths touched
     layers: frozenset[str]    # layers touched ("code" + derived/authored layers)
@@ -56,7 +64,6 @@ class Delta:
         # matching was already validated by interest.matches() in the
         # bus — the delta is relevant to this subscriber).
         has_id_filter = bool(interest.ids)
-        has_file_filter = bool(interest.files)
 
         if has_id_filter:
             scoped_created = self.created & interest.ids
@@ -65,16 +72,9 @@ class Delta:
             scoped_moved = self.moved & interest.ids
             scoped_authored = self.authored & interest.ids
             scoped_affected = self.affected & interest.ids
-        elif has_file_filter:
-            # File-based interest: keep all ids (bus already matched).
-            scoped_created = self.created
-            scoped_changed = self.changed
-            scoped_deleted = self.deleted
-            scoped_moved = self.moved
-            scoped_authored = self.authored
-            scoped_affected = self.affected
         else:
-            # Layer-only or empty interest: keep all.
+            # File-based, layer-only, or empty interest: keep all ids
+            # (the bus already matched this delta to the subscriber).
             scoped_created = self.created
             scoped_changed = self.changed
             scoped_deleted = self.deleted
@@ -107,103 +107,62 @@ class Delta:
         )
 
     @classmethod
-    def from_sync_result(
+    def from_commit_delta(
         cls,
-        result: SyncResult,
+        delta: CommitDelta,
         graph: CodeGraph | None = None,
         *,
         root: str | None = None,
     ) -> Delta:
-        """Build a ``Delta`` from a committed ``SyncResult``.
+        """Wrap an id-level ``CommitDelta`` for bus delivery (§5.11).
 
-        ``result.created/changed/deleted/moved`` are **absolute file paths**
-        from the native SyncResult.  *root* is the project root used to
-        normalise them to project-relative paths.  The graph maps those
-        files to DurableIds so the delta carries id-level precision.
+        The id sets come straight from the commit delta's id fields — no
+        path→id reconstruction.  ``affected`` is the native ``affected_ids``
+        (the transitive closure of ``changed ∪ deleted`` under reverse-deps,
+        §5.4); while the in-commit producer is deferred that field is the seed
+        set only, so it is expanded over *graph* (the materialised head graph
+        at this revision) when one is available — id→id only.
 
-        If *graph* is provided, the transitive affected set (§4.3.3) is
-        computed by walking inbound dependency edges from the entities in
-        the changed and deleted files.  Without a graph, ``affected`` is
-        the union of all ids in changed+deleted files.
-
-        *graph* must be the head graph at ``result.revision``.
+        ``touched_files`` is path metadata (absolute on the native delta);
+        when *root* is given it is normalised to project-relative for
+        file-interest matching, and the project-relative files of the affected
+        ids are unioned in so a file-interested reverse-dependent matches.
         """
-        # Normalise file paths from absolute → project-relative.
-        changed_raw = frozenset(result.changed)
-        deleted_raw = frozenset(result.deleted)
-        created_raw = frozenset(result.created)
-        # ``moved`` is path-shaped on the legacy ``SyncResult`` but structured
-        # (``MovedEntity`` with ``id`` + old/new file) on the Phase 3
-        # ``CommitDelta``.  Detect the latter: take the ids directly and the
-        # old/new files for file-interest matching.
-        moved_items = list(result.moved)
-        if moved_items and hasattr(moved_items[0], "id"):
-            _structured_moved_ids: frozenset[str] | None = frozenset(m.id for m in moved_items)
-            moved_raw = frozenset(f for m in moved_items for f in (m.old_file, m.new_file))
-        else:
-            _structured_moved_ids = None
-            moved_raw = frozenset(moved_items)
+        created = frozenset(delta.created_ids)
+        changed = frozenset(delta.changed_ids)
+        deleted = frozenset(delta.deleted_ids)
+        moved = frozenset(m.id for m in delta.moved)
+        authored = frozenset(delta.authored_ids)
 
-        # Normalise paths when root is available.
-        if root is not None:
-            changed_files = frozenset(_to_relative(root, p) for p in changed_raw)
-            deleted_files = frozenset(_to_relative(root, p) for p in deleted_raw)
-            created_files = frozenset(_to_relative(root, p) for p in created_raw)
-            moved_files = frozenset(_to_relative(root, p) for p in moved_raw)
-        else:
-            changed_files = changed_raw
-            deleted_files = deleted_raw
-            created_files = created_raw
-            moved_files = moved_raw
-
-        if graph is not None:
-            changed_ids = _ids_in_files(changed_files, graph)
-            deleted_ids = _ids_in_files(deleted_files, graph)
-            created_ids = _ids_in_files(created_files, graph)
-            moved_ids = _ids_in_files(moved_files, graph)
-        else:
-            # No graph: treat SyncResult entries as direct DurableIds.
-            changed_ids = changed_files
-            deleted_ids = deleted_files
-            created_ids = created_files
-            moved_ids = moved_files
-
-        # Structured CommitDelta moves carry the DurableId directly — use it
-        # rather than the file→id mapping.
-        if _structured_moved_ids is not None:
-            moved_ids = _structured_moved_ids
-
-        # Authored ids are already DurableIds. ``CommitDelta`` exposes them as
-        # ``authored_ids``; the legacy ``SyncResult`` as ``authored``.
-        authored_ids = frozenset(
-            getattr(result, "authored_ids", None) or getattr(result, "authored", ())
-        )
-
-        # Transitive affected set (§4.3.3).
-        seed = changed_ids | deleted_ids
+        # Native affected_ids is the seed set (changed∪deleted) until the
+        # in-commit producer lands; expand it transitively over the head graph
+        # so reverse-dependents are still notified (§5.4 / §5.11; the Phase 3
+        # "no capability lost" decision).  When the native producer lands,
+        # affected_ids is already transitive and _compute_affected is a no-op
+        # (the closure of a closed set is itself) — then this helper is deleted.
+        seed = frozenset(delta.affected_ids) or (changed | deleted)
         affected = _compute_affected(seed, graph)
 
-        # Files touched: the graph-relative paths from the result + any
-        # files reachable via the affected set.
-        files = changed_files | deleted_files | created_files | moved_files
-        # Also add files from affected ids.
-        affected_files = _resolve_files(affected, graph)
-        files = files | affected_files
-
-        # Resolve layers touched.
-        layers = _resolve_layers_from_files(result, authored_ids)
+        touched = delta.touched_files
+        if root is not None:
+            files = frozenset(_to_relative(root, p) for p in touched)
+        else:
+            files = frozenset(touched)
+        # Union the project-relative files of affected ids so a file-interested
+        # reverse-dependent matches (the affected importer's own file).
+        files = files | _resolve_files(affected, graph)
 
         return cls(
-            revision=result.revision,
-            created=created_ids,
-            changed=changed_ids,
-            deleted=deleted_ids,
-            moved=moved_ids,
-            authored=authored_ids,
+            revision=delta.revision,
+            created=created,
+            changed=changed,
+            deleted=deleted,
+            moved=moved,
+            authored=authored,
             affected=affected,
-            rescan=result.rescan,
+            rescan=delta.rescan,
             files=files,
-            layers=layers,
+            layers=_layers_touched(delta),
         )
 
 
@@ -211,8 +170,10 @@ class Delta:
 
 
 def _to_relative(root: str, path: str) -> str:
-    """Convert an absolute path to project-relative."""
+    """Convert an absolute path to project-relative (idempotent for
+    already-relative paths)."""
     from pathlib import Path, PurePosixPath
+
     try:
         root_p = Path(root).resolve()
         path_p = Path(path).resolve()
@@ -221,53 +182,16 @@ def _to_relative(root: str, path: str) -> str:
         return path
 
 
-def _ids_in_files(
-    files: frozenset[str],
-    graph: object | None,
-) -> frozenset[str]:
-    """Resolve the set of ``DurableId``s defined in *files*.
-
-    Uses the graph's ``_file_to_nodes`` index.  Accepts both absolute
-    paths (from SyncResult) and project-relative paths (from the graph).
-    """
-    if graph is None or not files:
-        return frozenset()
-
-    # The graph stores project-relative paths.  SyncResult gives absolute
-    # paths.  Try both for lookup.
-    ids: set[str] = set()
-    try:
-        for f in files:
-            found = False
-            # Direct lookup first.
-            for idx in graph._file_to_nodes.get(f, []):  # type: ignore[union-attr]
-                node = graph._graph[idx]  # type: ignore[union-attr]
-                ids.add(node.durable_id)
-                found = True
-            if found:
-                continue
-            # Try extracting the relative suffix.  SyncResult absolute
-            # paths look like /tmp/.../models.py.  Walk the file_to_nodes
-            # keys to find a suffix match.
-            for gfile, indices in graph._file_to_nodes.items():  # type: ignore[union-attr]
-                if f.endswith("/" + gfile) or f == gfile:
-                    for idx in indices:
-                        node = graph._graph[idx]  # type: ignore[union-attr]
-                        ids.add(node.durable_id)
-                    break
-    except Exception:
-        pass
-    return frozenset(ids)
-
-
 def _compute_affected(
     seed: frozenset[str],
-    graph: object | None,
+    graph: CodeGraph | None,
 ) -> frozenset[str]:
-    """Compute the transitive affected set (§4.3.3).
+    """Expand *seed* (durable ids) to its transitive reverse-dep closure
+    (§5.4): ``affected = seed ∪ transitive_dependents(seed)``.
 
-    ``affected = seed ∪ transitive_dependents(seed)``
-    using the graph's reverse-dependency index.
+    Pure id→id over the graph's reverse-dependency index.  Returns *seed*
+    unchanged when no graph is materialised (the native seed set).  Deleted
+    once the native in-commit producer emits a transitive ``affected_ids``.
     """
     if graph is None:
         return seed
@@ -275,60 +199,58 @@ def _compute_affected(
     affected: set[str] = set(seed)
     try:
         for did in seed:
-            deps = graph.transitive_dependents(did)  # type: ignore[union-attr]
-            affected.update(deps)
+            affected.update(graph.transitive_dependents(did))
     except Exception:
         pass
-
     return frozenset(affected)
 
 
 def _resolve_files(
     ids: frozenset[str],
-    graph: object | None,
+    graph: CodeGraph | None,
 ) -> frozenset[str]:
-    """Map a set of ``DurableId``s to their defining project-relative files.
+    """Map durable *ids* to their defining project-relative files (id→file).
 
-    Uses the graph's node registry.  Falls back to an empty set if no
-    graph is available.
+    Used so a file-interested subscriber matches a reverse-dependent by its
+    own file.  Empty when no graph is materialised.
     """
-    if graph is None:
+    if graph is None or not ids:
         return frozenset()
 
     files: set[str] = set()
     try:
         for did in ids:
-            idx = graph._id_to_index.get(did)  # type: ignore[union-attr]
+            idx = graph._id_to_index.get(did)
             if idx is not None:
-                node = graph._graph[idx]  # type: ignore[union-attr]
-                f = node.file
-                if f:
-                    files.add(f)
+                node = graph._graph[idx]
+                if node.file:
+                    files.add(node.file)
     except Exception:
         pass
-
     return frozenset(files)
 
 
-def _resolve_layers_from_files(result: SyncResult, authored: frozenset[str]) -> frozenset[str]:
-    """Resolve the set of layers touched by this revision.
+def _layers_touched(delta: CommitDelta) -> frozenset[str]:
+    """Resolve the set of layers touched by this revision, keyed off the
+    commit delta's id fields (not file strings).
 
-    Every write touches the implicit ``"code"`` layer (unless it's a
-    pure-authored write that only touches authored layers).  Authored
-    writes touch their respective authored layer.
+    Any structural change touches the implicit ``"code"`` layer; an authored
+    write touches the ``"authored"`` layer (so a layer-interested subscriber
+    is notified).
     """
     layers: set[str] = set()
 
-    # Code/derived changes: always touch "code" at minimum.
     has_code_change = bool(
-        result.created or result.changed or result.deleted
-        or result.moved or result.rescan
+        delta.created_ids
+        or delta.changed_ids
+        or delta.deleted_ids
+        or delta.moved
+        or delta.rescan
     )
     if has_code_change:
         layers.add("code")
 
-    # Authored writes touch their layer.
-    if authored:
+    if delta.authored_ids:
         layers.add("authored")
 
     return frozenset(layers)

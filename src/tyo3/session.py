@@ -911,11 +911,14 @@ class TyO3Session(_ReadOps):
         if bus is None or not bus.has_subscribers():
             return
         from tyo3.bus.delta import Delta
-        # Use the head graph if it was already materialized (it was updated
-        # by _apply_graph_delta just before this call).  If not materialized,
-        # pass None — the delta will carry file paths as ids (acceptable
-        # when the graph was never built).
-        delta = Delta.from_sync_result(result, self._head_graph, root=str(self._root))
+        # The bus delta is an id-level projection of the commit delta (§5.11):
+        # id sets come straight from the delta; the transitive ``affected``
+        # closure is expanded over the materialised head graph (id→id) while
+        # the native in-commit producer is deferred — never path→id.
+        # ``touched_files`` is normalised to project-relative for file-interest
+        # matching.  The head graph reflects this revision (the post-commit
+        # hook applies the graph delta before publishing).
+        delta = Delta.from_commit_delta(result, self._head_graph, root=str(self._root))
         bus.publish(delta)
 
     # ── Head snapshot caching ───────────────────────────────────────

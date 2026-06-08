@@ -104,11 +104,6 @@ def test_every_write_kind_publishes_exactly_one_delta(tmp_path):
         s.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 6 (on Phase 3): bus deltas carry durable ids only once the "
-    "id-level commit delta exists; today they are path-shaped",
-)
 def test_bus_deltas_are_id_level_and_in_revision_order(tmp_path):
     s = _open(tmp_path, {"a.py": "def foo():\n    return 1\n"})
     try:

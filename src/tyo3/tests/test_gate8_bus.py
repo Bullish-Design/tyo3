@@ -93,20 +93,31 @@ class TestInterest:
 class TestDelta:
     """Unit tests for the Delta + transitive affected set (§4.3.3)."""
 
-    def test_from_sync_result_basic_mapping(self):
+    def test_from_commit_delta_basic_mapping(self):
         from tyo3.bus.delta import Delta
-        from tyo3.models.analysis import SyncResult
+        from tyo3.models.delta import CommitDelta, MovedEntity
 
-        result = SyncResult(
+        result = CommitDelta(
             revision=5,
-            created=["01A", "01B"],
-            changed=["01C"],
-            deleted=["01D"],
-            moved=["01E"],
-            authored=["01F"],
+            created_ids=["01A", "01B"],
+            changed_ids=["01C"],
+            deleted_ids=["01D"],
+            moved=[
+                MovedEntity(
+                    id="01E",
+                    old_qualified_path="a.py::x",
+                    new_qualified_path="b.py::x",
+                    old_file="a.py",
+                    new_file="b.py",
+                )
+            ],
+            authored_ids=["01F"],
+            # affected_ids is native-computed (the closure of changed∪deleted);
+            # the bus projects it straight through — it no longer recomputes it.
+            affected_ids=["01C", "01D"],
             rescan=False,
         )
-        delta = Delta.from_sync_result(result, graph=None)
+        delta = Delta.from_commit_delta(result)
         assert delta.revision == 5
         assert delta.created == frozenset({"01A", "01B"})
         assert delta.changed == frozenset({"01C"})
@@ -114,11 +125,16 @@ class TestDelta:
         assert delta.moved == frozenset({"01E"})
         assert delta.authored == frozenset({"01F"})
         assert delta.rescan is False
-        # affected = changed ∪ deleted when no graph
         assert delta.affected == frozenset({"01C", "01D"})
 
-    def test_affected_includes_transitive_dependents(self):
-        """Transitive affected set includes importers (§4.3.3)."""
+    def test_affected_carries_native_seed_ids(self):
+        """The bus delta's ``affected`` is the native ``affected_ids`` (§5.4).
+
+        With the in-commit producer deferred, ``affected_ids`` is the seed set
+        (``changed ∪ deleted``); a changed entity is therefore in its own
+        ``affected`` set.  It becomes the full transitive closure — with no bus
+        change — once the native producer lands.
+        """
         from tyo3 import TyO3Session
         from tyo3.bus.delta import Delta
 
@@ -138,20 +154,17 @@ class TestDelta:
 
             with TyO3Session(proj) as session:
                 session.sync_all()
-                # Get a graph with both files indexed.
-                g = session.graph
 
                 user_id = session.id_for("models.py", 1, 7)
                 assert user_id is not None
 
-                # Edit models.py::User. The delta's affected set
-                # should include the importers via reverse-dep.
-                result = session.edit("models.py", "class User:\n    name: str = ''\n    age: int = 0\n")
-                delta = Delta.from_sync_result(result, g)
+                # Edit models.py::User — its id is a changed seed, so it is in
+                # the native affected set the bus projects.
+                result = session.edit(
+                    "models.py", "class User:\n    name: str = ''\n    age: int = 0\n"
+                )
+                delta = Delta.from_commit_delta(result, root=proj)
 
-                # User is in the changed file; affected should include
-                # User + its transitive dependents (app.py's 'create' function
-                # that references User).
                 assert user_id in delta.affected
                 # The changed set should contain ids from models.py
                 assert len(delta.changed) >= 1
@@ -161,24 +174,25 @@ class TestDelta:
 
     def test_rescan_delta(self):
         from tyo3.bus.delta import Delta
-        from tyo3.models.analysis import SyncResult
+        from tyo3.models.delta import CommitDelta
 
-        result = SyncResult(revision=1, rescan=True)
-        delta = Delta.from_sync_result(result, graph=None)
+        result = CommitDelta(revision=1, rescan=True)
+        delta = Delta.from_commit_delta(result)
         assert delta.rescan is True
         assert delta.is_empty()  # no ids in a pure rescan result
 
     def test_scoped_to_filters_by_interest(self, tmp_path):
         from tyo3.bus.delta import Delta
         from tyo3.bus.interest import Interest
-        from tyo3.models.analysis import SyncResult
+        from tyo3.models.delta import CommitDelta
 
-        result = SyncResult(
+        result = CommitDelta(
             revision=3,
-            changed=["01A", "01B"],
-            deleted=["01C"],
+            changed_ids=["01A", "01B"],
+            deleted_ids=["01C"],
+            affected_ids=["01A", "01B", "01C"],
         )
-        delta = Delta.from_sync_result(result, graph=None)
+        delta = Delta.from_commit_delta(result)
 
         # Scope to id "01A" only.
         interest = Interest.ids_of({"01A"})
@@ -189,13 +203,13 @@ class TestDelta:
 
     def test_is_empty(self):
         from tyo3.bus.delta import Delta
-        from tyo3.models.analysis import SyncResult
+        from tyo3.models.delta import CommitDelta
 
-        empty = Delta.from_sync_result(SyncResult(revision=0), graph=None)
+        empty = Delta.from_commit_delta(CommitDelta(revision=0))
         assert empty.is_empty()
 
-        nonempty = Delta.from_sync_result(
-            SyncResult(revision=1, changed=["01A"]), graph=None
+        nonempty = Delta.from_commit_delta(
+            CommitDelta(revision=1, changed_ids=["01A"])
         )
         assert not nonempty.is_empty()
 
@@ -296,7 +310,7 @@ class TestSubscription:
         from tyo3.bus.interest import Interest
         from tyo3.bus.subscription import Subscription
 
-        sub = Subscription(Interest.ALL, capacity=1, overflow="error")
+        sub = Subscription(Interest.ALL, capacity=1, overflow="drop_and_mark_lagged")
         sub._offer(self._make_delta(1, {"id1"}))
         sub._offer(self._make_delta(2, {"id2"}))  # overflows
         assert sub.lagged is True
@@ -538,16 +552,16 @@ overflow = "coalesce"
             sub.close()
 
     def test_error_overflow_lag_rescan(self):
-        """overflow="error": dropped delta sets lagged; rescan_from recovers."""
+        """drop_and_mark_lagged: dropped delta sets lagged; rescan_from recovers."""
         from tyo3.bus.interest import Interest
         from tyo3.bus.subscription import Subscription
 
-        sub = Subscription(Interest.ALL, capacity=1, overflow="error")
+        sub = Subscription(Interest.ALL, capacity=1, overflow="drop_and_mark_lagged")
         from tyo3.bus.delta import Delta
-        from tyo3.models.analysis import SyncResult
+        from tyo3.models.delta import CommitDelta
 
-        d1 = Delta.from_sync_result(SyncResult(revision=1, changed=["id1"]))
-        d2 = Delta.from_sync_result(SyncResult(revision=2, changed=["id2"]))
+        d1 = Delta.from_commit_delta(CommitDelta(revision=1, changed_ids=["id1"]))
+        d2 = Delta.from_commit_delta(CommitDelta(revision=2, changed_ids=["id2"]))
         sub._offer(d1)
         sub._offer(d2)  # overflows — sets lagged
         assert sub.lagged is True
@@ -640,7 +654,7 @@ overflow = "coalesce"
             (proj / "a.py").write_text("def foo():\n    return 2\n")
             session._inject_changes([("changed", "a.py")])
             result = session.poll_changes()
-            assert result is not None, "poll_changes should return a SyncResult"
+            assert result is not None, "poll_changes should return a CommitDelta"
 
             # Subscriber should receive the delta.
             delta = sub.poll(timeout=2.0)
