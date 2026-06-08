@@ -5,16 +5,19 @@
 //! code layer uses), computing a `qualified_path` for each and an
 //! AST-normalised `content_hash`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use ruff_db::files::File;
+use ruff_db::parsed::parsed_module;
 use ruff_db::source::source_text;
+use ruff_python_ast::Stmt;
 use ruff_source_file::LineIndex;
+use ruff_text_size::TextRange;
 use ty_project::Db;
 
-use crate::hash::{hash_entity, normalise_entity_source, ContentHash, HashPolicy};
+use crate::hash::{entity_normal_form, hash_entity, index_statements, ContentHash, HashPolicy};
 use crate::project::TyProjectState;
 
 // ── SymbolKind (internal, not the DTO) ───────────────────────────────────
@@ -158,6 +161,12 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
         let source_str = src.as_str();
         let line_index = LineIndex::from_source_text(source_str);
 
+        // Index the file's parsed statements by range once: an entity's
+        // `full_range` looks up its defining `Stmt` here for AST-canonical
+        // hashing (no re-parse — the ty db already parsed this revision).
+        let parsed = parsed_module(&state.db, *file).load(&state.db);
+        let stmt_index = index_statements(&parsed.syntax().body);
+
         // Walk the hierarchy from top-level entries, tracking visited ids to
         // avoid double-processing symbols that appear both as a root entry and
         // as a child.
@@ -172,6 +181,7 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
                 id,
                 &info,
                 source_str,
+                &stmt_index,
                 &line_index,
                 &file_path,
                 None,
@@ -192,6 +202,7 @@ fn collect_entities_recursive(
     id: ty_ide::SymbolId,
     info: &ty_ide::SymbolInfo,
     source_str: &str,
+    stmt_index: &HashMap<TextRange, &Stmt>,
     _line_index: &LineIndex,
     file_path: &str,
     parent_qualified: Option<&str>,
@@ -216,11 +227,10 @@ fn collect_entities_recursive(
     };
     let container = parent_qualified.map(|s| s.to_string());
 
-    // Extract the entity's source text from its full_range.
-    let entity_source = extract_range(source_str, info.full_range);
-
-    // Normalise and hash.
-    let normal_form = normalise_entity_source(&entity_source, policy);
+    // Hash a canonical rendering of the entity's AST subtree (the statement
+    // whose range matches `full_range`). `source_str` is only the degraded
+    // fallback when no statement matches.
+    let normal_form = entity_normal_form(stmt_index, info.full_range, source_str, policy);
     let content_hash = hash_entity(&normal_form);
 
     entities.push(Entity {
@@ -246,6 +256,7 @@ fn collect_entities_recursive(
             child_id,
             &child_info,
             source_str,
+            stmt_index,
             _line_index,
             file_path,
             Some(&qualified_path),
@@ -255,16 +266,6 @@ fn collect_entities_recursive(
             visited,
         );
     }
-}
-
-/// Extract the source text within a `TextRange` from the full source.
-fn extract_range(source: &str, range: ruff_text_size::TextRange) -> String {
-    let start = range.start().to_usize();
-    let end = range.end().to_usize();
-    // Clamp to valid UTF-8 boundaries.
-    let start = start.min(source.len());
-    let end = end.min(source.len());
-    source[start..end].to_string()
 }
 
 #[cfg(test)]

@@ -51,6 +51,9 @@ ruff_notebook = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689e
 
 [dev-dependencies]
 tempfile = "3"      # real temp directories for OsSystem-backed tests
+# Parser for hash.rs unit tests: parse a snippet → render its AST. Production
+# code never re-parses (it reuses the ty db's already-parsed module).
+ruff_python_parser = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
 
 [profile.release]
 lto = true

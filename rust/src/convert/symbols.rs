@@ -69,6 +69,7 @@ pub fn collect_symbols_recursive(
     id: ty_ide::SymbolId,
     info: &ty_ide::SymbolInfo,
     source: &str,
+    stmt_index: &std::collections::HashMap<ruff_text_size::TextRange, &ruff_python_ast::Stmt>,
     line_index: &ruff_source_file::LineIndex,
     file_path: &str,
     parent_name: Option<&str>,
@@ -88,12 +89,12 @@ pub fn collect_symbols_recursive(
     };
     let anchor = registry.and_then(|r| r.by_path(&identity_path).and_then(|id| r.get(id)));
 
-    // Compute per-profile content hashes from the entity source text.
+    // Compute per-profile content hashes from a canonical rendering of the
+    // entity's AST subtree (looked up in `stmt_index` by `full_range`).
     let mut content_hashes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let entity_source = extract_range(source, info.full_range);
     let default_hash = if let Some(policies) = hash_policies {
         for (profile_name, policy) in policies {
-            let nf = crate::hash::normalise_entity_source(&entity_source, policy);
+            let nf = crate::hash::entity_normal_form(stmt_index, info.full_range, source, policy);
             let h = crate::hash::hash_entity(&nf);
             content_hashes.insert(profile_name.clone(), h.0.to_string());
         }
@@ -132,6 +133,7 @@ pub fn collect_symbols_recursive(
             child_id,
             &child_info,
             source,
+            stmt_index,
             line_index,
             file_path,
             Some(own_name),
@@ -142,13 +144,4 @@ pub fn collect_symbols_recursive(
             symbols,
         );
     }
-}
-
-/// Extract the source text within a `TextRange` from the full source.
-fn extract_range(source: &str, range: ruff_text_size::TextRange) -> String {
-    let start = range.start().to_usize();
-    let end = range.end().to_usize();
-    let start = start.min(source.len());
-    let end = end.min(source.len());
-    source[start..end].to_string()
 }

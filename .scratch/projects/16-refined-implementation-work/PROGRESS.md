@@ -411,6 +411,83 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 
 ---
 
+### §9.10 — V2 Phase 10: AST-canonical content hashing + container-subsumes-members invariant ✅ **DONE** (2026-06-08)
+
+> **The content hash is now computed over a canonical rendering of the entity's
+> AST subtree, not a line-by-line text heuristic.** The hash reflects *meaning,
+> not formatting*: whitespace outside literals and trailing-comma style are
+> insignificant (they aren't in the AST), while literal *content* — including the
+> exact text inside string literals — is significant. Comments are never in the
+> AST so are always excluded; docstrings are identified **positionally** (the
+> first string-statement of a def/class/module body) and excluded/included per
+> policy. The container-subsumes-members property is promoted from an accident to
+> a **documented, tested invariant**.
+>
+> **AST source: reuse the ty db's parsed module (no re-parse, no new prod dep).**
+> ty's `document_symbols` sets `full_range == Stmt::range()` for
+> def/class/assign/import symbols, so an entity's `full_range` looks up its
+> defining `Stmt` by **exact range equality** in a per-file index built from
+> `ruff_db::parsed::parsed_module(db, file)` — the same module ty already parsed
+> for this revision. This sidesteps the re-parse-the-slice trap (a sliced method
+> body is indented and won't parse standalone). A class's `StmtClassDef` subtree
+> inherently contains its methods' `StmtFunctionDef` bodies → subsumption for free.
+>
+> **The renderer (`rust/src/hash.rs`).** A `SourceOrderVisitor` (`CanonicalRenderer`)
+> emits a `\u{1f}`-separated token stream: `enter_node` emits one tag per node
+> *kind* (structural skeleton over every node type); `visit_identifier` captures
+> all names uniformly (def/class/attr/param/alias/keyword); `visit_expr` adds the
+> scalar leaves the traversal omits — `Expr::Name.id`, and crucially the
+> **boolean/comparison operators** (the source-order traversal surfaces `Operator`
+> and `UnaryOp` but **not** `BoolOp`/`CmpOp`, so `a and b`≡`a or b` and `a<b`≡`a>b`
+> would have collided); `visit_string_literal`/`visit_bytes_literal`/
+> `visit_interpolated_string_element` emit exact literal content; `visit_stmt`
+> emits the `is_async` flag (skipped by the traversal). Docstrings: a one-shot
+> `pending_doc_scope` flag set in `visit_stmt` for def/class (and at the module
+> entry) is consumed by the next `visit_body`; no other `visit_body` runs between
+> a def/class and its own body, so nested scopes nest correctly and a leading
+> string in an `if`/`for` suite is **not** mistaken for a docstring.
+>
+> **Both hashing call sites converted to one shared renderer.** (1) `entity.rs`
+> (the `Entity.content_hash` / identity-registry anchor — read by the no-config
+> tests via `sym.content_hash`); (2) `convert/symbols.rs::collect_symbols_recursive`
+> (the per-profile `content_hashes` DTO map — read by the profile tests and reused
+> by the `code_layer` producer and graph nodes). Both call `hash::entity_normal_form`,
+> which renders the matched `Stmt` (degraded raw-slice fallback only if no stmt
+> matches — never happens for real symbols). `project.rs::compute_document_symbols`
+> builds the stmt index once per call and threads it down. **Encoding kept
+> DECIMAL** end-to-end (`ContentHash(u128)` is already ≥128-bit/deterministic/
+> machine-stable; hex would force a derived-cache-key rebuild for zero benefit —
+> 10.3 is "don't regress encoding"). The old `normalise_entity_source` /
+> `collapse_whitespace` / `is_likely_docstring_line` / `strip_trailing_comma` and
+> the two `extract_range` helpers were **deleted**, not extended.
+>
+> **The three target tests flipped** (`test_final_hash_ast.py`): the lone baseline
+> failure `test_formatting_only_hashes_same` now passes; the two
+> `xfail(strict=True)` tests (`test_string_literal_whitespace_hashes_differently`,
+> `test_docstring_policy_and_non_docstring_strings`) pass with the markers removed
+> and the stale "Phase 9" (V1) references corrected to "Phase 10" (V2).
+>
+> **Invariant promoted (10.4).** New Rust test
+> `hash.rs::class_hash_changes_when_method_body_changes` (a class hash moves when a
+> method body changes) co-located with the renderer, plus a load-bearing module
+> doc-comment: *container-subsumes-members is required for `affected`-set coverage
+> of inference-flow deps — never hash members independently of their container for
+> "finer cache keys"; do it in the derived layer's key (Phase 8), or you silently
+> reintroduce a §5.4 no-miss regression (Concept V2 §5.2–§5.3).* The three Python
+> `test_inference_flow_coverage.py` guards stay green.
+>
+> **Gate (2026-06-08):** `cargo test` **167/0** (162 + 5 new hash tests:
+> string-literal-content, comparison/bool operators, non-docstring-string,
+> class-subsumes-member, whitespace-around-operators). `ruff_python_parser` added
+> as a **dev-dependency only** (hash.rs unit tests parse a snippet then render;
+> production never re-parses). `test_final_hash_ast.py` 5/5 green, **zero xfail /
+> zero XPASS**. `test_inference_flow_coverage.py` 3/3 green. Phase-7 bus, Phase-8
+> derived suites, and Phase-9 precision suite unaffected (a content-addressed
+> cache-key *value* change is fine; the key *shape* is unchanged).
+> [[spine-refactor-v2-plan]] [[phase9-precision-refinement-done]]
+
+---
+
 ## 1. The six defects this refactor removes (from §6.3 of the Concept)
 
 | # | Defect | Status |

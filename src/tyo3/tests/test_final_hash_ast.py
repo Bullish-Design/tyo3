@@ -1,22 +1,19 @@
-"""Final invariant tests — AST-canonical hashing (→ Phase 9).
+"""Final invariant tests — AST-canonical hashing (V2 Phase 10).
 
 Encodes §5.6: the content hash is computed over a canonical rendering of the
 entity's AST subtree — insensitive to formatting, sensitive to identifiers,
 literals (including the exact text *inside* string literals), structure,
 signatures, annotations, decorators, bases, and (per policy) docstrings.
 
-Today the normaliser works on source text line-by-line and collapses whitespace
-even inside string literals, so ``"a  b"`` → ``"a b"`` does not change the hash.
-The behaviours that violate the AST-canonical contract are marked
-``xfail(strict=True)`` for Phase 9; the ones that already hold are live
-regression guards.
+As of Phase 10 the renderer walks the entity's AST subtree (not source text
+line-by-line), so whitespace inside string literals is significant
+(``"a  b"`` != ``"a b"``) and docstrings are identified positionally. All of
+these are live regression guards.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 from tyo3 import TyO3Session
 
@@ -66,11 +63,6 @@ def test_formatting_only_hashes_same(tmp_path):
 # ── 2. Whitespace inside a string literal hashes differently ─────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 9: the line-heuristic normaliser collapses whitespace inside "
-    "string literals, so string-content changes do not change the hash",
-)
 def test_string_literal_whitespace_hashes_differently(tmp_path):
     s = _open(tmp_path, {"m.py": 'def foo():\n    return "a  b"\n'})
     try:
@@ -118,11 +110,6 @@ _PROFILES_CFG = (
 )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 9: a non-docstring string statement must remain significant "
-    "even under include_docstrings=false; the heuristic strips by pattern",
-)
 def test_docstring_policy_and_non_docstring_strings(tmp_path):
     s = _open(
         tmp_path,

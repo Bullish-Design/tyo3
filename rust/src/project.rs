@@ -330,6 +330,11 @@ pub(crate) fn compute_document_symbols(
     let file_path = file.path(&state.db).as_str().to_string();
     let line_index = ruff_source_file::LineIndex::from_source_text(&source_str);
 
+    // Index the file's parsed statements once for AST-canonical entity hashing
+    // (an entity's `full_range` looks up its defining `Stmt`).
+    let parsed = ruff_db::parsed::parsed_module(&state.db, file).load(&state.db);
+    let stmt_index = crate::hash::index_statements(&parsed.syntax().body);
+
     let mut symbols: Vec<dto::SymbolDto> = Vec::new();
     let policies_ref = if state.hash_policies.is_empty() {
         None
@@ -347,6 +352,7 @@ pub(crate) fn compute_document_symbols(
             id,
             &info,
             &source_str,
+            &stmt_index,
             &line_index,
             &file_path,
             None,
