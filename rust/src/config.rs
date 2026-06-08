@@ -25,6 +25,11 @@ pub enum ConfigError {
     Parse(String),
     UndefinedEnv(String),
     BlockingOverflow(String),
+    InvalidValue {
+        key: String,
+        value: String,
+        allowed: String,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -49,6 +54,10 @@ impl fmt::Display for ConfigError {
                 "writer-blocking or unknown bus overflow policy: {policy} \
                  (use one of: coalesce, drop_and_mark_lagged, error_and_close)"
             ),
+            ConfigError::InvalidValue { key, value, allowed } => write!(
+                f,
+                "invalid value for {key}: {value} (use one of: {allowed})"
+            ),
         }
     }
 }
@@ -72,6 +81,8 @@ pub struct RawConfig {
     #[serde(default)]
     pub coordination: CoordinationCfg,
     #[serde(default)]
+    pub code_graph: CodeGraphCfg,
+    #[serde(default)]
     pub sidecar: SidecarCfg,
 }
 
@@ -88,6 +99,7 @@ impl RawConfig {
             generators: BTreeMap::new(),
             stores: BTreeMap::new(),
             coordination: CoordinationCfg::default(),
+            code_graph: CodeGraphCfg::default(),
             sidecar: SidecarCfg::default(),
         }
     }
@@ -452,6 +464,30 @@ pub fn validate(raw: RawConfig) -> Result<ValidatedConfig, ConfigError> {
         other => return Err(ConfigError::BlockingOverflow(other.to_string())),
     }
 
+    // Code-graph precision policy (Phase 9): reject unknown values at open so a
+    // typo never silently degrades to the wrong granularity. `container` is the
+    // sound never-miss default; `method` opts into the async narrowing worker.
+    match raw.code_graph.precision.as_str() {
+        "container" | "method" => {}
+        other => {
+            return Err(ConfigError::InvalidValue {
+                key: "code_graph.precision".to_string(),
+                value: other.to_string(),
+                allowed: "container, method".to_string(),
+            })
+        }
+    }
+    match raw.code_graph.refinement.as_str() {
+        "sync" | "async" => {}
+        other => {
+            return Err(ConfigError::InvalidValue {
+                key: "code_graph.refinement".to_string(),
+                value: other.to_string(),
+                allowed: "sync, async".to_string(),
+            })
+        }
+    }
+
     lint_secrets(&raw)?;
 
     Ok(ValidatedConfig { raw, topo_order })
@@ -500,6 +536,47 @@ impl Default for WatcherCfg {
             debounce_ms: default_debounce_ms(),
         }
     }
+}
+
+/// `[code_graph]` — affected-set precision policy (Concept V2 §5.4, Phase 9).
+///
+/// `precision` selects the granularity of the published `affected` set:
+///   * `container` (default) — the synchronous, container-granular, never-miss
+///     set; the optional refinement worker never runs.
+///   * `method` — additionally run an async worker that *narrows* the coarse
+///     set to method-level precision over a frozen snapshot.
+/// `refinement` selects how the narrowing is computed when `precision = method`:
+///   * `async` (default) — off the commit hot path, on a daemon worker.
+///   * `sync` — inline in the post-commit hook (opt-in; pays per-occurrence
+///     resolution on the writer, after primary delivery).
+///
+/// Both are validated at open; unknown values are rejected with
+/// `ConfigError::InvalidValue`. Python reads them via the validated
+/// `config_json` projection (single config source — no second TOML parser).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CodeGraphCfg {
+    #[serde(default = "default_precision")]
+    pub precision: String,
+    #[serde(default = "default_refinement")]
+    pub refinement: String,
+}
+
+impl Default for CodeGraphCfg {
+    fn default() -> Self {
+        Self {
+            precision: default_precision(),
+            refinement: default_refinement(),
+        }
+    }
+}
+
+fn default_precision() -> String {
+    "container".to_string()
+}
+
+fn default_refinement() -> String {
+    "async".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -1231,6 +1308,57 @@ dim = 3
                 "policy {policy} should be accepted"
             );
         }
+    }
+
+    #[test]
+    fn code_graph_precision_defaults_to_container_async() {
+        let cfg = CodeGraphCfg::default();
+        assert_eq!(cfg.precision, "container");
+        assert_eq!(cfg.refinement, "async");
+    }
+
+    #[test]
+    fn code_graph_precision_accepts_known_values() {
+        for precision in ["container", "method"] {
+            let mut raw = valid_layered_config();
+            raw.code_graph.precision = precision.to_string();
+            assert!(
+                validate(raw).is_ok(),
+                "precision {precision} should be accepted"
+            );
+        }
+        for refinement in ["sync", "async"] {
+            let mut raw = valid_layered_config();
+            raw.code_graph.refinement = refinement.to_string();
+            assert!(
+                validate(raw).is_ok(),
+                "refinement {refinement} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn code_graph_precision_rejects_unknown_value() {
+        let mut raw = valid_layered_config();
+        raw.code_graph.precision = "molecule".to_string();
+        let err = validate(raw).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::InvalidValue { ref key, ref value, .. }
+                if key == "code_graph.precision" && value == "molecule"
+        ));
+    }
+
+    #[test]
+    fn code_graph_refinement_rejects_unknown_value() {
+        let mut raw = valid_layered_config();
+        raw.code_graph.refinement = "eventually".to_string();
+        let err = validate(raw).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::InvalidValue { ref key, ref value, .. }
+                if key == "code_graph.refinement" && value == "eventually"
+        ));
     }
 
     #[test]

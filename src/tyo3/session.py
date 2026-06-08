@@ -692,6 +692,12 @@ class TyO3Session(_ReadOps):
         self._bus: Any = None  # lazily-built Bus (Gate 8)
         self._watcher_thread: Any = None  # auto-poll daemon thread
         self._watcher_stop: Any = None  # threading.Event for watcher stop
+        self._refiner: Any = None  # lazily-built PrecisionRefiner (Phase 9)
+        # Affected-set precision policy (Concept V2 §5.4). Read from the one
+        # validated native config (single source) — not a second TOML parser.
+        cg = self._config.code_graph
+        self._precision_mode: str = cg.precision
+        self._refinement_mode: str = cg.refinement
         from tyo3.sidecar import Sidecar
         self._sidecar = Sidecar(str(root_str))
         # Read coordination config from sidecar (defaults if absent).
@@ -1239,6 +1245,41 @@ class TyO3Session(_ReadOps):
         self._apply_graph_delta(delta)
         self._schedule_derived(delta)
         self._publish_delta(delta)
+        # Async precision refinement (Phase 9) — strictly *after* primary
+        # delivery, so the coarse set is always delivered first and the writer
+        # never waits on precision. A no-op unless precision=method.
+        self._maybe_refine(delta)
+
+    def _get_refiner(self):
+        """Lazily build the PrecisionRefiner (Phase 9, precision=method)."""
+        if self._refiner is None:
+            from tyo3.precision import PrecisionRefiner
+            self._refiner = PrecisionRefiner(self, mode=self._refinement_mode)
+        return self._refiner
+
+    def _maybe_refine(self, delta: CommitDelta) -> None:
+        """Feed the precision refiner when precision=method (§5.4).
+
+        Defaults to ``container`` ⇒ the refiner is never built and the writer
+        pays nothing. With ``method`` the coarse delta is handed to the refiner
+        (async: enqueued; sync: computed inline) which narrows it and publishes
+        an ``AffectedRefinement`` on the Phase-7 refinement channel.
+        """
+        if self._precision_mode != "method":
+            return
+        # Nothing to refine without a bus to publish to (and no subscribers
+        # means a no-op publish anyway) — skip building the worker.
+        bus = self._bus
+        if bus is None or not bus.has_subscribers():
+            return
+        try:
+            self._get_refiner().feed(
+                delta.revision, delta.changed_ids, delta.affected_ids
+            )
+        except Exception:
+            # Never let precision wiring surface as a write-path failure — the
+            # coarse set was already published (graceful degradation).
+            pass
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -1483,6 +1524,15 @@ class TyO3Session(_ReadOps):
             return
         # Stop watcher auto-poll loop (Step 7).
         self._stop_watcher_loop()
+        # Stop the precision refiner daemon (Phase 9) before tearing the bus
+        # down, so no in-flight refinement races a closing bus.
+        refiner = getattr(self, "_refiner", None)
+        if refiner is not None:
+            try:
+                refiner.stop()
+            except Exception:
+                pass
+            self._refiner = None
         # Close the bus (closes all subscriptions).
         bus = getattr(self, "_bus", None)
         if bus is not None:

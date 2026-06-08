@@ -61,6 +61,20 @@ class StoreConfig:
 
 
 @dataclass(frozen=True)
+class CodeGraphConfig:
+    """Affected-set precision policy (Concept V2 §5.4, Phase 9).
+
+    ``precision``: ``"container"`` (default, sound never-miss coarse set; the
+    refinement worker never runs) or ``"method"`` (run the async narrowing
+    worker). ``refinement``: ``"async"`` (default, off the commit hot path) or
+    ``"sync"`` (inline after primary delivery; opt-in).
+    """
+
+    precision: str = "container"
+    refinement: str = "async"
+
+
+@dataclass(frozen=True)
 class SidecarConfig:
     gitignore_cache: bool
 
@@ -74,6 +88,7 @@ class TyConfig:
     generators: dict[str, GeneratorConfig]
     stores: dict[str, StoreConfig]
     sidecar: SidecarConfig
+    code_graph: CodeGraphConfig
     topo_order: tuple[str, ...]
 
     @classmethod
@@ -106,6 +121,7 @@ class TyConfig:
                 for name, store in raw.get("stores", {}).items()
             },
             sidecar=SidecarConfig(**raw["sidecar"]),
+            code_graph=_code_graph(raw.get("code_graph", {})),
             topo_order=topo_order,
         )
 
@@ -127,6 +143,13 @@ def _layer(data: dict[str, Any]) -> LayerConfig:
     )
 
 
+def _code_graph(data: dict[str, Any]) -> CodeGraphConfig:
+    return CodeGraphConfig(
+        precision=data.get("precision") or "container",
+        refinement=data.get("refinement") or "async",
+    )
+
+
 def _generator(data: dict[str, Any]) -> GeneratorConfig:
     return GeneratorConfig(
         type=data.get("type"),
@@ -142,6 +165,7 @@ def _generator(data: dict[str, Any]) -> GeneratorConfig:
 
 
 __all__ = [
+    "CodeGraphConfig",
     "GeneratorConfig",
     "HashProfileConfig",
     "LayerConfig",

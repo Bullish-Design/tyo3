@@ -316,6 +316,101 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 
 ---
 
+### §9.9 — V2 Phase 9: async container→method precision refinement ✅ **DONE** (2026-06-08)
+
+> **The optional precision layer is live: a background worker narrows the
+> container-granular coarse `affected` set to method precision over a frozen
+> snapshot and publishes an `AffectedRefinement` on the Phase-7 channel.** It is
+> purely additive — the system is fully correct without it, and a lagging,
+> crashing, or disabled worker leaves the synchronous coarse set intact
+> (graceful degradation, proven by a test). Default `precision = container` means
+> the worker is never built and the writer pays nothing.
+>
+> **The narrowing (the crux).** Editing `Widget.draw`'s body moves both `draw`'s
+> and `Widget`'s content hash (subsumption), so `changed_ids ⊇ {Widget, draw}`
+> and the coarse `affected` reaches every Widget referrer via the named chain
+> (`consume_a`, `consume_b`, `make_widget`, …). The refiner classifies `Widget`
+> as a **subsumption-only container** (a changed class owning a changed member),
+> so it does **not** re-expand Widget's full referrer set — that container-
+> granular fan-out is exactly the over-fire being narrowed. Instead it resolves
+> the changed *member* precisely:
+>   1. `changed member id → (file, selection_range.start)` via the snapshot graph
+>      (`graph.symbol(id)`).
+>   2. `snap.find_references(file, line, col)` — ty's type-aware resolver returns
+>      `w.draw()` in `consume_a` but **not** `w.serialize()` in `consume_b`.
+>   3. each occurrence `(path, range) → enclosing entity id` via a tightest-range
+>      lookup over `graph.symbols_in_file` (the **id↔position↔id bridge** — graph
+>      files are project-relative, ref paths absolute, reconciled by an
+>      abs-path file index keyed off `snap._root`).
+>   4. `narrowed = (member_users ∪ closure ∪ changed) ∩ affected ∪ changed` —
+>      always a subset of the coarse set, always retaining `changed_ids`.
+> Result: `{Widget, consume_a, consume_b, make_widget, draw}` → `{Widget,
+> consume_a, draw}` (the serialize-only user and the bare constructor dropped).
+>
+> **Salsa-safe by construction.** The worker opens `session.snapshot(at=R)` (an
+> independent frozen Zalsa db), queries, and closes it in `finally` — it never
+> touches the live head db (V1 §3: a reader sharing the live db blocks/cancels
+> the writer). It reads the *already-built* `session._bus` directly (never
+> `_get_bus()`), so it never builds a bus the writer didn't ask for and no-ops
+> when there are no subscribers.
+>
+> **Fed without blocking primary delivery.** `session._after_commit` keeps its
+> order (`_invalidate_head_snap → _apply_graph_delta → _schedule_derived →
+> _publish_delta`) and appends `_maybe_refine(delta)` **strictly last** — so the
+> coarse set is always published before precision is even considered. With
+> `precision=method` the coarse `(revision, changed_ids, affected_ids)` is handed
+> to the refiner (async: enqueued on a daemon `queue.Queue`; sync: computed
+> inline) which narrows and publishes. The daemon swallows its own exceptions and
+> stays alive; `_maybe_refine` swallows wiring errors — a refiner failure can
+> never surface as a write-path failure or a miss.
+>
+> **What landed**
+> - **9.1 config (single-source).** `rust/src/config.rs`: new `[code_graph]` →
+>   `CodeGraphCfg { precision, refinement }` on `RawConfig` (`#[serde(default)]`,
+>   `deny_unknown_fields`), defaults `container`/`async`; `ConfigError::InvalidValue`
+>   + a `validate()` arm rejecting unknown values **at open** (deny_unknown_fields
+>   on `RawConfig` made a native struct unavoidable anyway, so this is also the
+>   long-term-correct shape). Surfaced through `config_json → TyConfig.code_graph`
+>   (`config.py::CodeGraphConfig`) — **no second TOML parser** (unlike the watcher's
+>   `_read_coordination_config`, which Phase 12 will fold in). Session reads
+>   `self._config.code_graph.{precision,refinement}`. 4 new `cargo test` config
+>   cases (accept/reject/defaults).
+> - **9.2 worker + wiring.** New `src/tyo3/precision/{__init__,refiner.py}`:
+>   `PrecisionRefiner` (daemon thread + queue, mirroring the watcher precedent;
+>   stop+join in `session.close()` before bus teardown). `session._maybe_refine`
+>   / `_get_refiner` (lazy) wired into `_after_commit` after `_publish_delta`.
+> - **9.3 tests.** `test_precision_refinement.py` (4, green): `test_narrows_to_member_users`
+>   (async, the full narrowing), `test_graceful_degradation_on_worker_crash`
+>   (monkeypatched-to-raise worker ⇒ coarse set still delivered & complete, writer
+>   never raises, no refinement leaks, session stays healthy), `test_container_mode_is_a_no_op`
+>   (refiner never built, no refinement), `test_sync_refinement_runs_inline`.
+>
+> **NOT built: 9.4 expansion mode.** Off-by-default, eventually-consistent on the
+> non-nominal miss class (§5.3); no use case requested it. The refiner is
+> narrow-only — `added` is never published.
+>
+> **Precision boundary (documented, not a correctness gap).** A class that
+> simultaneously changes its own structure *and* a member body is narrowed by
+> member-users only, which can drop a pure-type referrer of that class. This is a
+> *precision* limit (the coarse set is always delivered first), made rigorous when
+> Phase 10's container-subsumes-members hashing lets the refiner distinguish a
+> subsumption-only change from a genuine structural one.
+>
+> **Gate (2026-06-08):** `cargo test` **162/0** (158 + 4). `test_precision_refinement.py`
+> 4/4 green. Full `pytest -q --no-cov` unchanged from the Phase-8 baseline +4 new
+> greens; only remaining baseline failure stays `test_final_hash_ast::test_formatting_only_hashes_same`
+> (→ Phase 10). Phase-7 bus contracts, Phase-8 derived suites, and
+> `test_inference_flow_coverage.py` stay green; `container` default leaves every
+> existing suite untouched.
+>
+> **Leaves for later:** the derived loop consuming a refinement (optional/forward,
+> Phase 8 made it possible); 9.4 expansion if ever needed; snapshot-lifetime
+> hygiene reviewed with Phase 11; config consolidation (drop the watcher's direct
+> TOML read) in Phase 12.
+> [[spine-refactor-v2-plan]]
+
+---
+
 ## 1. The six defects this refactor removes (from §6.3 of the Concept)
 
 | # | Defect | Status |
