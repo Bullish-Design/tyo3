@@ -6,18 +6,16 @@ reading ``session.graph`` can change ``session.head``.  Phase 4 removes the
 read-side write: identity is reconciled at open and on every commit, so a graph
 read never mutates the session.
 
-The remaining read-side writes (``session.graph`` priming, the latest-view
-``check()``) are marked ``xfail(strict=True)`` until Phase 4; they flip to
-failures (forcing marker removal) once reads stop advancing head.  The
-``snapshot().graph()`` case is already green: Phase 1.3 reconciles identity at
-open, so building a pinned snapshot graph no longer primes via a session write.
+Phase 4 landed the cutover: ``session.graph`` is now a pure projection of the
+native code delta (no identity priming, no ``sync_all``), the floating
+``latest`` view inherits that side-effect-free build, and ``snapshot().graph()``
+builds over the snapshot's own frozen database.  All three reads leave
+``session.head`` unchanged — the markers are removed and the asserts are live.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 from tyo3 import TyO3Session
 
@@ -39,11 +37,6 @@ _FILES = {
 }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 4: session.graph primes identity via sync_all(), a read-side "
-    "write that advances head",
-)
 def test_reading_session_graph_does_not_advance_head(tmp_path):
     s = _open(tmp_path, _FILES)
     try:
@@ -74,11 +67,6 @@ def test_snapshot_graph_does_not_advance_head(tmp_path):
         s.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 4: the floating latest view's graph()/check() can trigger "
-    "identity priming that advances head",
-)
 def test_latest_check_does_not_advance_head(tmp_path):
     s = _open(tmp_path, _FILES)
     try:

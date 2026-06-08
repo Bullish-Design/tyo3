@@ -54,7 +54,16 @@ pub struct CommitDeltaDto {
     pub affected_ids: Vec<String>,
 
     // ── nested structural delta (Phase 2, carried for Phase 4) ───────────
-    pub code_delta: CodeDeltaDto,
+    /// Three-state structural delta (§5.3 / Phase 4):
+    ///   - `None` (absent)        → no structural delta was computed this commit
+    ///     ⇒ the consumer rebuilds the head graph from a full native delta;
+    ///   - `Some(empty)`          → computed, nothing changed (e.g. a
+    ///     whitespace-only edit) ⇒ a clean no-op apply;
+    ///   - `Some(populated)`      → the incremental delta ⇒ apply it.
+    /// `build_commit_delta` emits `None` while the in-commit producer is not
+    /// running (deferred — see `run_identity_reconciliation`). Pythonizes to
+    /// `None` / a dict, matching Python `CommitDelta.code_delta: dict | None`.
+    pub code_delta: Option<CodeDeltaDto>,
 
     // ── path-shaped metadata (NOT ids — for bus file-interest + readability) ─
     /// Union of the path-level created/changed/deleted strings.
@@ -108,7 +117,7 @@ mod tests {
             }],
             authored_ids: vec![],
             affected_ids: vec!["01CHANGED".into(), "01DELETED".into()],
-            code_delta: CodeDeltaDto {
+            code_delta: Some(CodeDeltaDto {
                 revision: 9,
                 rescan: false,
                 nodes_upserted: vec![CodeNodeDto {
@@ -135,7 +144,7 @@ mod tests {
                     range: None,
                 }],
                 edges_removed: vec![],
-            },
+            }),
             touched_files: vec!["a.py".into()],
             created: vec![],
             changed: vec!["a.py".into()],
@@ -170,6 +179,21 @@ mod tests {
         assert_eq!(back.revision, 9);
         assert_eq!(back.changed_ids, vec!["01CHANGED".to_string()]);
         assert_eq!(back.moved.len(), 1);
-        assert_eq!(back.code_delta.nodes_upserted.len(), 1);
+        assert_eq!(back.code_delta.unwrap().nodes_upserted.len(), 1);
+    }
+
+    #[test]
+    fn absent_code_delta_pythonizes_to_null_not_empty_dict() {
+        // The deferred-producer path emits `None`; it must serialise to JSON
+        // null (Python `None`), NOT an empty `{}` dict — the consumer keys
+        // rebuild-vs-noop on absence, so absent must be distinguishable from
+        // "computed, empty".
+        let delta = CommitDeltaDto {
+            revision: 3,
+            code_delta: None,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&delta).unwrap();
+        assert!(json["code_delta"].is_null());
     }
 }

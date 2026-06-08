@@ -732,13 +732,37 @@ class TyO3Session(_ReadOps):
 
     @property
     def graph(self):
-        """The mutable live HEAD graph, updated incrementally after writes."""
+        """The live HEAD graph — a pure projection of the native code delta.
+
+        Built (and rebuilt) by applying ``full_code_delta()`` to a fresh
+        ``CodeGraph``: no read-surface walk, no identity priming, no session
+        write. Reading it never advances ``head`` (§5.3 / §5.9).
+        """
         self._check_open()
         if self._head_graph is None:
-            from tyo3.graph import CodeGraph
-
-            self._head_graph = CodeGraph.build(self)
+            self._rebuild_head_graph_from_native()
         return self._head_graph
+
+    def _rebuild_head_graph_from_native(self) -> None:
+        """(Re)build the live HEAD graph from a full native code delta.
+
+        A pure projection: apply ``full_code_delta()`` (a full/``rescan`` delta
+        over the current head state) to the live HEAD ``CodeGraph``. A rescan
+        delta clears-and-rebuilds the graph **in place**, so the head-graph
+        instance is stable across commits (callers may hold a reference to it);
+        a fresh ``CodeGraph`` is allocated only on first materialisation. Shared
+        by the lazy ``graph`` property and the post-commit rebuild branch (the
+        deferred-producer path). Mutates no native state — ``full_code_delta()``
+        is a pure read of the head.
+        """
+        from tyo3.graph import CodeGraph
+
+        g = self._head_graph
+        if g is None:
+            g = CodeGraph()
+            g._root = self._root
+            self._head_graph = g
+        g.apply_code_delta(self._inner.full_code_delta())
 
     def _head_graph_or_none(self) -> Any:
         """Return the live HEAD graph if materialized; never build it."""
@@ -1102,12 +1126,35 @@ class TyO3Session(_ReadOps):
             raise InternalTyError(f"Unexpected error in _inject_changes(): {e}") from e
 
     def _apply_graph_delta(self, result: CommitDelta) -> None:
-        """Apply a write delta to the materialized HEAD graph, if any."""
+        """Update the materialized HEAD graph from the native code delta (§5.3).
+
+        Three-state on ``result.code_delta`` (Phase 4):
+          * ``None`` (absent) — no structural delta was computed this commit ⇒
+            **rebuild** the head graph from a full native delta. This is the
+            deferred-producer path and is taken on every materialised-graph
+            commit today.
+          * present, empty — computed, nothing changed structurally (e.g. a
+            whitespace-only edit) ⇒ a clean **no-op** apply.
+          * present, populated — the incremental delta ⇒ **apply** it,
+            revision-gated.
+        """
         if self._head_graph is None:
             return
-        # Pass self (TyO3Session) as the source so id_for/locate are available.
-        # After the write, the session's head snapshot is already at result.revision.
-        self._head_graph.apply_delta(self, result)
+        code_delta = result.code_delta
+        if code_delta is None:
+            self._rebuild_head_graph_from_native()
+            self._invalidate_derived(result)
+            return
+        # Present delta — incremental apply, revision-gated. A revision *gap*
+        # (the delta skips revisions) can't be applied incrementally, so rebuild
+        # from a fresh full delta; the in-order case applies (a stale delta is an
+        # internal no-op inside apply_code_delta).
+        cur = self._head_graph.revision
+        new_rev = code_delta.get("revision")
+        if cur is not None and new_rev is not None and new_rev > cur + 1:
+            self._rebuild_head_graph_from_native()
+        else:
+            self._head_graph.apply_code_delta(code_delta)
         # Step 5: invalidate derived artifacts within the same write boundary.
         self._invalidate_derived(result)
 

@@ -1228,10 +1228,12 @@ struct IdentityDelta {
 /// Assemble the public `CommitDeltaDto` from the id-level identity classes and
 /// the path-shaped metadata the write method produced.
 ///
-/// The nested `code_delta` is left default (empty) in Phase 3: the legacy graph
-/// build is still authoritative (cutover is Phase 4), and the in-commit code-layer
-/// producer is deferred (see `run_identity_reconciliation`). `touched_files` is
-/// the union of the path-level created/changed/deleted strings — metadata only.
+/// The nested `code_delta` is emitted as `None` (absent): the in-commit
+/// code-layer producer is deferred (see `run_identity_reconciliation`), so no
+/// structural delta is computed here. The Phase 4 consumer reads `None` as
+/// "rebuild the head graph from a full native delta" — distinct from a present
+/// empty delta (a no-op). `touched_files` is the union of the path-level
+/// created/changed/deleted strings — metadata only.
 fn build_commit_delta(
     revision: u64,
     created: Vec<String>,
@@ -1254,7 +1256,7 @@ fn build_commit_delta(
         moved: identity.moved,
         authored_ids: vec![],
         affected_ids: identity.affected_ids,
-        code_delta: dto::CodeDeltaDto::default(),
+        code_delta: None,
         touched_files,
         created,
         changed,
