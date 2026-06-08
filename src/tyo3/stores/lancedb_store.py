@@ -58,50 +58,62 @@ class LanceDbStore:
         return self._metric
 
     def get(self, key: str) -> bytes | None:
-        """Return the vector bytes for *key*, or None."""
+        """Return the vector bytes for *key*, or None when genuinely absent.
+
+        An empty query result is "not found" (``None``); a query *failure*
+        propagates as :class:`StoreBackendBroken` rather than masquerading as a
+        miss (§5.12).
+        """
         import json
+        from tyo3.exceptions import StoreBackendBroken
         self._ensure_table()
         try:
             results = self._table.search().where(f"key = '{key}'").limit(1).to_list()
-            if results:
-                vec = results[0]["vector"]
-                return json.dumps(vec).encode("utf-8")
-        except Exception:
-            pass
+        except Exception as exc:
+            raise StoreBackendBroken(
+                f"LanceDB query failed for key {key!r}: {exc}"
+            ) from exc
+        if results:
+            vec = results[0]["vector"]
+            return json.dumps(vec).encode("utf-8")
         return None
 
     def put(self, key: str, artifact: bytes) -> None:
         """Insert a vector under *key*. Idempotent — overwrites if exists."""
         import json
+        from tyo3.exceptions import StoreBackendBroken
         self._ensure_table()
         try:
             vec = json.loads(artifact.decode("utf-8"))
-            # Delete any existing row with this key.
-            try:
-                self._table.delete(f"key = '{key}'")
-            except Exception:
-                pass
+            self._table.delete(f"key = '{key}'")  # overwrite any existing row
             import pyarrow as pa
             data = pa.table({"key": [key], "vector": [vec]})
             self._table.add(data)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise StoreBackendBroken(
+                f"LanceDB write failed for key {key!r}: {exc}"
+            ) from exc
 
     def has(self, key: str) -> bool:
         return self.get(key) is not None
 
     def delete(self, key: str) -> None:
+        from tyo3.exceptions import StoreBackendBroken
         self._ensure_table()
         try:
             self._table.delete(f"key = '{key}'")
-        except Exception:
-            pass
+        except Exception as exc:
+            raise StoreBackendBroken(
+                f"LanceDB delete failed for key {key!r}: {exc}"
+            ) from exc
 
     def nearest(self, query: Sequence[float], k: int) -> list[tuple[str, float]]:
         """Return the k nearest neighbors to *query*.
 
-        Returns list of ``(key, score)`` sorted by ascending distance.
+        Returns list of ``(key, score)`` sorted by ascending distance. A query
+        failure propagates as :class:`StoreBackendBroken` (§5.12).
         """
+        from tyo3.exceptions import StoreBackendBroken
         self._ensure_table()
         try:
             results = (
@@ -110,6 +122,8 @@ class LanceDbStore:
                 .limit(k)
                 .to_list()
             )
-            return [(r["key"], r.get("_distance", 0.0)) for r in results]
-        except Exception:
-            return []
+        except Exception as exc:
+            raise StoreBackendBroken(
+                f"LanceDB nearest-search failed: {exc}"
+            ) from exc
+        return [(r["key"], r.get("_distance", 0.0)) for r in results]

@@ -31,6 +31,7 @@ class DerivedLayer:
     hash_profile: str
     serving: Literal["stale", "block"]
     recompute: Literal["lazy", "eager"]
+    key_locality: Literal["local", "semantic"]
     entity_kinds: frozenset[str] | None  # None = all
     cache: ArtifactCache
 
@@ -64,6 +65,7 @@ class DerivedLayer:
             hash_profile=layer_cfg.hash_profile or "structure",
             serving=layer_cfg.serving,  # type: ignore[arg-type]
             recompute=layer_cfg.recompute,  # type: ignore[arg-type]
+            key_locality=getattr(layer_cfg, "key_locality", "local"),  # type: ignore[arg-type]
             entity_kinds=entity_kinds,
             cache=cache,
         )

@@ -133,6 +133,9 @@ class DerivationDAG:
             return
 
         scheduler = self._get_scheduler()
+        # One pinned snapshot for the whole pass — invalidation AND eager
+        # recompute — closed in `finally` (§8.4, no second-snapshot leak). It is
+        # a cold MVCC snapshot, never the live head graph (§5.9).
         snap = session.snapshot()
         try:
             for layer in self.iter_layers():
@@ -148,21 +151,24 @@ class DerivationDAG:
 
                     prior = layer.binding(durable_id)
                     if prior == input_hash:
-                        # Input hash unchanged → reuse (cache hit).
+                        # Layer key unchanged → reuse (cache hit). For a `local`
+                        # layer this is every affected-but-unchanged id (no
+                        # over-recompute); for a `semantic` layer the key moved
+                        # iff a dependency changed.
                         continue
 
-                    # Changed or missing → stale.
+                    # Key moved → stale.
                     layer.mark_stale(durable_id)
                     if layer.recompute == "eager":
                         scheduler.enqueue(layer, durable_id, input_hash)
 
                 for durable_id in deleted:
                     layer.drop(durable_id)
+
+            # Process eager items over the same pinned snapshot.
+            scheduler.process_all(self, snap)
         finally:
             snap.close()
-
-        # Process eager items.
-        scheduler.process_all(self, session.snapshot())
 
     def gc_orphans(self, session) -> None:
         """Evict orphaned derived artifacts per store GC policy (Step 9).
@@ -219,12 +225,30 @@ class DerivationDAG:
 
         if layer.is_code_derived:
             node = snapshot.graph().symbol(durable_id)
-            input_hash = node.content_hashes.get(layer.hash_profile)
-            if input_hash is None:
+            if node is None:
+                raise KeyError(
+                    f"Entity '{durable_id}' is not present at this revision "
+                    f"(deleted, or never reconciled to this snapshot)"
+                )
+            content_hash = node.content_hashes.get(layer.hash_profile)
+            if content_hash is None:
                 raise KeyError(
                     f"Entity '{durable_id}' has no content hash for profile "
                     f"'{layer.hash_profile}' (available: {list(node.content_hashes)})"
                 )
+            # Per-layer key locality (§5.5): a `local` layer keys on the entity's
+            # own content hash; a `semantic` layer additionally folds in the
+            # dependency-closure fingerprint, so it recomputes when a dependency
+            # changes even though its own body did not.
+            if layer.key_locality == "semantic":
+                fingerprint = self._dependency_fingerprint(
+                    snapshot, durable_id, layer.hash_profile
+                )
+                input_hash = _hash_bytes(
+                    f"{content_hash}\x00{fingerprint}".encode("utf-8")
+                )
+            else:
+                input_hash = content_hash
             source = _entity_source(snapshot, durable_id)
             return (
                 GenInput(durable_id=durable_id, source=source, kind=node.kind.value),
@@ -280,6 +304,36 @@ class DerivationDAG:
             if up_up_artifact is None:
                 return None
             return _hash_bytes(up_up_artifact)
+
+    def _dependency_fingerprint(
+        self, snapshot: "Snapshot", durable_id: str, hash_profile: str
+    ) -> str:
+        """Stable fingerprint of *durable_id*'s dependency closure at *snapshot*.
+
+        Walks the transitive forward-dependency closure over the pinned
+        snapshot's graph (never the live head — §5.9), collecting each
+        dependency's content hash under *hash_profile*. The result is a stable
+        hash of the sorted ``id=hash`` pairs, so it moves iff any dependency's
+        content changed (or the closure's shape changed). The entity itself is
+        excluded — its own content hash is keyed separately (§5.5).
+        """
+        graph = snapshot.graph()
+        closure: set[str] = set()
+        frontier = [durable_id]
+        while frontier:
+            current = frontier.pop()
+            for dep_id in graph.dependencies(current):
+                if dep_id == durable_id or dep_id in closure:
+                    continue
+                closure.add(dep_id)
+                frontier.append(dep_id)
+
+        parts: list[str] = []
+        for dep_id in sorted(closure):
+            node = graph.symbol(dep_id)
+            dep_hash = node.content_hashes.get(hash_profile, "") if node else ""
+            parts.append(f"{dep_id}={dep_hash}")
+        return _hash_bytes("\x00".join(parts).encode("utf-8"))
 
 
 def _hash_bytes(data: bytes) -> str:

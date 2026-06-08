@@ -92,11 +92,6 @@ def _reset_generator_state():
 # ── 1. Derived invalidation receives DurableIds ──────────────────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 7: invalidation is fed the path-shaped write result, so the "
-    "generator never sees the changed entity's durable id",
-)
 def test_invalidation_receives_durable_ids(tmp_path):
     s = _open(tmp_path, {"a.py": "def foo():\n    return 1\n"}, config=_config())
     try:
@@ -116,10 +111,6 @@ def test_invalidation_receives_durable_ids(tmp_path):
 # ── 2. A move with unchanged hash reuses the cached artifact ─────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 7: inert invalidation breaks content-hash reuse on move",
-)
 def test_move_unchanged_reuses_artifact(tmp_path):
     s = _open(tmp_path, {"a.py": "def foo():\n    return 1\n", "c.py": ""}, config=_config())
     try:
@@ -140,10 +131,6 @@ def test_move_unchanged_reuses_artifact(tmp_path):
 # ── 3. A body change recomputes only the affected ids ────────────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 7: inert invalidation never schedules the precise recompute",
-)
 def test_body_change_recomputes_only_affected(tmp_path):
     s = _open(
         tmp_path,
@@ -171,11 +158,6 @@ def test_body_change_recomputes_only_affected(tmp_path):
 # ── 4. An eager recompute closes the snapshot it opened (no leak) ─────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 7: the eager derivation pass opens a second snapshot it never "
-    "closes",
-)
 def test_eager_recompute_leaks_no_snapshot(tmp_path):
     s = _open(tmp_path, {"a.py": "def foo():\n    return 1\n"}, config=_config(serving="block"))
     try:
@@ -195,11 +177,6 @@ def test_eager_recompute_leaks_no_snapshot(tmp_path):
 # ── 5. A generator failure leaves the last-good artifact intact ──────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 7: failed staleness/last-good handling depends on id-level "
-    "invalidation being live",
-)
 def test_generator_failure_keeps_last_good(tmp_path):
     s = _open(
         tmp_path,
@@ -218,5 +195,98 @@ def test_generator_failure_keeps_last_good(tmp_path):
             val = snap.derived("upper", foo_id)
         assert val.status == "failed", f"a generator failure must report failed, got {val.status}"
         assert val.artifact == good, "the last-good artifact must be served intact"
+    finally:
+        s.close()
+
+
+# ── 6. Per-layer key locality (Concept V2 §5.5) ──────────────────────────────
+
+
+def _locality_config(key_locality: str) -> str:
+    """Single code-derived layer with a declared *key_locality*."""
+    return f"""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "counting_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_upper"
+serving = "stale"
+key_locality = "{key_locality}"
+entity_kinds = ["function"]
+
+[generators.counting_gen]
+type = "python"
+callable = "tyo3.tests.test_final_derived_contract:counting_generator"
+
+[stores.kv_upper]
+backend = "fs"
+path = "cache/upper"
+"""
+
+
+# A two-function module where ``caller`` references ``dep``; editing ``dep``'s
+# body changes ``dep``'s content hash, putting ``caller`` in ``affected`` (a
+# reverse-dependent) without changing ``caller``'s own content hash.
+_DEP_V0 = "def dep():\n    return 1\n\n\ndef caller():\n    return dep()\n"
+_DEP_V1 = "def dep():\n    return 999\n\n\ndef caller():\n    return dep()\n"
+
+
+def test_semantic_layer_recomputes_on_dependency_change(tmp_path):
+    """A *semantic* layer recomputes E when a dependency of E changes.
+
+    ``caller`` is affected (it references ``dep``) but its own body is
+    unchanged. Its semantic key folds in the dependency-closure fingerprint, so
+    the key moves and ``caller`` recomputes.
+    """
+    s = _open(tmp_path, {"mod.py": _DEP_V0}, config=_locality_config("semantic"))
+    try:
+        dep_id = s.id_for("mod.py", 1, 5)
+        caller_id = s.id_for("mod.py", 5, 5)
+        assert dep_id is not None and caller_id is not None
+        assert dep_id != caller_id
+        with s.snapshot() as snap:
+            assert snap.derived("upper", caller_id).status == "fresh"  # prime
+        _CALLS.clear()
+        s.edit("mod.py", _DEP_V1)  # dep body changes; caller body unchanged
+        with s.snapshot() as snap:
+            snap.derived("upper", caller_id)
+        recomputed = {did for call in _CALLS for did in call}
+        assert caller_id in recomputed, (
+            "a semantic layer must recompute on a dependency-only change"
+        )
+    finally:
+        s.close()
+
+
+def test_local_layer_skips_dependency_only_change(tmp_path):
+    """A *local* layer must NOT recompute E on a dependency-only change.
+
+    Same edit as the semantic case: ``caller`` is affected but its own content
+    hash is unchanged, so its local key (own content hash) does not move and the
+    cached artifact is reused.
+    """
+    s = _open(tmp_path, {"mod.py": _DEP_V0}, config=_locality_config("local"))
+    try:
+        dep_id = s.id_for("mod.py", 1, 5)
+        caller_id = s.id_for("mod.py", 5, 5)
+        assert dep_id is not None and caller_id is not None
+        with s.snapshot() as snap:
+            art0 = snap.derived("upper", caller_id).artifact  # prime
+        assert art0 is not None
+        _CALLS.clear()
+        s.edit("mod.py", _DEP_V1)  # dep body changes; caller body unchanged
+        with s.snapshot() as snap:
+            val = snap.derived("upper", caller_id)
+        recomputed = {did for call in _CALLS for did in call}
+        assert caller_id not in recomputed, (
+            "a local layer must not recompute on a dependency-only change"
+        )
+        assert val.artifact == art0, "local artifact must be reused unchanged"
     finally:
         s.close()

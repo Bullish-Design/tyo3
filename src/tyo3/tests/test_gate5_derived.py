@@ -12,7 +12,6 @@ from tyo3.derive.cache import ArtifactCache, CacheKey
 from tyo3.stores.fs import FsStore
 
 
-@pytest.mark.xfail(reason="Gate 5 Step 0: API does not exist yet — pinned for implementation")
 def test_self_healing_derived_layer_cache_hit_recompute_reuse(tmp_path):
     """The three behaviours that define Gate 5.
 
@@ -108,10 +107,14 @@ path = "cache/upper"
 
         # --- Reuse on move: move foo to c.py unchanged ---
         call_count_before = _UPPERCASE_CALL_COUNT
-        # Simulate move: delete from a.py, create in c.py with same body.
-        session.sync_path("a.py")  # remove overlay, revert to disk (old content)
-        session.edit("a.py", "")   # clear a.py
-        session.edit("c.py", "def foo():\n    return 99\n")  # same body as after edit
+        # An atomic move (one revision) so identity rebinds foo's DurableId to
+        # its new location with an unchanged content hash. A non-atomic move
+        # (delete in one commit, create in the next) is a different operation —
+        # cross-revision move-tracking — and is not what this self-healing
+        # contract is about.
+        (proj / "c.py").write_text("")  # make c.py a known project path
+        session.sync_path("c.py")
+        session.edit_many({"a.py": "", "c.py": "def foo():\n    return 99\n"})
         snap3 = session.snapshot()
         val3 = snap3.derived("upper", foo_id)
         assert val3.status == "fresh"

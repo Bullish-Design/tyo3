@@ -779,12 +779,24 @@ class TyO3Session(_ReadOps):
         return self._derivation
 
     def _invalidate_derived(self, result: CommitDelta) -> None:
-        """Invalidate derived artifacts from the write delta (Step 5)."""
+        """Drive derived invalidation from the id-level delta (§5.5, Phase 8).
+
+        Feeds the loop **durable ids**, never the path-shaped metadata. The
+        candidate set is the transitive, container-granular ``affected_ids``
+        closure (which already subsumes ``changed`` ∪ ``created`` ∪ the
+        reverse-dependents); ``created``/``changed`` are unioned in defensively
+        so a delta that populates only those still invalidates. Deletions drop
+        by durable id.
+        """
         dag = self._get_derivation()
         if dag.is_empty:
             return
-        dirty = set(result.created) | set(result.changed)
-        dag.invalidate(self, dirty, set(result.deleted), result.revision)
+        dirty = (
+            set(result.affected_ids)
+            | set(result.changed_ids)
+            | set(result.created_ids)
+        )
+        dag.invalidate(self, dirty, set(result.deleted_ids), result.revision)
 
     # ── Coordination config (Gate 8) ───────────────────────────────
 
@@ -1655,29 +1667,44 @@ class Snapshot(_ReadOps):
                 artifact=None, status="absent", revision=self.revision, layer=layer
             )
         L = dag.layer(layer)
-        gen_input, input_hash = dag.resolve_input(L, self, durable_id)
+        try:
+            gen_input, input_hash = dag.resolve_input(L, self, durable_id)
+        except (KeyError, AttributeError):
+            # The entity does not resolve at this revision (deleted, or never
+            # reconciled to this snapshot) → nothing to serve.
+            return DerivedValue(
+                artifact=None, status="absent", revision=self.revision, layer=layer
+            )
         key = L.keys_for(input_hash)
         art = L.cache.get(key)
         if art is not None:
+            # Present at the resolved key ⇒ fresh. Read-time staleness is a pure
+            # key comparison (§8.3): the content-addressed key already encodes
+            # the entity content (and, for semantic layers, its dependency
+            # closure), so a move-unchanged hit serves the reused artifact.
             return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
 
-        # Miss at current hash.
-        if L.serving == "block":
-            scheduler = dag._get_scheduler()
-            art = scheduler.recompute_now(dag, L, self, durable_id)
-            if art is not None:
-                return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
-            return DerivedValue(artifact=None, status="failed", revision=self.revision, layer=layer)
-
-        # serving == "stale": serve last-good, schedule lazy recompute.
+        # Miss at the resolved key. Self-heal with a synchronous recompute over
+        # this pinned snapshot (§8.3). With no async worker in Phase 8 this
+        # serves both `block` and `stale` layers; the serving policy is honoured
+        # on failure, where we fall back to the last-good artifact tagged
+        # honestly. The async refinement path is Phase 9.
         scheduler = dag._get_scheduler()
-        scheduler.enqueue(L, durable_id, input_hash, lazy=True)
+        art = scheduler.recompute_now(dag, L, self, durable_id)
+        if art is not None:
+            return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
+
+        # Recompute failed (or produced nothing) → serve last-good honestly.
         last_key = L.last_good_store_key(durable_id)
         if last_key:
             last_art = L.cache._store.get(last_key)
             if last_art is not None:
                 status = "failed" if durable_id in L._failed else "stale"
                 return DerivedValue(artifact=last_art, status=status, revision=self.revision, layer=layer)
+        # No last-good. A recorded generator failure is reported as `failed`
+        # (artifact None); a genuine never-produced artifact is `absent`.
+        if durable_id in L._failed:
+            return DerivedValue(artifact=None, status="failed", revision=self.revision, layer=layer)
         return DerivedValue(artifact=None, status="absent", revision=self.revision, layer=layer)
 
     def nearest(

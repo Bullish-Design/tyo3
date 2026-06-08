@@ -6,6 +6,8 @@ from pathlib import Path
 import hashlib
 import os
 
+from tyo3.exceptions import StoreBackendBroken
+
 
 class FsStore:
     """Content-hash-keyed file store rooted at a cache directory."""
@@ -15,9 +17,16 @@ class FsStore:
 
     def get(self, key: str) -> bytes | None:
         path = self._path(key)
-        if not path.exists():
+        try:
+            return path.read_bytes()
+        except FileNotFoundError:
+            # A genuinely absent artifact — the one condition that is *not* an
+            # error (§5.12). Every other IO failure propagates typed below.
             return None
-        return path.read_bytes()
+        except OSError as exc:
+            raise StoreBackendBroken(
+                f"FsStore read failed for key {key!r}: {exc}"
+            ) from exc
 
     def put(self, key: str, artifact: bytes) -> None:
         path = self._path(key)

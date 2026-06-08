@@ -218,6 +218,13 @@ pub enum RecomputeMode {
     Eager,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyLocality {
+    Local,
+    Semantic,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct LayerCfg {
@@ -232,6 +239,11 @@ pub struct LayerCfg {
     pub serving: ServingMode,
     #[serde(default = "default_recompute")]
     pub recompute: RecomputeMode,
+    /// Derived cache-key locality (§5.5). `local` keys on the entity's own
+    /// content hash; `semantic` additionally folds in the dependency-closure
+    /// fingerprint. Defaults to `local` on the Python side when absent.
+    #[serde(default)]
+    pub key_locality: Option<KeyLocality>,
     #[serde(default)]
     pub entity_kinds: Vec<String>,
     #[serde(default = "default_true")]
@@ -1103,6 +1115,7 @@ dim = 3
                 store: None,
                 serving: ServingMode::Stale,
                 recompute: RecomputeMode::Lazy,
+                key_locality: None,
                 entity_kinds: Vec::new(),
                 history: true,
                 review_on_change: true,
@@ -1132,6 +1145,7 @@ dim = 3
                 store: None,
                 serving: ServingMode::Stale,
                 recompute: RecomputeMode::Lazy,
+                key_locality: None,
                 entity_kinds: Vec::new(),
                 history: true,
                 review_on_change: true,

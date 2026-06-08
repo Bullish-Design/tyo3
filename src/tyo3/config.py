@@ -34,6 +34,7 @@ class LayerConfig:
     entity_kinds: tuple[str, ...]
     history: bool
     review_on_change: bool
+    key_locality: str = "local"
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ def _layer(data: dict[str, Any]) -> LayerConfig:
         store=data.get("store"),
         serving=data["serving"],
         recompute=data["recompute"],
+        key_locality=data.get("key_locality") or "local",
         entity_kinds=tuple(data.get("entity_kinds", ())),
         history=data["history"],
         review_on_change=data["review_on_change"],

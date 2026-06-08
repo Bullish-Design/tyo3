@@ -58,8 +58,27 @@ class ProjectOpenError(TyO3Error):
     """Raised when a project cannot be opened for non-config reasons."""
 
 
-class StoreBackendUnavailable(TyO3Error):
+class StoreError(TyO3Error):
+    """Base class for artifact-store failures (§5.12).
+
+    Distinguishes the three store conditions so callers never conflate them:
+    a genuinely absent artifact (``get`` returns ``None`` — *not* an error),
+    a missing optional backend (:class:`StoreBackendUnavailable`), and a
+    backend that is present but failing (:class:`StoreBackendBroken`).
+    """
+
+
+class StoreBackendUnavailable(StoreError):
     """Raised when an optional store backend dependency is not installed."""
+
+
+class StoreBackendBroken(StoreError):
+    """Raised when a present store backend fails an IO/query/write operation.
+
+    A genuine "not found" is never this — it is a ``None`` return. This is for
+    permission errors, corrupt state, query failures, etc., which must propagate
+    rather than masquerade as "missing" (§5.12, the silent-no-op class).
+    """
 
 
 class GeneratorFailed(TyO3Error):
@@ -88,7 +107,9 @@ __all__ = [
     "TyO3Error",
     "ConfigError",
     "FormatVersionError",
+    "StoreError",
     "StoreBackendUnavailable",
+    "StoreBackendBroken",
     "ProjectOpenError",
     "ProjectClosedError",
     "PathResolutionError",
