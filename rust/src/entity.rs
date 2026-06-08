@@ -61,10 +61,23 @@ impl From<&ty_ide::SymbolKind> for SymbolKind {
 
 /// One addressable entity in a project at a given revision.
 ///
-/// `qualified_path` is `file_path::qualified_name` (e.g. `"pkg/mod.py::User.save"`).
-/// It is the primary EXACT match key. `content_hash` is the secondary HASH
-/// match key. `name` is the unqualified leaf name. `container` is the enclosing
-/// qualified name (used by STRUCT matching in Pass C).
+/// `qualified_path` is `file_path::qualified_name` (e.g. `"pkg/mod.py::User::save"`).
+/// It is the primary EXACT match key and the registry key. `content_hash` is the
+/// secondary HASH match key. `name` is the unqualified leaf name. `container` is
+/// the enclosing qualified path (used by STRUCT matching in Pass C).
+///
+/// `file`, `full_range`, `name_range`, and `qualified_name` are the structural
+/// fields the native code-layer producer needs (Phase 2, §5.4). They are the
+/// node-facing decomposition of `qualified_path`:
+///   - `file` — the source file path (`File::path(...).as_str()` form).
+///   - `full_range` — the entity's full definition range.
+///   - `name_range` — the range of the symbol's *name* only (the analysis
+///     "selection range"). Inheritance/supertype resolution MUST position its
+///     cursor on this range, never on `full_range` start, or supertype lookups
+///     silently return nothing.
+///   - `qualified_name` — the leaf-relative *dotted* name (`User.save`), kept
+///     separate from the `::`-joined, file-prefixed `qualified_path` the
+///     registry keys on.
 #[derive(Debug, Clone)]
 pub struct Entity {
     pub qualified_path: String,
@@ -72,6 +85,10 @@ pub struct Entity {
     pub content_hash: ContentHash,
     pub container: Option<String>,
     pub name: String,
+    pub file: String,
+    pub full_range: ruff_text_size::TextRange,
+    pub name_range: ruff_text_size::TextRange,
+    pub qualified_name: String,
 }
 
 // ── Extraction ──────────────────────────────────────────────────────────
@@ -158,6 +175,7 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
                 &line_index,
                 &file_path,
                 None,
+                None,
                 &policy,
                 &mut entities,
                 &mut visited,
@@ -177,6 +195,7 @@ fn collect_entities_recursive(
     _line_index: &LineIndex,
     file_path: &str,
     parent_qualified: Option<&str>,
+    parent_dotted: Option<&str>,
     policy: &HashPolicy,
     entities: &mut Vec<Entity>,
     visited: &mut HashSet<ty_ide::SymbolId>,
@@ -185,9 +204,15 @@ fn collect_entities_recursive(
 
     let name = info.name.clone();
     let kind = SymbolKind::from(&info.kind);
-    let qualified_name = match parent_qualified {
+    // The `::`-joined, file-prefixed registry key (EXACT match key).
+    let qualified_path = match parent_qualified {
         Some(p) => format!("{}::{}", p, name),
         None => format!("{}::{}", file_path, name),
+    };
+    // The leaf-relative dotted name the graph node carries (`User.save`).
+    let dotted_qualified_name = match parent_dotted {
+        Some(p) => format!("{}.{}", p, name),
+        None => name.to_string(),
     };
     let container = parent_qualified.map(|s| s.to_string());
 
@@ -199,11 +224,15 @@ fn collect_entities_recursive(
     let content_hash = hash_entity(&normal_form);
 
     entities.push(Entity {
-        qualified_path: qualified_name.clone(),
+        qualified_path: qualified_path.clone(),
         kind,
         content_hash,
         container,
         name: name.to_string(),
+        file: file_path.to_string(),
+        full_range: info.full_range,
+        name_range: info.name_range,
+        qualified_name: dotted_qualified_name.clone(),
     });
 
     // Recurse into children.
@@ -219,7 +248,8 @@ fn collect_entities_recursive(
             source_str,
             _line_index,
             file_path,
-            Some(&qualified_name),
+            Some(&qualified_path),
+            Some(&dotted_qualified_name),
             policy,
             entities,
             visited,
@@ -330,6 +360,41 @@ class User:
         let hash2 = save2.content_hash;
 
         assert_eq!(hash1, hash2, "whitespace edit should not change content hash");
+    }
+
+    #[test]
+    fn structural_fields_name_range_covers_only_name() {
+        // For `class A: def b(self): ...`, the `b` method entity must carry a
+        // name_range covering only `b` (one token), a strictly-larger
+        // full_range, a file ending in m.py, and a dotted qualified_name "A.b".
+        let src = "class A:\n    def b(self):\n        pass\n";
+        let (_dir, state) = state_with_source(src);
+        let entities = extract_entities(&state);
+
+        let b = entities
+            .iter()
+            .find(|e| e.name == "b" && e.kind == SymbolKind::Method)
+            .expect("method b not found");
+
+        // name_range covers exactly "b" (length 1).
+        assert_eq!(
+            u32::from(b.name_range.len()),
+            1,
+            "name_range should cover only the name `b`"
+        );
+        // full_range is strictly larger than name_range.
+        assert!(
+            b.full_range.len() > b.name_range.len(),
+            "full_range must be strictly larger than name_range"
+        );
+        // The name_range sits inside the full_range.
+        assert!(
+            b.full_range.contains_range(b.name_range),
+            "full_range must contain name_range"
+        );
+        assert!(b.file.ends_with("m.py"), "file should end with m.py: {}", b.file);
+        assert_eq!(b.qualified_name, "A.b", "dotted qualified_name");
+        assert_eq!(b.qualified_path, format!("{}::A::b", b.file));
     }
 
     #[test]

@@ -56,3 +56,11 @@ tempfile = "3"      # real temp directories for OsSystem-backed tests
 lto = true
 codegen-units = 1
 opt-level = 3
+
+# Optimize all *dependencies* even in dev/debug builds (`maturin develop`).
+# The ty type-checker, salsa, and ruff do heavy semantic analysis over the
+# stdlib typeshed on every open/sync_all; unoptimized they dominate test time
+# (~107s per fixture). The local `tyo3` crate stays at opt-level 0 so
+# incremental rebuilds during development remain fast.
+[profile.dev.package."*"]
+opt-level = 3

@@ -240,17 +240,13 @@ def test_projections_are_well_formed(tmp_path):
         assert all(count >= 1 for count in edges.values())
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 2/4: native code delta + CodeGraph.apply_code_delta do not "
-    "exist yet, so assert_parity cannot build its native half",
-)
-def test_assert_parity_native_half_not_ready_yet(tmp_path):
-    """assert_parity should pass once the native delta + applier exist (P2–P4).
+def test_assert_parity_native_half_matches_legacy(tmp_path):
+    """assert_parity passes now that the native code delta + applier exist (P2).
 
-    Until then the native half is absent and assert_parity raises
-    ParityOracleNotReady; this xfail flips to a failure (forcing marker removal)
-    the moment the native path becomes available and the graphs match.
+    The native ``full_code_delta()`` + the pure ``CodeGraph.apply_code_delta``
+    build a graph that matches the legacy read-surface build structurally (and,
+    for this fixture, cosmetically too). If the native half regresses to absent,
+    this fails on ``ParityOracleNotReady`` instead of silently xfailing.
     """
     _write(tmp_path, _PROJECT_A)
     with TyO3Session(str(tmp_path)) as session:

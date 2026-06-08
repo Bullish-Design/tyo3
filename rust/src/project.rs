@@ -42,7 +42,7 @@ use crate::files as file_resolver;
 ///
 /// Both variants wrap a `String` so they can be used directly as `map_err` fns,
 /// e.g. `resolve_file(...).map_err(AnalysisError::Path)?`.
-enum AnalysisError {
+pub(crate) enum AnalysisError {
     Path(String),
     Position(String),
 }
@@ -117,6 +117,13 @@ struct HeadState {
     /// Captured into snapshots alongside the registry for Snapshot
     /// isolation + time-travel (§10.2.2 authored half).
     authored: AuthoredStore,
+    /// Canonical native code layer (nodes + edges + reverse-deps). Carried on
+    /// the head so Phase 3 can maintain it incrementally inside the commit. In
+    /// Phase 2 it stays empty: the producer is full-build and too expensive to
+    /// run eagerly per commit (see `run_identity_reconciliation`), and parity is
+    /// served on demand by `full_code_delta`. Hence "never read" for now.
+    #[allow(dead_code)]
+    code_layer: crate::code_layer::CodeLayer,
 }
 
 /// Anything that can produce the cheap, GIL-releasable read clone.
@@ -241,7 +248,7 @@ fn resolve_file_and_source(
 // safe to call inside `py.detach(...)`.
 
 /// List all source files in the project.
-fn compute_files(state: &TyProjectState) -> Vec<String> {
+pub(crate) fn compute_files(state: &TyProjectState) -> Vec<String> {
     let project = state.db.project();
     let indexed = project.files(&state.db);
     indexed
@@ -297,7 +304,7 @@ fn compute_check_file(
 }
 
 /// Get document symbols for a file.
-fn compute_document_symbols(
+pub(crate) fn compute_document_symbols(
     state: &TyProjectState,
     path: &str,
 ) -> Result<Vec<dto::SymbolDto>, AnalysisError> {
@@ -393,7 +400,7 @@ fn compute_workspace_symbols(
 ///
 /// `navigate_fn` is a plain function pointer — function pointers are
 /// `Send`/`Ungil`, so they cross the `detach` boundary fine.
-fn compute_navigate(
+pub(crate) fn compute_navigate(
     state: &TyProjectState,
     path: &str,
     line: u32,
@@ -487,7 +494,7 @@ fn compute_semantic_tokens(
 }
 
 /// Batch-resolve all name occurrences in a file.
-fn compute_file_occurrences(
+pub(crate) fn compute_file_occurrences(
     state: &TyProjectState,
     path: &str,
 ) -> Result<Vec<dto::NameOccurrenceDto>, AnalysisError> {
@@ -554,7 +561,7 @@ fn compute_type_hierarchy(
 /// global scan from the hot build path.
 ///
 /// Returns an empty vec when the position is not on a class.
-fn compute_supertypes(
+pub(crate) fn compute_supertypes(
     state: &TyProjectState,
     path: &str,
     line: u32,
@@ -1019,6 +1026,7 @@ fn build_head_with_config(
         default_hash_profile,
         config,
         authored: AuthoredStore::default(),
+        code_layer: crate::code_layer::CodeLayer::new(),
     }
 }
 
@@ -1343,6 +1351,15 @@ fn run_identity_reconciliation(
         }
         Err(e) => log::error!("Failed to serialise identity registry: {}", e),
     }
+
+    // NOTE (Phase 2): the native code layer is *not* produced eagerly here.
+    // The Phase 2 producer is a full build (full semantic analysis: occurrence
+    // resolution + type-hierarchy/typeshed warmup), so running it inside every
+    // commit/open would make `open()` ~100x slower and serialise on the GIL.
+    // Phase 2's deliverable is parity, served on demand by
+    // `PyTyProject::full_code_delta`. The eager in-commit hookup (§5.3 step 4)
+    // is deferred to Phase 3, where the producer becomes incremental/scoped and
+    // the commit is staged (Phase 5). See PROGRESS.md §5.
 
     IdentityDelta {
         moved,
@@ -2216,6 +2233,30 @@ impl PyTyProject {
     }
 
     // ── Identity: id_for, locate (Gate 2 Step 6) ──────────────────────
+
+    // ── Native code delta (Phase 2, parity-only) ─────────────────
+
+    /// Produce a **full** (cold-start) native code delta for the current head
+    /// state — every node upserted, every edge added, `rescan = true` — against
+    /// an empty previous layer. The parity oracle applies this to a fresh
+    /// `CodeGraph` and compares it to the legacy read-surface build.
+    ///
+    /// This is a pure read of the head state (it does not mutate the head or its
+    /// stored code layer); the in-commit producer is what maintains the layer.
+    fn full_code_delta<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let (state, revision) = {
+            let guard = lock_state(&self.inner, "full_code_delta")?;
+            let head = guard.as_ref().unwrap();
+            (head.read_clone(), head.store.revision().0)
+        };
+        let empty = crate::code_layer::CodeLayer::new();
+        let delta = py.detach(move || {
+            let (_next, delta) =
+                crate::code_layer::produce_code_delta(&state, &empty, revision, true, None);
+            delta
+        });
+        pythonize(py, &delta).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
 
     /// Resolve the DurableId of the entity at `(path, line, col)`.
     ///

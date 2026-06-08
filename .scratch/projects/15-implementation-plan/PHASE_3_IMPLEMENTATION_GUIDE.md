@@ -34,14 +34,9 @@ shell.** Two equivalent forms:
   ```bash
   devenv shell -- cargo test --manifest-path rust/Cargo.toml identity
   ```
-- Interactive (if you are iterating rapidly):
-  ```bash
-  devenv shell        # drop into the environment once
-  # …then run cargo / pytest / the project scripts directly inside it…
-  ```
 
 The project defines custom scripts inside `devenv.nix` — `build`, `tests`,
-`test-rust`, `test-quick`, `clean`, `status`, etc. When this guide says "rebuild
+`test-rust`, `test-fast`, `clean`, `status`, etc. When this guide says "rebuild
 the extension," it means `devenv shell -- build` (which runs maturin so Python
 sees the freshly compiled Rust). **A pure `cargo test` does not refresh the
 compiled extension Python imports.** Phase 3 changes the *shape of the value

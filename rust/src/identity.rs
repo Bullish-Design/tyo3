@@ -860,6 +860,10 @@ mod tests {
             content_hash: hash,
             container: container.map(|s| s.to_string()),
             name: name.to_string(),
+            file: path.to_string(),
+            full_range: ruff_text_size::TextRange::default(),
+            name_range: ruff_text_size::TextRange::default(),
+            qualified_name: name.to_string(),
         }
     }
 
@@ -1064,6 +1068,10 @@ mod tests {
             content_hash: hash(60),
             container: Some("a.py::Outer".into()),
             name: "helper".into(),
+            file: "some/other/a.py".into(),
+            full_range: ruff_text_size::TextRange::default(),
+            name_range: ruff_text_size::TextRange::default(),
+            qualified_name: "Outer.helper".into(),
         };
         let entities = vec![e];
         let recon = reconcile(&mut reg, &entities, Revision(2));

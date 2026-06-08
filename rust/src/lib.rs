@@ -18,6 +18,7 @@ mod config;
 mod content;
 mod entity;
 mod identity;
+mod code_layer;
 mod sidecar;
 mod authored;
 mod convert;

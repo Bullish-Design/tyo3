@@ -13,6 +13,7 @@ mod completion;
 mod hints;
 mod code_action;
 mod sync;
+mod code_delta;
 pub use coordinates::*;
 pub use diagnostics::*;
 pub use hierarchy::*;
@@ -28,6 +29,7 @@ pub use completion::*;
 pub use hints::*;
 pub use code_action::*;
 pub use sync::*;
+pub use code_delta::*;
 
 /// An authored value resolved at a snapshot revision.
 ///

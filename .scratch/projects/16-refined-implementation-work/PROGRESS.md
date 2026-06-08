@@ -33,7 +33,7 @@
 |-------|------|-------------|------------|----------|--------|
 | **0** | Invariant tests + parity oracle | 8 test files | — | `parity_oracle.py`, 8 test files | ✅ **DONE** |
 | **1** | Complete committed generations (content gate) | `test_final_content_spine.py` | `content.rs`, `project.rs`, `overlay.rs` | — | ✅ **DONE** (2 carry-overs → Phase 5) |
-| **2** | Native code layer + code delta (parity-only) | Parity suite | `code_layer.rs` (new), `entity.rs`, `dto/code_delta.rs` (new) | `parity_oracle.py` (existing) | 🔴 **Not started** |
+| **2** | Native code layer + code delta (parity-only) | Parity suite | `code_layer.rs` (new), `entity.rs`, `dto/code_delta.rs` (new) | `graph/graph.py` (applier), `parity_oracle.py` (existing) | ✅ **DONE** |
 | **3** | Id-level commit delta | `test_final_commit_delta_contract.py` | `identity.rs`, `dto/sync.rs`, `project.rs` | `CommitDelta` model (new) | 🔴 **Not started** |
 | **4** | Cutover: Python graph as pure applier | `test_final_no_read_side_writes.py`, parity suite | `project.rs`, snapshot code-delta accessor | `graph/graph.py` (heavily edit) | 🔴 **Not started** |
 | **5** | Single native `commit()` with staging + rollback | `test_final_transaction_rollback.py` | `project.rs`, `sidecar.rs`, `authored.rs` | — | 🔴 **Not started** |
@@ -163,9 +163,63 @@ devenv shell -- pytest src/tyo3/tests/test_final_content_spine.py \
 
 ---
 
-## 5. Phase 2 — Native code layer + code delta (parity-only) 🔴 **Not started**
+## 5. Phase 2 — Native code layer + code delta (parity-only) ✅ **DONE**
 
-### 5.1 What needs to happen
+> **Completed & verified 2026-06-07.** All five steps implemented; the parity
+> oracle's native half now exists and **structural parity is exact** for the
+> `_PROJECT_A` fixture (8 nodes, 15 edges, zero structural *and* zero cosmetic
+> diffs). `test_final_parity_oracle.py::test_assert_parity_native_half_matches_legacy`
+> (renamed from `..._not_ready_yet`, xfail removed) is green. Milestone gate:
+> full Rust suite **145 passed**; full Python suite green (see §17 countdown — the
+> parity xfail is retired).
+>
+> **What landed**
+> - `entity.rs`: `Entity` gained `file`, `full_range`, `name_range`,
+>   `qualified_name` (the node-facing decomposition of `qualified_path`). Unit
+>   test pins the name range to the symbol name only.
+> - `code_layer.rs` (new): `CodeLayer { nodes, edges (derive Ord), reverse_deps }`,
+>   synthetic-id helper `make_module_durable_id`, and `produce_code_delta` — a
+>   faithful native port of the legacy six-pass build. It reads the **same**
+>   analysis cores the FFI read surface uses (`compute_document_symbols` /
+>   `compute_file_occurrences` / `compute_supertypes`), so node payloads are
+>   identical to the legacy build by construction, then ports graph.py's
+>   resolution case-for-case: ordered name→id map with the `""` short-name
+>   collision sentinel + ordered file-scan fallback, range-cache enclosing-symbol
+>   lookup, import edges + external stubs, two-pass inheritance (all `inherits`
+>   then all `overrides`), and the overrides BFS.
+> - `dto/code_delta.rs` (new): `CodeNodeDto` / `CodeNodeMovedDto` / `CodeEdgeDto`
+>   / `CodeDeltaDto`, field names matching the Python applier; carries the
+>   structural `name`/`external` and cosmetic `package`/`content_hashes`
+>   explicitly so the applier is trivial and parity-exact.
+> - `project.rs`: `CodeLayer` field on `HeadState` (carried for Phase 3, empty
+>   in Phase 2); `PyTyProject.full_code_delta()` returns a full cold-start delta
+>   (pure read, no head mutation) — the surface the parity oracle probes.
+> - `graph/graph.py`: `apply_code_delta` — a **pure** applier (no FFI, no
+>   session/snapshot), Phase-4-ready, plus `_add_code_edge` / `_remove_code_edge`
+>   / `_node_from_code_delta` helpers.
+>
+> **Deliberately deferred:**
+> - **Eager in-commit hookup (§5.3 step 4).** The guide wires `produce_code_delta`
+>   into every commit. The Phase 2 producer is a *full* build (full semantic
+>   analysis: occurrence resolution + cold typeshed/type-hierarchy warmup), so an
+>   eager per-commit/per-open hookup made `open()` ~100×slower (1-file fixture:
+>   ~4.5 s vs ~0.7 s) and serialised on the GIL — regressing
+>   `test_concurrency::test_no_deadlock_on_repeat_sessions` (the only NEW failure
+>   the eager wiring introduced). **Decision (user-confirmed 2026-06-07): defer
+>   the eager hookup to Phase 3**, where the producer becomes incremental/scoped
+>   (re-analyse only dirty files + importers, diff against the stored layer) and
+>   the build is driven lazily/incrementally rather than eagerly per open. Phase 2
+>   serves parity on demand via `full_code_delta()`; the `CodeLayer` field +
+>   `reverse_deps` are in place so Phase 3 inherits a correct index. The deferral
+>   is documented in `run_identity_reconciliation` (project.rs).
+> - The legacy `CodeGraph.build` stays authoritative (cutover is Phase 4); the
+>   code delta is not threaded into `SyncResultDto` (the id-level `CommitDelta` is
+>   Phase 3); plain `import x` module edges via the goto fallback are wired but
+>   untested (the parity fixture has none). The producer's incremental diff path
+>   exists (Rust-unit-tested for no-over-fire) but Phase 2 only exercises the full
+>   path through the oracle.
+
+### 5.1 What was done
 
 1. **Extend `Entity` with structural fields** — add `file`, full `range`, **name `range`**, `qualified_name` to `rust/src/entity.rs`
 2. **New `rust/src/code_layer.rs`** — `CodeLayer` with `nodes: Map<DurableId, NodeData>`, `edges: Set<Edge>`, `reverse_deps: Map<DurableId, Set<DurableId>>`
@@ -521,7 +575,7 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 | `test_final_bus_contract.py` | 3 | Phase 6 |
 | `test_final_derived_contract.py` | 5 | Phase 7 |
 | `test_final_hash_ast.py` | 2 | Phase 9 |
-| `test_final_parity_oracle.py` | 1 | Phase 2/4 |
+| `test_final_parity_oracle.py` | 0 (✅ Phase 2 done) | — |
 | **Total** | **27** (was 24: content-spine −1, no-read-side-writes −1; +5 Phase 1→5 carry-over xfails) | |
 
 ---
@@ -532,7 +586,7 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 |---|----------------|-------|
 | 1 | `test: add final invariant tests + parity oracle harness` | **0 ✅** |
 | 2 | `refactor(content): complete generations; remove snapshot disk pre-population` | **1 ✅** |
-| 3 | `feat(rust): native code layer + code delta behind the parity oracle` | **2 🔴** |
+| 3 | `feat(rust): native code layer + code delta behind the parity oracle` | **2 ✅** |
 | 4 | `refactor(delta): id-level commit delta with structured moves + affected closure` | **3 🔴** |
 | 5 | `refactor(graph): cut over to a pure applier; remove read-surface build + priming` | **4 🔴** |
 | 6 | `refactor(commit): single native commit() with staging + rollback` | **5 🔴** |

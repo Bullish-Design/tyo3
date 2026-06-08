@@ -1921,6 +1921,151 @@ class CodeGraph:
             native_by_graph=native_by_graph,
         )
 
+    # ── Pure native-delta applier (Phase 2 / Phase 4) ─────────
+
+    @staticmethod
+    def _coerce_range(payload: Any) -> Range | None:
+        """Validate a pythonized range dict (or ``None``) into a ``Range``."""
+        if payload is None:
+            return None
+        if isinstance(payload, Range):
+            return payload
+        return Range.model_validate(payload)
+
+    def _node_from_code_delta(self, n: dict[str, Any]) -> SymbolNode:
+        """Build a ``SymbolNode`` from one ``CodeNodeDto`` dict."""
+        return SymbolNode(
+            durable_id=n["durable_id"],
+            name=n["name"],
+            qualified_name=n["qualified_name"],
+            kind=SymbolKind(n["kind"]),
+            file=n["file"],
+            range=self._coerce_range(n["range"]),
+            selection_range=self._coerce_range(n.get("name_range")),
+            content_hash=n.get("content_hash"),
+            content_hashes=dict(n.get("content_hashes") or {}),
+            external=bool(n.get("external", False)),
+            package=n.get("package"),
+        )
+
+    def apply_code_delta(self, code_delta: Any) -> None:
+        """Apply a native ``CodeDelta`` to this graph — a **pure** function of the
+        graph and the delta.
+
+        Makes **no FFI calls** and touches **no session or snapshot**: it consumes
+        only the delta's node/edge upserts, removals, and moves. This is the
+        applier the parity oracle exercises in Phase 2 and that becomes the sole
+        graph-update path at the Phase 4 cutover.
+
+        *code_delta* is a pythonized ``CodeDeltaDto`` dict (the shape the native
+        ``full_code_delta()`` / commit delta produce).
+        """
+        self._assert_mutable()
+        d = code_delta if isinstance(code_delta, dict) else dict(code_delta)
+
+        # 1. Removals first (so a remove+re-add of the same id is well-defined).
+        removed_ids = list(d.get("nodes_removed") or [])
+        if removed_ids:
+            doomed = [self._id_to_index[i] for i in removed_ids if i in self._id_to_index]
+            if doomed:
+                self._graph.remove_nodes_from(doomed)
+                self._rebuild_indexes()
+
+        # 2. Node upserts. Re-emit (same id, new payload) replaces in place;
+        #    new ids are added.
+        for n in d.get("nodes_upserted") or []:
+            node = self._node_from_code_delta(n)
+            existing = self._id_to_index.get(node.durable_id)
+            if existing is None:
+                self._add_node(node)
+            else:
+                old = self._graph[existing]
+                self._graph[existing] = node
+                if old.file != node.file:
+                    if existing in self._file_to_nodes.get(old.file, []):
+                        self._file_to_nodes[old.file].remove(existing)
+                    self._file_to_nodes[node.file].append(existing)
+                self._semantic_subgraph_cache.clear()
+
+        # 3. Moves: same id, unchanged body, new location only.
+        for m in d.get("nodes_moved") or []:
+            idx = self._id_to_index.get(m["durable_id"])
+            if idx is None:
+                continue
+            node = self._graph[idx]
+            updated = node.model_copy(
+                update={
+                    "file": m["file"],
+                    "range": self._coerce_range(m["range"]),
+                    "selection_range": self._coerce_range(m.get("name_range")),
+                }
+            )
+            self._graph[idx] = updated
+            if node.file != updated.file:
+                if idx in self._file_to_nodes.get(node.file, []):
+                    self._file_to_nodes[node.file].remove(idx)
+                self._file_to_nodes[updated.file].append(idx)
+
+        # 4. Edge removals then additions.
+        for e in d.get("edges_removed") or []:
+            self._remove_code_edge(e)
+        for e in d.get("edges_added") or []:
+            self._add_code_edge(e)
+
+        # 5. Rebuild range caches for touched files so enclosing-symbol queries
+        #    stay correct (pure: derived from node payloads only).
+        for file_str in list(self._file_to_nodes.keys()):
+            self._build_range_cache_for_file(file_str)
+
+        self._semantic_subgraph_cache.clear()
+        revision = d.get("revision")
+        if revision is not None:
+            self._revision = revision
+
+    def _add_code_edge(self, e: dict[str, Any]) -> None:
+        """Add one ``CodeEdgeDto`` as an ``EdgeData`` edge."""
+        data = EdgeData(
+            kind=EdgeKind(e["kind"]),
+            file=e.get("file"),
+            range=self._coerce_range(e.get("range")),
+            role=ReferenceRole(e["role"]) if e.get("role") else None,
+        )
+        self._add_edge(e["source_id"], e["destination_id"], data, e.get("file") or "")
+        # Maintain the file-level reverse-dependency index from IMPORTS edges
+        # (project→project only), mirroring _add_import_edge.
+        if data.kind == EdgeKind.IMPORTS:
+            src = self.symbol(e["source_id"])
+            tgt = self.symbol(e["destination_id"])
+            if (
+                src is not None
+                and tgt is not None
+                and src.file != "<external>"
+                and tgt.file != "<external>"
+                and src.file != tgt.file
+            ):
+                self._file_importers[tgt.file].add(src.file)
+
+    def _remove_code_edge(self, e: dict[str, Any]) -> None:
+        """Remove the first matching ``CodeEdgeDto`` edge."""
+        src_idx = self._id_to_index.get(e["source_id"])
+        tgt_idx = self._id_to_index.get(e["destination_id"])
+        if src_idx is None or tgt_idx is None:
+            return
+        kind = EdgeKind(e["kind"])
+        want_range = self._coerce_range(e.get("range"))
+        want_role = ReferenceRole(e["role"]) if e.get("role") else None
+        for _s, t, data in self._graph.out_edges(src_idx):
+            if (
+                t == tgt_idx
+                and data.kind == kind
+                and data.file == e.get("file")
+                and data.range == want_range
+                and data.role == want_role
+            ):
+                self._graph.remove_edge(src_idx, tgt_idx)
+                self._semantic_subgraph_cache.clear()
+                return
+
     def apply_delta(
         self,
         source,
