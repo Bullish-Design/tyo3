@@ -72,7 +72,7 @@ pub struct CodeEdgeDto {
 ///
 /// `rescan = true` marks a full (cold-start / unknown-diff) delta: every node is
 /// in `nodes_upserted` and every edge in `edges_added`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct CodeDeltaDto {
     pub revision: u64,
     pub rescan: bool,
