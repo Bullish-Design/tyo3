@@ -1,19 +1,17 @@
 """Delta — the revision-stamped, scopable notification object.
 
-A thin immutable projection of the id-level ``CommitDelta`` (§5.11): the
-``created``/``changed``/``deleted``/``moved``/``authored`` id sets are taken
-**straight from the commit delta's id fields** — no path→id reconstruction.
+A thin immutable **pure projection** of the id-level ``CommitDelta`` (§5.11):
+every field is read straight off the commit delta — no path→id reconstruction,
+no graph walk, no materialised-head-graph dependency.
 
-The one graph-touch that survives is the *transitive affected closure*
-(§5.4 / §5.11): ``affected`` is the closure of ``changed ∪ deleted`` under
-reverse-deps, so a reverse-dependent (e.g. an importer of a changed entity) is
-notified even though its own body didn't change.  This is computed natively in
-the commit once the in-commit code-layer producer lands; while that producer is
-deferred (Phases 3–5), ``CommitDelta.affected_ids`` is the *seed* set only, so
-we expand it over the materialised head graph here — purely id→id and id→file,
-never path→id.  When the native producer lands, ``affected_ids`` is already
-transitive and these two helpers are deleted (the bus becomes a pure
-projection).
+``affected`` is the transitive, container-granular closure of ``changed ∪
+deleted`` under the code layer's reverse-dependency index, *computed natively in
+the commit* (the Phase 6 scoped in-commit producer maintains ``reverse_deps``
+edge-by-edge and emits ``affected_ids`` already-transitive).  ``files`` is the
+union of the directly-edited ``touched_files`` and the closure's
+``affected_files`` (both project-relative, both native) — so a file-interested
+subscriber matches a reverse-dependent by its own file without the bus ever
+touching a graph (Phase 7 deleted the interim Option-B bridge).
 """
 
 from __future__ import annotations
@@ -23,7 +21,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tyo3.bus.interest import Interest
-    from tyo3.graph.graph import CodeGraph
     from tyo3.models.delta import CommitDelta
 
 
@@ -107,127 +104,33 @@ class Delta:
         )
 
     @classmethod
-    def from_commit_delta(
-        cls,
-        delta: CommitDelta,
-        graph: CodeGraph | None = None,
-        *,
-        root: str | None = None,
-    ) -> Delta:
-        """Wrap an id-level ``CommitDelta`` for bus delivery (§5.11).
+    def from_commit_delta(cls, delta: CommitDelta) -> Delta:
+        """Project an id-level ``CommitDelta`` for bus delivery (§5.11).
 
-        The id sets come straight from the commit delta's id fields — no
-        path→id reconstruction.  ``affected`` is the native ``affected_ids``
-        (the transitive closure of ``changed ∪ deleted`` under reverse-deps,
-        §5.4); while the in-commit producer is deferred that field is the seed
-        set only, so it is expanded over *graph* (the materialised head graph
-        at this revision) when one is available — id→id only.
-
-        ``touched_files`` is path metadata (absolute on the native delta);
-        when *root* is given it is normalised to project-relative for
-        file-interest matching, and the project-relative files of the affected
-        ids are unioned in so a file-interested reverse-dependent matches.
+        A pure projection: every field is read straight off the delta.  The id
+        sets come from the commit delta's id fields; ``affected`` is the native
+        ``affected_ids`` (already the transitive, container-granular closure of
+        ``changed ∪ deleted`` — the Phase 6 in-commit producer maintains
+        ``reverse_deps`` and computes the closure natively).  ``files`` unions
+        the directly-edited ``touched_files`` with the closure's
+        ``affected_files`` (both native, both project-relative) so a
+        file-interested reverse-dependent matches by its own file — no graph.
         """
-        created = frozenset(delta.created_ids)
-        changed = frozenset(delta.changed_ids)
-        deleted = frozenset(delta.deleted_ids)
-        moved = frozenset(m.id for m in delta.moved)
-        authored = frozenset(delta.authored_ids)
-
-        # Native affected_ids is the seed set (changed∪deleted) until the
-        # in-commit producer lands; expand it transitively over the head graph
-        # so reverse-dependents are still notified (§5.4 / §5.11; the Phase 3
-        # "no capability lost" decision).  When the native producer lands,
-        # affected_ids is already transitive and _compute_affected is a no-op
-        # (the closure of a closed set is itself) — then this helper is deleted.
-        seed = frozenset(delta.affected_ids) or (changed | deleted)
-        affected = _compute_affected(seed, graph)
-
-        touched = delta.touched_files
-        if root is not None:
-            files = frozenset(_to_relative(root, p) for p in touched)
-        else:
-            files = frozenset(touched)
-        # Union the project-relative files of affected ids so a file-interested
-        # reverse-dependent matches (the affected importer's own file).
-        files = files | _resolve_files(affected, graph)
-
         return cls(
             revision=delta.revision,
-            created=created,
-            changed=changed,
-            deleted=deleted,
-            moved=moved,
-            authored=authored,
-            affected=affected,
+            created=frozenset(delta.created_ids),
+            changed=frozenset(delta.changed_ids),
+            deleted=frozenset(delta.deleted_ids),
+            moved=frozenset(m.id for m in delta.moved),
+            authored=frozenset(delta.authored_ids),
+            affected=frozenset(delta.affected_ids),
             rescan=delta.rescan,
-            files=files,
+            files=frozenset(delta.touched_files) | frozenset(delta.affected_files),
             layers=_layers_touched(delta),
         )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
-
-
-def _to_relative(root: str, path: str) -> str:
-    """Convert an absolute path to project-relative (idempotent for
-    already-relative paths)."""
-    from pathlib import Path, PurePosixPath
-
-    try:
-        root_p = Path(root).resolve()
-        path_p = Path(path).resolve()
-        return str(PurePosixPath(path_p.relative_to(root_p)))
-    except Exception:
-        return path
-
-
-def _compute_affected(
-    seed: frozenset[str],
-    graph: CodeGraph | None,
-) -> frozenset[str]:
-    """Expand *seed* (durable ids) to its transitive reverse-dep closure
-    (§5.4): ``affected = seed ∪ transitive_dependents(seed)``.
-
-    Pure id→id over the graph's reverse-dependency index.  Returns *seed*
-    unchanged when no graph is materialised (the native seed set).  Deleted
-    once the native in-commit producer emits a transitive ``affected_ids``.
-    """
-    if graph is None:
-        return seed
-
-    affected: set[str] = set(seed)
-    try:
-        for did in seed:
-            affected.update(graph.transitive_dependents(did))
-    except Exception:
-        pass
-    return frozenset(affected)
-
-
-def _resolve_files(
-    ids: frozenset[str],
-    graph: CodeGraph | None,
-) -> frozenset[str]:
-    """Map durable *ids* to their defining project-relative files (id→file).
-
-    Used so a file-interested subscriber matches a reverse-dependent by its
-    own file.  Empty when no graph is materialised.
-    """
-    if graph is None or not ids:
-        return frozenset()
-
-    files: set[str] = set()
-    try:
-        for did in ids:
-            idx = graph._id_to_index.get(did)
-            if idx is not None:
-                node = graph._graph[idx]
-                if node.file:
-                    files.add(node.file)
-    except Exception:
-        pass
-    return frozenset(files)
 
 
 def _layers_touched(delta: CommitDelta) -> frozenset[str]:

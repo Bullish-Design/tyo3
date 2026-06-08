@@ -903,24 +903,19 @@ class TyO3Session(_ReadOps):
         """Publish a committed delta to the bus (the last step of the one
         post-commit hook, ``_after_commit``).
 
-        Called only from ``_after_commit``, after the graph delta is applied,
-        so the head graph reflects this revision. Single-threaded writes
-        serialised through the native commit guarantee revision order.
-
-        Fast no-op when no subscribers are registered.
+        Single-threaded writes serialised through the native commit guarantee
+        revision order. Fast no-op when no subscribers are registered.
         """
         bus = self._bus
         if bus is None or not bus.has_subscribers():
             return
         from tyo3.bus.delta import Delta
-        # The bus delta is an id-level projection of the commit delta (§5.11):
-        # id sets come straight from the delta; the transitive ``affected``
-        # closure is expanded over the materialised head graph (id→id) while
-        # the native in-commit producer is deferred — never path→id.
-        # ``touched_files`` is normalised to project-relative for file-interest
-        # matching.  The head graph reflects this revision (the post-commit
-        # hook applies the graph delta before publishing).
-        delta = Delta.from_commit_delta(result, self._head_graph, root=str(self._root))
+        # The bus delta is a *pure projection* of the commit delta (§5.11): every
+        # field — including the transitive ``affected`` closure and its
+        # project-relative ``affected_files`` — is emitted natively by the
+        # in-commit producer (Phase 6). The bus no longer depends on the
+        # materialised head graph (Phase 7 deleted the Option-B bridge).
+        delta = Delta.from_commit_delta(result)
         bus.publish(delta)
 
     # ── Head snapshot caching ───────────────────────────────────────

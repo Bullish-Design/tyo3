@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from tyo3.bus.delta import Delta
     from tyo3.bus.interest import Interest
+    from tyo3.bus.refinement import AffectedRefinement
     from tyo3.bus.subscription import Subscription
 
 
@@ -119,6 +120,33 @@ class Bus:
                 scoped = delta.scoped_to(interest)
                 if not scoped.is_empty():
                     sub._offer(scoped)
+
+    def publish_refinement(self, ref: AffectedRefinement) -> None:
+        """Fan an ``AffectedRefinement`` out on the **refinement channel** (§5.4).
+
+        Delivered on a channel **separate** from the primary delta stream, so it
+        does **not** touch the ``revision > last`` invariant: a refinement for
+        revision R may legitimately arrive after R's primary delta (and even
+        after R+1's). Each matching subscriber receives it on its refinement
+        queue and reconciles it against the primary delta it already saw for R.
+
+        Matching: ``ALL`` subscribers always receive it; a scoped subscriber
+        receives it when its id-interest intersects the refinement's narrowed
+        (or expansion-added) ids. Like ``publish`` it never blocks the producer.
+
+        Phase 7 ships this as the **contract seam** — nothing emits a refinement
+        until the async precision worker lands (Phase 9).
+        """
+        with self._lock:
+            if self._closed or not self._subs:
+                return
+            subs_snapshot = list(self._subs)
+
+        ids = ref.narrowed | ref.added
+        for sub in subs_snapshot:
+            interest = sub.interest
+            if interest.all or (interest.ids and (interest.ids & ids)):
+                sub._offer_refinement(ref)
 
     def has_subscribers(self) -> bool:
         """Fast check for the write-path no-op guard."""

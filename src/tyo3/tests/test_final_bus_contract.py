@@ -1,14 +1,20 @@
-"""Final invariant tests — the subscription bus (→ Phase 6).
+"""Final invariant tests — the subscription bus (→ Phase 6 / Phase 7).
 
 Encodes §5.11: every committed write publishes exactly one relevant, id-level
 bus delta; deltas to a subscriber arrive in revision order; a slow subscriber
 never blocks the writer; and config rejects any writer-blocking overflow
 policy.
 
-Phase 6 made all four contracts hold: every write funnels through one
+Phase 6 made the first four contracts hold: every write funnels through one
 ``_after_commit`` hook so ``discard`` (and every other write) publishes; the
 bus delta is an id-level projection of the ``CommitDelta``; the bus asserts
 revision order; and config rejects the writer-blocking overflow policy.
+
+Phase 7 makes the bus delta a **pure projection** (no graph, no bridge) and adds
+the **refinement-channel** seam (§5.4): a revision-stamped refinement may arrive
+after a revision's primary delta, on a channel separate from the primary stream
+(so the revision-order assertion is untouched). Nothing emits a refinement yet
+(Phase 9) — the contract test injects one manually.
 """
 
 from __future__ import annotations
@@ -139,6 +145,62 @@ def test_slow_subscriber_does_not_block_writer(tmp_path):
         assert elapsed < 30.0, f"writer was stalled by a slow subscriber ({elapsed:.1f}s)"
         # The subscriber still has at most its capacity buffered (coalesced).
         assert sub.poll(timeout=0.0) is not None
+        sub.close()
+    finally:
+        s.close()
+
+
+def test_refinement_channel_delivers_after_primary_delta(tmp_path):
+    """The refinement channel is a separate, ordered stream (§5.4).
+
+    A refinement for an already-delivered revision is delivered on the
+    refinement queue, in order, **without** perturbing the primary delta stream
+    or its ``revision > last`` assertion (a late refinement for R may legitimately
+    arrive after R+1's primary delta). Phase 7 ships the seam only — nothing
+    emits a refinement yet — so this injects one manually.
+    """
+    from tyo3.bus import AffectedRefinement
+
+    s = _open(tmp_path, {"a.py": "def foo():\n    return 1\n"})
+    try:
+        fid = s.id_for("a.py", 1, 5)
+        assert fid is not None
+        sub = s.subscribe(Interest.ALL)
+        _drain(sub)
+
+        # Two primary commits → two ordered primary deltas.
+        r1 = s.edit("a.py", "def foo():\n    return 2\n").revision
+        r2 = s.edit("a.py", "def foo():\n    return 3\n").revision
+        deltas = _drain(sub)
+        revs = [d.revision for d in deltas]
+        assert revs == sorted(revs)
+
+        # No refinement has been emitted yet.
+        assert sub.poll_refinement(timeout=0.0) is None
+
+        # Inject a refinement for an ALREADY-delivered revision (r1), after r2's
+        # primary delta already went out — the late refinement must not trip the
+        # primary revision-order assertion.
+        bus = s._get_bus()
+        bus.publish_refinement(AffectedRefinement(revision=r1, narrowed=frozenset({fid})))
+
+        got = sub.poll_refinement(timeout=1.0)
+        assert got is not None
+        assert got.revision == r1
+        assert fid in got.narrowed
+
+        # The refinement channel is independent — it enqueued no primary delta.
+        assert sub.poll(timeout=0.0) is None
+
+        # Refinements are delivered in publish order on their own channel.
+        bus.publish_refinement(AffectedRefinement(revision=r2, narrowed=frozenset({fid})))
+        bus.publish_refinement(AffectedRefinement(revision=r2 + 1, narrowed=frozenset()))
+        order = [sub.poll_refinement(timeout=1.0).revision for _ in range(2)]
+        assert order == [r2, r2 + 1]
+
+        # The primary stream is still live and asserts cleanly after refinements.
+        s.edit("a.py", "def foo():\n    return 4\n")
+        assert _drain(sub), "primary stream must remain live after refinements"
         sub.close()
     finally:
         s.close()

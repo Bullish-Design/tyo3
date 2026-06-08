@@ -49,7 +49,12 @@ class CommitDelta(BaseModel):
     code_delta: dict | None = None
 
     # ── path-shaped metadata (NOT ids) ──────────────────────────────────
+    # Directly-edited files (project-relative). The bus's file-interest surface.
     touched_files: list[str] = Field(default_factory=list)
+    # Project-relative files of the ``affected_ids`` closure (reverse-dependents
+    # included), emitted natively so the bus matches file-interest without a
+    # graph walk (§5.11).
+    affected_files: list[str] = Field(default_factory=list)
     created: list[str] = Field(default_factory=list)
     changed: list[str] = Field(default_factory=list)
     deleted: list[str] = Field(default_factory=list)

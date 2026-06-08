@@ -1236,6 +1236,10 @@ struct IdentityDelta {
     /// Closure of `changed ∪ deleted` under the head code layer's reverse-deps.
     /// Phase 3: the layer is empty, so this equals the seeds.
     affected_ids: Vec<String>,
+    /// Project-relative files of `affected_ids` (the files of the closure's
+    /// nodes, `<external>` filtered) — emitted so the bus matches a
+    /// reverse-dependent file-interest natively (§5.11).
+    affected_files: Vec<String>,
     needs_review: Vec<String>,
     orphaned: Vec<String>,
     extracted: usize,
@@ -1259,6 +1263,7 @@ struct IdentityDelta {
 /// of the path-level created/changed/deleted strings — metadata only.
 fn build_commit_delta(
     revision: u64,
+    root: &SystemPathBuf,
     created: Vec<String>,
     changed: Vec<String>,
     deleted: Vec<String>,
@@ -1268,9 +1273,17 @@ fn build_commit_delta(
     project_changed: bool,
     custom_stdlib_changed: bool,
 ) -> dto::CommitDeltaDto {
-    let mut touched_files = created.clone();
-    touched_files.extend(changed.iter().cloned());
-    touched_files.extend(deleted.iter().cloned());
+    // `touched_files` is the bus's project-relative file surface (the directly
+    // edited files); normalise the absolute native paths here so the bus is a
+    // pure projection with no Python path math. The per-category `created` /
+    // `changed` / `deleted` fields stay native (path-shaped metadata consumed by
+    // the still-path-shaped derived invalidation until Phase 8).
+    let touched_files: Vec<String> = created
+        .iter()
+        .chain(changed.iter())
+        .chain(deleted.iter())
+        .map(|p| native_to_graph(root, p).unwrap_or_else(|| p.clone()))
+        .collect();
 
     dto::CommitDeltaDto {
         revision,
@@ -1282,6 +1295,7 @@ fn build_commit_delta(
         affected_ids: identity.affected_ids,
         code_delta,
         touched_files,
+        affected_files: identity.affected_files,
         created,
         changed,
         deleted,
@@ -1471,6 +1485,9 @@ fn run_identity_reconciliation(
         deleted_ids,
         moved,
         affected_ids,
+        // Computed in `run_staged` over the maintained `next` layer (the node→file
+        // map of the closure), after `affected_ids` is resolved.
+        affected_files: Vec::new(),
         needs_review,
         orphaned,
         extracted,
@@ -1957,6 +1974,22 @@ fn run_staged(
             .affected_closure_with_deleted(&prev, &seeds, &deleted)
             .into_iter()
             .collect();
+
+        // affected_files = the project-relative files of the affected closure's
+        // nodes (deduped, `<external>` filtered) — emitted natively so the bus
+        // matches a reverse-dependent file-interest without walking a graph
+        // (§5.11). Deleted seeds are absent from `next` and resolve via
+        // `touched_files` (their deleted paths) instead, so missing them here is
+        // correct, not a gap.
+        let affected_files: std::collections::BTreeSet<String> = identity
+            .affected_ids
+            .iter()
+            .filter_map(|id| next.nodes.get(id))
+            .map(|node| node.file.clone())
+            .filter(|file| file != "<external>")
+            .collect();
+        identity.affected_files = affected_files.into_iter().collect();
+
         head.code_layer = next;
 
         // Code-layer staging boundary fault seam: a producer/code-layer failure
@@ -2004,6 +2037,7 @@ fn run_staged(
     // 8. Build the id-level commit delta.
     let mut dto = build_commit_delta(
         revision,
+        &head.root,
         staged.created,
         staged.changed,
         staged.deleted,

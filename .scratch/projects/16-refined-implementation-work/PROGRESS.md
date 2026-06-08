@@ -156,6 +156,80 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 
 ---
 
+### §9.7 — V2 Phase 7: pure-projection bus + refinement seam ✅ **DONE** (2026-06-08)
+
+> **The bus delta is now a pure projection of the `CommitDelta`** — no graph, no
+> Option-B bridge, no path→id reconstruction. The interim
+> `_compute_affected`/`_resolve_files`/`_to_relative` helpers and the
+> `graph`/`root` params of `Delta.from_commit_delta` are deleted;
+> `grep CodeGraph\|_compute_affected\|_resolve_files\|_head_graph src/tyo3/bus/`
+> is empty. `session._publish_delta` calls `Delta.from_commit_delta(result)` with
+> no head-graph argument — the bus no longer depends on a materialised head graph.
+>
+> **The key design decision (user-confirmed 2026-06-08): keep file-interest as a
+> first-class, reverse-dep-aware API and emit `affected_files` natively.** The
+> guide's literal "just read `touched_files`" projection would have regressed
+> `test_gate8_bus::test_scoped_reverse_dep_delivery` (a file-interest subscriber
+> on `app.py` must fire when `models.py`, which it imports, changes — but native
+> `touched_files` is only the directly-edited files). The id→file map for
+> reverse-dependents lived only in the deleted head graph. Rationale: id-interest
+> is *statically* resolvable (closure is native), but file-interest's reverse-dep
+> frontier is *dynamic per-revision* — deprecating file-interest wouldn't remove
+> that cost, it would relocate it onto every subscriber (a graph dependency, N×,
+> consumer-side). So the delta carries it once: **the cheapest place to pay.**
+>
+> **What landed**
+> - `dto/commit_delta.rs`: new `affected_files: Vec<String>` — the
+>   project-relative files of the `affected_ids` closure (`<external>` filtered),
+>   disjoint role from `touched_files` (directly edited).
+> - `project.rs`: `run_staged` computes `affected_files` from `next.nodes`
+>   (node→file) right after `affected_closure_with_deleted`, deduped via a
+>   `BTreeSet`; deleted seeds are absent from `next` and resolve via
+>   `touched_files` instead (correct, not a gap). `build_commit_delta` now takes
+>   `&head.root` and emits **project-relative** `touched_files` via
+>   `native_to_graph` — so Python does zero path math. The per-category
+>   `created`/`changed`/`deleted` fields stay native (consumed by the
+>   still-path-shaped derived invalidation → Phase 8); only the bus-facing
+>   `touched_files` is normalised.
+> - `bus/delta.py`: `from_commit_delta` is a pure projection —
+>   `affected = frozenset(delta.affected_ids)`,
+>   `files = touched_files | affected_files`. Helpers deleted.
+> - `bus/refinement.py` (new): `AffectedRefinement{revision, narrowed, added}` —
+>   the refinement-channel **contract seam** (Concept V2 §5.4). `Bus.publish_refinement`
+>   fans out on a **separate** channel (own subscription queue, own
+>   `poll_refinement`) so a late refinement for R never touches the primary
+>   `revision > last` assertion. **Nothing emits a refinement yet** (Phase 9).
+> - **7.2/7.3 — nothing to cut (verified, not assumed).** `CodeGraph.build` is
+>   already the *thin native builder* (Phase 4 deleted the ~1140-line legacy
+>   read-surface build); it is load-bearing as the parity oracle's full-rebuild
+>   baseline + the conftest shared cache, so it is **kept**.
+>   `test_incremental_parity.py` is the *real* incremental-vs-rebuild oracle and
+>   stays. `parity_oracle.py`'s tiered comparator is live test infra (a green
+>   `test_final_parity_oracle.py` + `test_graph_incremental.py`), not the legacy
+>   builder — **not deleted** ("think before cutting"). No orphaned private
+>   helpers in `graph.py`. The Phase-6 `_remove_code_edge` index-precise
+>   parallel-edge fix is untouched.
+>
+> **Strengthened contract:** `test_gate8_bus::test_scoped_reverse_dep_delivery`
+> dropped its `_g = session.graph` line — reverse-dep file delivery now works with
+> **no** head-graph materialisation, proving the native `affected_files` path.
+> New `test_final_bus_contract::test_refinement_channel_delivers_after_primary_delta`
+> proves ordered, independent refinement delivery for an already-delivered
+> revision. `test_final_bus_contract.py` is fully green (zero xfail).
+>
+> **Gate (2026-06-08):** full `pytest -q --no-cov` — only the **3 documented
+> pre-existing later-phase failures** (`test_final_derived_contract` ×2 → Phase 8;
+> `test_final_hash_ast::test_formatting_only_hashes_same` → Phase 10); **zero
+> new**. `cargo test` **158/0**. `test_gate8_bus.py` (36) + `test_final_bus_contract.py`
+> (5, zero xfail) green; `test_incremental_parity.py` + `test_inference_flow_coverage.py`
+> green.
+>
+> **Leaves for later:** emitting refinements → Phase 9; derived invalidation
+> consuming `affected` → Phase 8; bus file structure → Phase 13.
+> [[spine-refactor-v2-plan]]
+
+---
+
 ## 1. The six defects this refactor removes (from §6.3 of the Concept)
 
 | # | Defect | Status |

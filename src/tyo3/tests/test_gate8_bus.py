@@ -163,7 +163,7 @@ class TestDelta:
                 result = session.edit(
                     "models.py", "class User:\n    name: str = ''\n    age: int = 0\n"
                 )
-                delta = Delta.from_commit_delta(result, root=proj)
+                delta = Delta.from_commit_delta(result)
 
                 assert user_id in delta.affected
                 # The changed set should contain ids from models.py
@@ -1035,8 +1035,9 @@ def test_scoped_reverse_dep_delivery(tmp_path):
 
     with TyO3Session(str(proj)) as session:
         session.sync_all()
-        # Materialize the graph so the bus can compute id-level deltas.
-        _g = session.graph
+        # NB: the bus is a pure projection of the native CommitDelta (Phase 7) —
+        # reverse-dep file delivery works WITHOUT materialising session.graph
+        # (the affected closure + affected_files are emitted natively).
         user_id = session.id_for("models.py", 1, 7)  # class User
         assert user_id is not None
 

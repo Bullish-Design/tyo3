@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Iterator, Literal
 if TYPE_CHECKING:
     from tyo3.bus.delta import Delta
     from tyo3.bus.interest import Interest
+    from tyo3.bus.refinement import AffectedRefinement
 
 # Runtime import needed for _coalesce_into_tail which constructs Delta.
 # We import lazily to avoid circular imports at module level.
@@ -53,6 +54,11 @@ class Subscription:
         self._bus: object | None = bus
 
         self._queue: deque[Delta] = deque()
+        # The refinement channel is a SEPARATE queue (§5.4): a late refinement for
+        # an already-delivered revision must not perturb the primary delta stream
+        # or its revision-order invariant. Shares the lock/cond for cheap
+        # signalling; consumers poll it independently of the delta queue.
+        self._refinements: deque[AffectedRefinement] = deque()
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._closed = False
@@ -124,6 +130,23 @@ class Subscription:
         self._queue.append(merged)
         self._cond.notify_all()
 
+    def _offer_refinement(self, ref: AffectedRefinement) -> None:
+        """Append *ref* to the refinement queue (non-blocking).
+
+        Called by the ``Bus`` on the refinement channel.  Like ``_offer`` it
+        must NEVER block the producer; on overflow it drops the **oldest**
+        refinement (refinements are advisory narrowings — the coarse set the
+        subscriber already holds stays correct, Concept V2 §5.4 graceful
+        degradation).
+        """
+        with self._lock:
+            if self._closed:
+                return
+            self._refinements.append(ref)
+            if len(self._refinements) > self._capacity:
+                self._refinements.popleft()
+            self._cond.notify_all()
+
     # ── Consumer side (called by the subscriber's own thread) ───────
 
     def poll(self, timeout: float | None = 0.0) -> Delta | None:
@@ -151,6 +174,37 @@ class Subscription:
                 delta = self._queue.popleft()
                 self._cond.notify_all()
                 return delta
+
+        return None
+
+    def poll_refinement(
+        self, timeout: float | None = 0.0
+    ) -> AffectedRefinement | None:
+        """Non-blocking poll of the **refinement** channel (or block up to
+        *timeout* seconds).
+
+        Returns the next ``AffectedRefinement`` or ``None`` if none is queued
+        and the timeout expires.  Independent of ``poll`` — the primary delta
+        stream and the refinement stream are consumed separately, in their own
+        orders (a refinement for R may legitimately arrive after R+1's delta).
+        """
+        with self._cond:
+            if timeout is None:
+                while not self._closed and not self._refinements:
+                    self._cond.wait()
+            elif timeout > 0:
+                deadline = _time.monotonic() + timeout
+                while not self._closed and not self._refinements:
+                    remaining = deadline - _time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._cond.wait(timeout=remaining)
+            # timeout == 0: non-blocking, just check.
+
+            if self._refinements:
+                ref = self._refinements.popleft()
+                self._cond.notify_all()
+                return ref
 
         return None
 
@@ -198,9 +252,10 @@ class Subscription:
                 pass
             self._bus = None
 
-        # Drain the queue to release any held references.
+        # Drain the queues to release any held references.
         with self._lock:
             self._queue.clear()
+            self._refinements.clear()
 
     @property
     def lagged(self) -> bool:

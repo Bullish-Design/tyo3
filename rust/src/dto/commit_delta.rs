@@ -66,8 +66,18 @@ pub struct CommitDeltaDto {
     pub code_delta: Option<CodeDeltaDto>,
 
     // ── path-shaped metadata (NOT ids — for bus file-interest + readability) ─
-    /// Union of the path-level created/changed/deleted strings.
+    /// Union of the path-level created/changed/deleted strings, **project-relative**
+    /// (POSIX graph paths). The directly-touched files of this write.
     pub touched_files: Vec<String>,
+    /// Project-relative files of the `affected_ids` closure — the files that
+    /// contain a (possibly reverse-dependent) affected entity (§5.11). Emitted
+    /// natively from the maintained code layer so the bus stays a *pure
+    /// projection*: a file-interested subscriber matches a reverse-dependent by
+    /// its own file without the bus ever walking a graph. `<external>` stubs are
+    /// filtered out. Disjoint role from `touched_files` (directly edited); the
+    /// bus unions the two for file-interest matching.
+    #[serde(default)]
+    pub affected_files: Vec<String>,
     /// Per-category touched paths (metadata; consumed by the still-path-shaped
     /// Phase 6/7 post-commit helpers until they are rewritten).
     pub created: Vec<String>,
@@ -146,6 +156,7 @@ mod tests {
                 edges_removed: vec![],
             }),
             touched_files: vec!["a.py".into()],
+            affected_files: vec!["a.py".into(), "b.py".into()],
             created: vec![],
             changed: vec!["a.py".into()],
             deleted: vec![],
@@ -173,6 +184,10 @@ mod tests {
         assert_eq!(json["code_delta"]["nodes_upserted"][0]["durable_id"], "01CHANGED");
         // touched files are path-shaped metadata, kept separate from ids.
         assert_eq!(json["touched_files"][0], "a.py");
+        // affected files are the project-relative files of the affected closure,
+        // emitted natively so the bus stays a pure projection.
+        assert_eq!(json["affected_files"][0], "a.py");
+        assert_eq!(json["affected_files"][1], "b.py");
         assert_eq!(json["changed"][0], "a.py");
 
         let back: CommitDeltaDto = serde_json::from_value(json).unwrap();
