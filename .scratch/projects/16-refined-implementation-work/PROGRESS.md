@@ -660,6 +660,82 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 
 ---
 
+### §9.13 — V2 Phase 13: split the monoliths ✅ **DONE** (2026-06-08)
+
+> **The three central monoliths are now focused packages — closing §6.3
+> deviation #10.** Pure structural refactor: **behaviour-preserving moves +
+> re-exports only**, no signature or behaviour changes, no bug fixes. The full
+> suite is the acceptance — no new tests. Public imports are unchanged
+> (`from tyo3 import TyO3Session`, `from tyo3.graph import CodeGraph`,
+> `from tyo3.exceptions import …`).
+>
+> **The three splits.**
+>   - **13.1 `rust/src/project.rs` (4656 lines) → `rust/src/project/`** (commit
+>     `cd0162a`). Submodules: `analysis.rs` (the `compute_*` LSP read cores),
+>     `open.rs` (open / HEAD construction), `commit.rs` (staged commit + producer
+>     driver), `methods.rs` (thin PyO3 `PyTyProject` `#[pymethods]` wrappers),
+>     `snapshot.rs` (`PySnapshot`), `head_view.rs` (`PyHeadView`). The root
+>     `project.rs` keeps the shared state types (`TyProjectState`, `HeadState`,
+>     the `PyTyProject` struct, lock helpers), re-exports submodules via
+>     `pub(crate) use <mod>::*;`, and keeps the unit tests. `identity.rs` /
+>     `code_layer.rs` stayed separate. **Decision:** free-functions-in-submodules
+>     + a thin `#[pymethods]` block — enabled by `multiple-pymethods` (already on
+>     in `rust/Cargo.toml`), so the `PyTyProject` method block lives in
+>     `methods.rs` while the read cores are plain free functions.
+>   - **13.2 `src/tyo3/session.py` (1993 lines) → `src/tyo3/session/`** (commit
+>     `3db2428`). Layered package: `_native.py` (PyO3 handle + native-exception
+>     shims) ← `read_ops.py` (the `_ReadOps` shared read surface) ← `views.py`
+>     (`_OwnedView` / `Snapshot` / `LatestView`) ← `session.py` (the `TyO3Session`
+>     facade), with `__init__.py` re-exporting. **Decision:** layered
+>     facade→views→read_ops→_native (one-way edges).
+>   - **13.3 `src/tyo3/graph/graph.py` (1082 lines) → `projection.py` + mixins**
+>     (this session). **Renamed `graph.py` → `projection.py`** — the class is now a
+>     pure projection of `full_code_delta()`, not a transaction participant, so
+>     `projection.py` names that unambiguously (chosen over `snapshot_graph`, which
+>     would collide with the `Snapshot` concept). `CodeGraph` is **re-exported**
+>     from `tyo3/graph/__init__.py`, so `from tyo3.graph import CodeGraph` is
+>     unchanged. The single class is spread across four **mixins** (the standard
+>     Python way): `CodeGraph(_ApplierMixin, _QueriesMixin, _DiffMixin,
+>     _DiagnosticsMixin)`. New modules under `src/tyo3/graph/`: `_helpers.py`
+>     (leaf fns `_to_relative` / `_normalize_result_path` / `_ranges_overlap`),
+>     `applier.py` (`_ApplierMixin` — the code-delta → graph applier), `queries.py`
+>     (`_QueriesMixin` + `DEPENDENCY_EDGE_KINDS`), `diff.py` (`_DiffMixin`),
+>     `diagnostics.py` (`_DiagnosticsMixin` + module `logger`), `projection.py`
+>     (the `CodeGraph` core — construction / MVCC / properties). **Decisions:**
+>     **all** instance state initialises in `CodeGraph.__init__` (projection.py);
+>     the mixins define **no `__init__`** and cross-mixin `self.X(...)` calls
+>     resolve via MRO at runtime (no imports between mixins); the dependency edge
+>     is one-way (`projection → mixins`, `mixins → _helpers`/models leaves), mixins
+>     reference `CodeGraph` only in `TYPE_CHECKING`/string annotations, so **no
+>     runtime cycle**. Deep-importers repointed to `tyo3.graph.projection`
+>     (`__init__.py`, `parity_oracle.py`, `test_graph_apply_code_delta.py`).
+>
+> **13.4 — bus/precision boundaries: confirm-only (no work).** `src/tyo3/bus/` is
+> already split (`bus.py` / `subscription.py` / `delta.py` / `interest.py` /
+> `refinement.py`); `precision/refiner.py` imports only `tyo3.bus.refinement`
+> (one-way); **neither `bus/` nor `precision/` imports `session` or `graph`** —
+> `grep -rn "tyo3.session\|tyo3.graph" src/tyo3/bus/ src/tyo3/precision/` returns
+> nothing → no cycle. Verified, untouched.
+>
+> **Pre-existing leftovers (NOT introduced here; deferred to Phase 14).** The
+> un-imported `Optional` annotation in the session facade and the `dto/mod.rs`
+> `sync::*` + `cfg(test)`-gated `Document` / `file_name` warnings are all
+> pre-existing and out of scope for a behaviour-preserving split — they belong to
+> Phase 14 (zero-warnings / typing / exception hygiene + the acceptance suite).
+> The `F841` "unused `sync`" lints in `test_incremental_parity.py` are likewise
+> pre-existing in untouched test files.
+>
+> **Gate (2026-06-08).** 13.3: ruff `F401/F811/F821/F841` clean across all six new
+> graph modules + `__init__`; import smoke + cycle check pass
+> (`CodeGraph.__mro__` = projection → applier → queries → diff → diagnostics);
+> `src/tyo3/graph/tests/` green. Final milestone gate: full `pytest -q --no-cov`
+> **green (exit 0)** — Phase-12 baseline preserved, zero new xfail/XPASS; `cargo
+> test` **167/0** (Rust unchanged since 13.1, re-certified). Each module is now
+> single-responsibility; no cycles; the graph module reads as a `projection`.
+> [[phase12-single-config-source]] [[phase11-read-surface-done]] [[spine-refactor-v2-plan]]
+
+---
+
 ## 1. The six defects this refactor removes (from §6.3 of the Concept)
 
 | # | Defect | Status |
@@ -673,7 +749,7 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 | 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | ✅ **V2 Phase 11 DONE** (`_OwnedView` owns/pins the snapshot; eager `entity`/`diff` materialise-then-close; floating-latest `graph()` non-canonical; layer views stop swallowing read failures) |
 | 8 | Hashing is text-heuristic not AST-canonical (collapses whitespace inside string literals) | 🔴 **V2 Phase 10** |
 | 9 | Config parsed twice with silent fallback (Python re-reads config.toml, swallows errors) | ✅ **V2 Phase 12 DONE** (`_read_coordination_config` deleted; coordination read from the one validated native config via `TyConfig.coordination`; invalid overflow/precision/refinement fails loudly at open) |
-| 10 | Three central files are monoliths (`project.rs`, `session.py`, `graph/graph.py`) | 🔴 **V2 Phase 13** |
+| 10 | Three central files are monoliths (`project.rs`, `session.py`, `graph/graph.py`) | ✅ **V2 Phase 13 DONE** (`project.rs` → `project/` submodules; `session.py` → `session/` package; `graph/graph.py` → `projection.py` + four mixins — behaviour-preserving, public surface unchanged) |
 
 > **Phase numbers in this table are V2** (see §0). Beyond these 10 defects, V2 adds
 > the deferred keystone — the **scoped in-commit producer (V2 Phase 6)** that makes
