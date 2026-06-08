@@ -107,17 +107,71 @@ deleted.
 
 **What Phases 2–3 already put in place (you build on it, don't rebuild it):**
 
-- A native `CodeLayer` + `produce_code_delta(...)` (Phase 2), producing a delta
-  inside the commit, **stored back into `head.code_layer`**, proven
-  structurally parity-equal to the legacy build (cosmetic tier surfaced/known).
+- A native `CodeLayer` + `produce_code_delta(...)` (Phase 2): the **producer
+  exists** and is proven structurally parity-equal to the legacy build (cosmetic
+  tier surfaced/known), but it is **not run inside the commit** — see the
+  carry-over below.
 - `PyTyProject.full_code_delta()` (Phase 2) — a *full* (`rescan=true`, scope=all)
   pythonized code delta for the current head state. The parity oracle probes it
-  (`parity_oracle.py:233-247`).
+  (`parity_oracle.py:233-247`). This is the **only populated** native code-delta
+  surface today.
 - A *minimal* pure `CodeGraph.apply_code_delta(code_delta)` (Phase 2 pull-forward)
   used only by the oracle so far — Phase 4 promotes and hardens it.
-- The id-level `CommitDelta` (Phase 3) with the Phase 2 code delta **nested** as
-  its `code_delta` field (Rust `CommitDeltaDto.code_delta`; Python
-  `CommitDelta.code_delta`, currently a `dict | None`).
+- The id-level `CommitDelta` (Phase 3) with a `code_delta` field intended to nest
+  the Phase 2 code delta (Rust `CommitDeltaDto.code_delta`; Python
+  `CommitDelta.code_delta`, declared `dict | None`).
+
+> ### ⚠️ Critical carry-over from Phase 3 — the nested `code_delta` is EMPTY
+>
+> Phase 3 (user-approved "Option B") shipped the id-level `CommitDelta` but
+> **deliberately did NOT run the in-commit producer**. Two facts the rest of this
+> guide depends on:
+>
+> 1. **`head.code_layer` is empty** — `produce_code_delta` is a *full* build
+>    (occurrence + supertype analysis + cold typeshed warmup) that regressed
+>    `open()`/`test_concurrency` in Phase 2, so it is not run per commit. As a
+>    result `reverse_deps` is empty and `affected_ids` is currently seeds-only
+>    (`changed ∪ deleted`); the `CodeLayer::affected_closure` helper exists and is
+>    unit-tested but has nothing to walk.
+> 2. **`CommitDelta.code_delta` is empty on every commit** — `build_commit_delta`
+>    (`rust/src/project.rs`) sets it to `CodeDeltaDto::default()`, which pythonizes
+>    to a **non-null** dict `{revision:0, rescan:false, nodes_upserted:[], …}`, NOT
+>    `None`. So the naïve `if code_delta is None:` branch in the 4.2(a) sketch
+>    **never fires**, and applying that empty delta would leave the head graph
+>    un-updated.
+>
+> **What Phase 4 must do about it — make the field a true `Option` and use
+> three-state semantics (detailed in 4.2(a)):**
+>
+> | `code_delta` | meaning | consumer action |
+> |---|---|---|
+> | `None` (absent) | "no structural delta was computed this commit" | **rebuild** from `full_code_delta()` |
+> | `Some({})` (present, empty) | "computed it; nothing changed structurally" (e.g. whitespace-only edit) | **no-op** — applying it is correct & cheap |
+> | `Some({…})` (present, populated) | "here is the incremental delta" | apply it incrementally |
+>
+> Collapsing *empty* into *rebuild* is a perf bug (it would force a full rebuild on
+> every cosmetic edit); the "I didn't compute it" signal must therefore be
+> **absence (`None`)**, not an empty payload. And you **cannot** reuse
+> `code_delta.rescan = true` as the "go rebuild" flag: the applier treats
+> `rescan=true` as "*this delta is the complete set, replace the graph wholesale*",
+> so an empty rescan delta would wipe the graph to nothing — a real rescan delta
+> has to actually contain every node/edge (i.e. it *is* `full_code_delta()`).
+>
+> **The producer fork is decoupled from this signal.** Change
+> `CommitDeltaDto.code_delta` to `Option<CodeDeltaDto>` and have `build_commit_delta`
+> emit `None` while the producer isn't running. Then Phase 4's post-commit head
+> update is simply `None → _rebuild_head_graph_from_native()` — landing the cutover
+> with **zero producer work** and parity green. The cold ~4.5 s `full_code_delta()`
+> cost is paid once per session (typeshed warmup); subsequent calls run over a warm
+> salsa db (tens-to-low-hundreds of ms), so a rebuild-per-materialised-commit is
+> acceptable — **re-verify with `test_concurrency`**. Implementing the scoped
+> incremental producer later (emit `Some(real_delta)` instead of `None`, maintain
+> `head.code_layer`, which also makes `affected_ids` transitive for free) is then a
+> **purely additive optimization** with no consumer changes — do it within Phase 4
+> only if perf demands, else defer it. **This producer-vs-full-rebuild choice is a
+> design fork the guide leaves open — confirm the direction with the requester
+> before committing to it** (exactly as Phase 3 did with the affected-closure fork;
+> see the `phase3-affected-closure-deferred` project memory).
 
 **The fix this phase delivers:**
 
@@ -344,21 +398,47 @@ this whole refactor removes.
 #### (a) Flip the post-commit head update to the native delta (revision-gated)
 
 **Where / how.**
+- **First, make `code_delta` a true `Option` so absent ≠ empty** (see the §1
+  carry-over callout). In Rust, change `CommitDeltaDto.code_delta` from
+  `CodeDeltaDto` to `Option<CodeDeltaDto>` and have `build_commit_delta`
+  (`rust/src/project.rs`) emit `None` while the in-commit producer is not running
+  (it isn't, post-Phase-3). Python `CommitDelta.code_delta` is already `dict | None`.
+  This gives the **three-state** contract the apply path keys on:
+  - `None` → no structural delta was computed → **rebuild** from a full native delta,
+  - `Some({})` → computed, nothing changed (e.g. whitespace-only edit) → **no-op**,
+  - `Some({…})` → incremental delta → **apply** it.
+
+  Do **not** signal "rebuild" with an empty-but-present delta (it would force a full
+  rebuild on every cosmetic edit), and do **not** signal it with `rescan=true` on
+  the nested delta (the applier reads `rescan=true` as "this delta is the *complete*
+  set, replace wholesale", so an empty rescan delta wipes the graph; a real rescan
+  delta must actually contain every node/edge — i.e. it is `full_code_delta()`).
 - Rewrite `_apply_graph_delta` (`session.py:1103`) to apply the **nested** code
   delta instead of calling the legacy `apply_delta`:
   ```python
   def _apply_graph_delta(self, delta: CommitDelta) -> None:
       if self._head_graph is None:
           return                      # graph not materialised → nothing to update
-      code_delta = delta.code_delta   # Phase 3 nested the Phase 2 code delta here
+      code_delta = delta.code_delta   # Phase 3's nested field; None until the
+                                      # in-commit producer is wired (see §1 carry-over)
       if code_delta is None:
-          # No structural delta computed (e.g. a coarse rescan): rebuild from a
-          # full native delta rather than the read surface.
+          # No structural delta computed this commit → rebuild from a full native
+          # delta rather than the read surface. (NOT the same as an *empty* delta,
+          # which is a legitimate no-op.)
           self._rebuild_head_graph_from_native()
+          self._invalidate_derived(delta)
           return
-      self._head_graph.apply_code_delta(code_delta)   # 4.1, revision-gated inside
+      self._head_graph.apply_code_delta(code_delta)   # 4.1, revision-gated inside;
+                                                      # an empty delta is a clean no-op
       self._invalidate_derived(delta)                 # unchanged (Phase 7 rewrites it)
   ```
+  > **Post-Phase-3 reality:** until you wire the incremental in-commit producer,
+  > `code_delta` is always `None`, so every materialised-graph commit takes the
+  > rebuild branch. That is the intended, parity-safe starting point — a full
+  > rebuild equals the build the oracle checks against. Upgrading to incremental
+  > later means emitting `Some(real_delta)` from the producer; **no change to this
+  > consumer**. Re-verify `test_concurrency` to confirm rebuild-per-commit stays in
+  > the tens-to-low-hundreds of ms over a warm session.
 - **Revision-gating.** Inside `apply_code_delta` (or a thin guard around it),
   compare the delta's `revision` to `self._head_graph._revision`. The normal case
   is "delta.revision is the next revision" → apply. A stale/duplicate delta
@@ -685,6 +765,16 @@ no-read-side-writes test, the graph suite, the parity suite, and both full suite
 
 ## 8. What Phase 4 deliberately leaves for later (so you don't over-reach)
 
+- **The incremental in-commit code-delta producer (optional, can be deferred).**
+  Phase 4 lands the cutover with `code_delta = None → full rebuild` (see §1
+  carry-over + 4.2(a)), which is parity-safe and needs no producer work. Wiring
+  the *scoped* incremental producer — run `produce_code_delta` over dirty files +
+  importers, diff against `head.code_layer`, store it back, and emit
+  `Some(real_delta)` — is a **purely additive optimization** (no consumer change)
+  that also makes `head.code_layer.reverse_deps` maintained and `affected_ids`
+  transitive. Do it within Phase 4 only if `test_concurrency`/graph-test timing
+  demands it; otherwise it can ship as a later perf pass. It is the long-deferred
+  Phase 2 hookup — keep it behind the same perf guard (no `open()` regression).
 - **The single staged native `commit()` with rollback** (sidecar as a participant;
   no torn publish) is **Phase 5**. Phase 4 makes the graph a pure applier of the
   committed delta; it does **not** restructure the commit transaction itself.
