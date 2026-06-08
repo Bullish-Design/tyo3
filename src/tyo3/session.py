@@ -845,8 +845,9 @@ class TyO3Session(_ReadOps):
                 if self._closed:
                     break
                 try:
-                    result = self.poll_changes()
-                    # poll_changes already calls _apply_graph_delta + _publish_delta.
+                    self.poll_changes()
+                    # poll_changes funnels through the one _after_commit hook
+                    # (applies the graph delta + publishes) on a real commit.
                 except Exception:
                     pass
 
@@ -899,11 +900,12 @@ class TyO3Session(_ReadOps):
         return self._get_bus().subscribe(interest)
 
     def _publish_delta(self, result: CommitDelta) -> None:
-        """Publish a committed delta to the bus after publication.
+        """Publish a committed delta to the bus (the last step of the one
+        post-commit hook, ``_after_commit``).
 
-        Called from every write method after ``_apply_graph_delta``,
-        under the session-level write lock (single-threaded writes
-        guarantee revision order).
+        Called only from ``_after_commit``, after the graph delta is applied,
+        so the head graph reflects this revision. Single-threaded writes
+        serialised through the native commit guarantee revision order.
 
         Fast no-op when no subscribers are registered.
         """
@@ -971,7 +973,6 @@ class TyO3Session(_ReadOps):
         """Overlay ``path`` with in-memory ``text`` (no disk write).
         Returns a SyncResult with the new revision and affected paths."""
         self._check_open()
-        self._invalidate_head_snap()
         try:
             native_result = self._inner.edit(str(path), text)
         except _NativeClosedError as e:
@@ -983,14 +984,12 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit(): {e}") from e
         result = CommitDelta.model_validate(native_result)
-        self._apply_graph_delta(result)
-        self._publish_delta(result)
+        self._after_commit(result)
         return result
 
     def edit_many(self, edits: dict[str, str]) -> CommitDelta:
         """Overlay many files atomically (one publish, one revision)."""
         self._check_open()
-        self._invalidate_head_snap()
         try:
             native_result = self._inner.edit_many(edits)
         except _NativeClosedError as e:
@@ -1002,15 +1001,13 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit_many(): {e}") from e
         result = CommitDelta.model_validate(native_result)
-        self._apply_graph_delta(result)
-        self._publish_delta(result)
+        self._after_commit(result)
         return result
 
     def edit_virtual(self, uri: str, text: str) -> CommitDelta:
         """Overlay a virtual/unsaved buffer (e.g. "untitled:1").
         No disk involvement."""
         self._check_open()
-        self._invalidate_head_snap()
         try:
             native_result = self._inner.edit_virtual(uri, text)
         except _NativeClosedError as e:
@@ -1022,15 +1019,13 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit_virtual(): {e}") from e
         result = CommitDelta.model_validate(native_result)
-        self._apply_graph_delta(result)
-        self._publish_delta(result)
+        self._after_commit(result)
         return result
 
     def sync_path(self, path: str | StdPath) -> CommitDelta:
         """Ingest a disk change for ``path``: drop any overlay and re-read
         disk."""
         self._check_open()
-        self._invalidate_head_snap()
         try:
             native_result = self._inner.sync_path(str(path))
         except _NativeClosedError as e:
@@ -1042,14 +1037,12 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_path(): {e}") from e
         result = CommitDelta.model_validate(native_result)
-        self._apply_graph_delta(result)
-        self._publish_delta(result)
+        self._after_commit(result)
         return result
 
     def discard(self, path: str | StdPath) -> CommitDelta:
         """Drop the overlay buffer for ``path``, reverting to disk."""
         self._check_open()
-        self._invalidate_head_snap()
         try:
             native_result = self._inner.discard(str(path))
         except _NativeClosedError as e:
@@ -1061,14 +1054,15 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in discard(): {e}") from e
         result = CommitDelta.model_validate(native_result)
-        self._apply_graph_delta(result)
+        # Routes through the one post-commit hook — so discard now publishes
+        # like every other write (closes defect #6).
+        self._after_commit(result)
         return result
 
     def sync_all(self) -> CommitDelta:
         """Rescan everything (in-place). Existing overlay buffers are
         preserved; ty re-walks and re-reads all files."""
         self._check_open()
-        self._invalidate_head_snap()
         try:
             native_result = self._inner.sync_all()
         except _NativeClosedError as e:
@@ -1080,8 +1074,7 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_all(): {e}") from e
         result = CommitDelta.model_validate(native_result)
-        self._apply_graph_delta(result)
-        self._publish_delta(result)
+        self._after_commit(result)
         return result
 
     # ── File watching (Phase 8) ────────────────────────────────────
@@ -1130,7 +1123,6 @@ class TyO3Session(_ReadOps):
         Like the explicit write methods, this advances the revision and
         updates the live HEAD graph (if materialised)."""
         self._check_open()
-        self._invalidate_head_snap()
         try:
             native_result = self._inner.poll_changes()
         except _NativeClosedError as e:
@@ -1142,11 +1134,12 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in poll_changes(): {e}") from e
 
+        # A no-event poll commits nothing — return None and publish nothing
+        # (correct, not a missed publish). The hook runs only on a real commit.
         if native_result is None:
             return None
         result = CommitDelta.model_validate(native_result)
-        self._apply_graph_delta(result)
-        self._publish_delta(result)
+        self._after_commit(result)
         return result
 
     def _inject_changes(self, changes: list[tuple[str, str]]) -> None:
@@ -1162,11 +1155,19 @@ class TyO3Session(_ReadOps):
     def _apply_graph_delta(self, result: CommitDelta) -> None:
         """Update the materialized HEAD graph from the native code delta (§5.3).
 
+        The pure graph applier (Phase 4); derived invalidation is a separate
+        post-commit step (``_schedule_derived``), not done here.
+
+        An **authored-only** write (only ``authored_ids``, no code churn)
+        touches no code/edge structure, so this is a no-op for it — that is what
+        lets ``author`` route through the one ``_after_commit`` hook without
+        mutating the code graph (§6.2).
+
         Three-state on ``result.code_delta`` (Phase 4):
           * ``None`` (absent) — no structural delta was computed this commit ⇒
             **rebuild** the head graph from a full native delta. This is the
             deferred-producer path and is taken on every materialised-graph
-            commit today.
+            code commit today.
           * present, empty — computed, nothing changed structurally (e.g. a
             whitespace-only edit) ⇒ a clean **no-op** apply.
           * present, populated — the incremental delta ⇒ **apply** it,
@@ -1174,10 +1175,14 @@ class TyO3Session(_ReadOps):
         """
         if self._head_graph is None:
             return
+        # An authored write carries no code structure — never mutate the graph
+        # (its code_delta is None like the deferred-producer rebuild path, so it
+        # must be discriminated by its id shape, not by code_delta).
+        if self._is_authored_only(result):
+            return
         code_delta = result.code_delta
         if code_delta is None:
             self._rebuild_head_graph_from_native()
-            self._invalidate_derived(result)
             return
         # Present delta — incremental apply, revision-gated. A revision *gap*
         # (the delta skips revisions) can't be applied incrementally, so rebuild
@@ -1189,8 +1194,44 @@ class TyO3Session(_ReadOps):
             self._rebuild_head_graph_from_native()
         else:
             self._head_graph.apply_code_delta(code_delta)
-        # Step 5: invalidate derived artifacts within the same write boundary.
-        self._invalidate_derived(result)
+
+    @staticmethod
+    def _is_authored_only(delta: CommitDelta) -> bool:
+        """True for a pure authored write: it carries ``authored_ids`` but no
+        code churn (no created/changed/deleted/moved ids and no rescan), so it
+        must not mutate the code graph."""
+        return bool(delta.authored_ids) and not (
+            delta.created_ids
+            or delta.changed_ids
+            or delta.deleted_ids
+            or delta.moved
+            or delta.rescan
+        )
+
+    def _schedule_derived(self, delta: CommitDelta) -> None:
+        """Schedule derived-layer invalidation from the id-level delta (§5.7).
+
+        Phase 6 only *calls* the existing invalidation from the one post-commit
+        hook; Phase 7 makes it precise (read-time staleness, snapshot lifetime).
+        An authored-only write produces no dirty/deleted ids, so this is a
+        no-op for it.
+        """
+        self._invalidate_derived(delta)
+
+    def _after_commit(self, delta: CommitDelta) -> None:
+        """The single post-commit path every write funnels through (§6.1/§6.3).
+
+        Invalidate the head snapshot (so the next read re-pins at the new
+        revision), apply the native code delta to the head graph, schedule
+        derived invalidation, then publish to the bus — in that order. Because
+        every write method calls exactly this, no path can diverge and every
+        committed revision publishes (closes defect #6: ``discard`` forgetting
+        to publish).
+        """
+        self._invalidate_head_snap()
+        self._apply_graph_delta(delta)
+        self._schedule_derived(delta)
+        self._publish_delta(delta)
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -1310,7 +1351,6 @@ class TyO3Session(_ReadOps):
         Derived layers are unaffected — authored layers are sinks (§9.2.4).
         """
         self._check_open()
-        self._invalidate_head_snap()
         payload = json.dumps(value)
         try:
             native = self._inner.author(layer, durable_id, payload)
@@ -1323,8 +1363,10 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in author(): {e}") from e
         result = CommitDelta.model_validate(native)
-        # Do NOT call _apply_graph_delta — authored writes produce no code/derived delta.
-        self._publish_delta(result)
+        # Routes through the one post-commit hook like every other write; its
+        # graph apply is a no-op (authored-only delta), so the code graph is
+        # not mutated (§6.2).
+        self._after_commit(result)
         return result
 
     def authored(self, layer: str, durable_id: str) -> AuthoredValue:
