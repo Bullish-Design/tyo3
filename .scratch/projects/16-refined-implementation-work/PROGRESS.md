@@ -344,7 +344,41 @@ devenv shell -- pytest src/tyo3/tests/test_final_commit_delta_contract.py -q --n
 
 ---
 
-## 7. Phase 4 — Cutover: Python graph as pure applier 🔴 **Not started**
+## 7. Phase 4 — Cutover: Python graph as pure applier 🟡 **In progress**
+
+> ### Design decision (user-confirmed 2026-06-07): defer the in-commit producer
+>
+> The one open fork the guide leaves to the requester — **scoped incremental
+> in-commit producer vs. `None`→full-rebuild** — is resolved as **defer the
+> producer** (same call shape as Phase 3's affected-closure deferral).
+>
+> - `CommitDeltaDto.code_delta` becomes a true **`Option<CodeDeltaDto>`**;
+>   `build_commit_delta` emits **`None`** while the producer isn't running.
+> - **Three-state consumer contract** (in `_apply_graph_delta`):
+>   `None` (absent) → **rebuild** head graph from `full_code_delta()`;
+>   `Some({})` (present, empty) → **no-op** (e.g. whitespace-only edit);
+>   `Some({…})` (present, populated) → **apply** incrementally.
+>   *Empty ≠ rebuild* (that would full-rebuild every cosmetic edit), and rebuild
+>   is **never** signalled via `rescan=true` on the nested delta (the applier
+>   reads `rescan` as "replace wholesale" → an empty rescan delta wipes the graph).
+> - **Why defer:** the producer is *purely additive* (no consumer change to flip
+>   `None`→`Some` later), and coupling it with the cutover compounds two
+>   independent risks — the cutover's parity risk and the producer's perf
+>   regression (full `produce_code_delta` per commit regressed `open()` ~100× /
+>   deadlocked `test_concurrency` in Phase 2). The correct producer is
+>   *scoped/incremental* (dirty files + importers, diff against `head.code_layer`)
+>   — a real perf pass with its own `open()`-regression guard, filed as the
+>   follow-up. Long-term destination is still the in-commit producer
+>   (Concept §7: Rust owns the canonical code layer + reverse_deps); deferring
+>   costs no rework.
+> - **Consequence carried forward:** `head.code_layer` stays empty, `reverse_deps`
+>   empty, `affected_ids` seeds-only — until the producer lands (Phase 4 perf
+>   follow-up, or later).
+>
+> **Red baseline recorded (2026-06-07):** parity suite GREEN (native half matches
+> legacy); `test_final_no_read_side_writes.py` = **2 xfail** to remove
+> (`session.graph`, `latest.check`) — the `snapshot().graph()` case already went
+> green via Phase 1.3. (The guide text says 3; the actual red count is 2.)
 
 ### 7.1 What needs to happen
 

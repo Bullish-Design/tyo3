@@ -1959,9 +1959,46 @@ class CodeGraph:
 
         *code_delta* is a pythonized ``CodeDeltaDto`` dict (the shape the native
         ``full_code_delta()`` / commit delta produce).
+
+        **Revision-gating.** An incremental delta whose ``revision`` does not
+        advance the graph (``<= self._revision``) is a stale/duplicate and is a
+        **no-op** — publication is the commit tail (§5.3), so in-order is the
+        rule and gating only makes the out-of-order case safe rather than
+        corrupting the graph. A ``rescan`` delta is an *authoritative wholesale
+        replacement* (it carries every node/edge — i.e. it is a full delta) and
+        is therefore never gated out; it clears the graph and applies the
+        complete set.
         """
         self._assert_mutable()
         d = code_delta if isinstance(code_delta, dict) else dict(code_delta)
+
+        revision = d.get("revision")
+        rescan = bool(d.get("rescan"))
+
+        # Revision-gate: a stale/duplicate *incremental* delta is a no-op. A
+        # rescan/full delta is authoritative and is applied regardless.
+        if (
+            not rescan
+            and revision is not None
+            and self._revision is not None
+            and revision <= self._revision
+        ):
+            return
+
+        # A rescan/full delta is the complete set — clear the graph and apply it
+        # wholesale. (``nodes_upserted`` + ``edges_added`` carry every node/edge;
+        # this is what ``full_code_delta()`` emits.) On a fresh graph this is a
+        # no-op clear; on a populated one it replaces it.
+        if rescan:
+            self._graph = rx.PyDiGraph()
+            self._id_to_index.clear()
+            self._file_to_nodes.clear()
+            self._file_to_edges.clear()
+            self._file_importers.clear()
+            self._file_node_ranges.clear()
+            self._name_to_id.clear()
+            self._name_prefix_index.clear()
+            self._semantic_subgraph_cache.clear()
 
         # 1. Removals first (so a remove+re-add of the same id is well-defined).
         removed_ids = list(d.get("nodes_removed") or [])
@@ -2018,7 +2055,6 @@ class CodeGraph:
             self._build_range_cache_for_file(file_str)
 
         self._semantic_subgraph_cache.clear()
-        revision = d.get("revision")
         if revision is not None:
             self._revision = revision
 
@@ -2046,7 +2082,12 @@ class CodeGraph:
                 self._file_importers[tgt.file].add(src.file)
 
     def _remove_code_edge(self, e: dict[str, Any]) -> None:
-        """Remove the first matching ``CodeEdgeDto`` edge."""
+        """Remove the first matching ``CodeEdgeDto`` edge.
+
+        Symmetrically prunes the file-level reverse-dependency index
+        ``_file_importers`` when the removed edge was the *last* IMPORTS edge
+        between two project files (mirrors the maintenance in ``_add_code_edge``).
+        """
         src_idx = self._id_to_index.get(e["source_id"])
         tgt_idx = self._id_to_index.get(e["destination_id"])
         if src_idx is None or tgt_idx is None:
@@ -2054,6 +2095,8 @@ class CodeGraph:
         kind = EdgeKind(e["kind"])
         want_range = self._coerce_range(e.get("range"))
         want_role = ReferenceRole(e["role"]) if e.get("role") else None
+        src_node = self._graph[src_idx]
+        tgt_node = self._graph[tgt_idx]
         for _s, t, data in self._graph.out_edges(src_idx):
             if (
                 t == tgt_idx
@@ -2064,7 +2107,26 @@ class CodeGraph:
             ):
                 self._graph.remove_edge(src_idx, tgt_idx)
                 self._semantic_subgraph_cache.clear()
+                # Prune the reverse-dep index iff this was the last IMPORTS edge
+                # connecting src.file → tgt.file (parallel imports may remain).
+                if (
+                    kind == EdgeKind.IMPORTS
+                    and src_node.file != "<external>"
+                    and tgt_node.file != "<external>"
+                    and src_node.file != tgt_node.file
+                    and not self._has_import_edge_between(src_node.file, tgt_node.file)
+                ):
+                    self._file_importers.get(tgt_node.file, set()).discard(src_node.file)
                 return
+
+    def _has_import_edge_between(self, source_file: str, target_file: str) -> bool:
+        """True iff any IMPORTS edge still connects a node in *source_file* to a
+        node in *target_file* (used to decide reverse-dep pruning)."""
+        for src_idx in self._file_to_nodes.get(source_file, []):
+            for _s, tgt, data in self._graph.out_edges(src_idx):
+                if data.kind == EdgeKind.IMPORTS and self._graph[tgt].file == target_file:
+                    return True
+        return False
 
     def apply_delta(
         self,
