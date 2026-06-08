@@ -29,10 +29,10 @@ class Bus:
         self,
         *,
         capacity: int = 1024,
-        overflow: Literal["coalesce", "block", "error"] = "coalesce",
+        overflow: Literal["coalesce", "drop_and_mark_lagged", "error_and_close"] = "coalesce",
     ) -> None:
         self._capacity = capacity
-        self._overflow: Literal["coalesce", "block", "error"] = overflow
+        self._overflow: Literal["coalesce", "drop_and_mark_lagged", "error_and_close"] = overflow
         self._subs: set[Subscription] = set()
         self._lock = threading.Lock()
         self._closed = False

@@ -144,11 +144,6 @@ def test_slow_subscriber_does_not_block_writer(tmp_path):
         s.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 6.3: config validation must reject the writer-blocking "
-    "'block' overflow policy; today it is silently accepted",
-)
 def test_config_rejects_writer_blocking_overflow_policy(tmp_path):
     config = (
         "schema_version = 1\n\n"

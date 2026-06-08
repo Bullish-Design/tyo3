@@ -24,6 +24,7 @@ pub enum ConfigError {
     SecretInline(String),
     Parse(String),
     UndefinedEnv(String),
+    BlockingOverflow(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -43,6 +44,11 @@ impl fmt::Display for ConfigError {
             ConfigError::UndefinedEnv(name) => {
                 write!(f, "undefined environment variable in config: {name}")
             }
+            ConfigError::BlockingOverflow(policy) => write!(
+                f,
+                "writer-blocking or unknown bus overflow policy: {policy} \
+                 (use one of: coalesce, drop_and_mark_lagged, error_and_close)"
+            ),
         }
     }
 }
@@ -424,6 +430,14 @@ pub fn validate(raw: RawConfig) -> Result<ValidatedConfig, ConfigError> {
                 }
             }
         }
+    }
+
+    // Coordination: reject a writer-blocking overflow policy at open (§5.11 —
+    // a slow or dead subscriber MUST NOT stall the writer). Only the three
+    // non-blocking policies are accepted; fail loudly, never a silent default.
+    match raw.coordination.bus.overflow.as_str() {
+        "coalesce" | "drop_and_mark_lagged" | "error_and_close" => {}
+        other => return Err(ConfigError::BlockingOverflow(other.to_string())),
     }
 
     lint_secrets(&raw)?;
@@ -1181,6 +1195,28 @@ dim = 3
         let err = validate(raw).unwrap_err();
 
         assert!(matches!(err, ConfigError::UnknownVersion(999)));
+    }
+
+    #[test]
+    fn writer_blocking_overflow_policy_is_rejected() {
+        let mut raw = valid_layered_config();
+        raw.coordination.bus.overflow = "block".to_string();
+
+        let err = validate(raw).unwrap_err();
+
+        assert!(matches!(err, ConfigError::BlockingOverflow(p) if p == "block"));
+    }
+
+    #[test]
+    fn non_blocking_overflow_policies_are_accepted() {
+        for policy in ["coalesce", "drop_and_mark_lagged", "error_and_close"] {
+            let mut raw = valid_layered_config();
+            raw.coordination.bus.overflow = policy.to_string();
+            assert!(
+                validate(raw).is_ok(),
+                "policy {policy} should be accepted"
+            );
+        }
     }
 
     #[test]

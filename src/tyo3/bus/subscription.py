@@ -33,10 +33,10 @@ def _get_delta_class() -> type:
 class Subscription:
     """One subscriber's delivery endpoint.
 
-    Producer side (``_offer``) is called by the ``Bus`` under the write
-    lock — it must never block the writer (except the opt-in ``block``
-    overflow policy).  Consumer side (``poll``, ``__iter__``) is called
-    by the subscriber's own thread.
+    Producer side (``_offer``) is called by the ``Bus`` after publication — it
+    **never** blocks the writer; all overflow policies are non-blocking.
+    Consumer side (``poll``, ``__iter__``) is called by the subscriber's own
+    thread.
     """
 
     def __init__(
@@ -44,12 +44,12 @@ class Subscription:
         interest: Interest,
         *,
         capacity: int = 1024,
-        overflow: Literal["coalesce", "block", "error"] = "coalesce",
+        overflow: Literal["coalesce", "drop_and_mark_lagged", "error_and_close"] = "coalesce",
         bus: object | None = None,  # Bus — set by Bus.subscribe()
     ) -> None:
         self.interest: Interest = interest
         self._capacity = max(1, capacity)
-        self._overflow: Literal["coalesce", "block", "error"] = overflow
+        self._overflow: Literal["coalesce", "drop_and_mark_lagged", "error_and_close"] = overflow
         self._bus: object | None = bus
 
         self._queue: deque[Delta] = deque()
@@ -61,11 +61,13 @@ class Subscription:
     # ── Producer side (called by Bus, under the write lock) ─────────
 
     def _offer(self, delta: Delta) -> None:
-        """Append *delta* to the queue; apply overflow policy.
+        """Append *delta* to the queue; apply the (non-blocking) overflow policy.
 
-        Called by the ``Bus`` under the write lock iterating subscribers.
-        Must NEVER block the writer for ``coalesce``/``error`` policies.
+        Called by the ``Bus`` while fanning out a published delta.  Must NEVER
+        block the writer — there is no producer-side wait for any policy
+        (§5.11: a slow or dead subscriber must not stall the writer).
         """
+        should_close = False
         with self._lock:
             if self._closed:
                 return
@@ -75,19 +77,23 @@ class Subscription:
                 self._cond.notify_all()
                 return
 
-            # Queue is full — apply overflow policy.
+            # Queue is full — apply a non-blocking overflow policy.
             if self._overflow == "coalesce":
+                # Union into the tail; the subscriber misses nothing (§12.2.2).
                 self._coalesce_into_tail(delta)
-            elif self._overflow == "block":
-                # Opt-in backpressure: blocks the producer (writer!).
-                while len(self._queue) >= self._capacity and not self._closed:
-                    self._cond.wait()
-                if not self._closed:
-                    self._queue.append(delta)
-                    self._cond.notify_all()
-            else:  # error
+            elif self._overflow == "error_and_close":
+                # Mark lagged and tear the subscription down (drop + close),
+                # still never blocking the producer.
                 self._lagged = True
-                # Drop on the floor — never block the writer.
+                should_close = True
+            else:  # drop_and_mark_lagged
+                # Drop on the floor and force the subscriber to rescan — never
+                # blocks the writer.
+                self._lagged = True
+
+        # Close outside the lock (close() re-acquires it); idempotent.
+        if should_close:
+            self.close()
 
     def _coalesce_into_tail(self, incoming: Delta) -> None:
         """Merge *incoming* into the tail delta of the queue.
@@ -143,7 +149,6 @@ class Subscription:
 
             if self._queue:
                 delta = self._queue.popleft()
-                # If queue was full (block policy), notify a blocked producer.
                 self._cond.notify_all()
                 return delta
 
@@ -199,7 +204,8 @@ class Subscription:
 
     @property
     def lagged(self) -> bool:
-        """True when ``overflow="error"`` dropped a delta."""
+        """True when an overflow policy (``drop_and_mark_lagged`` /
+        ``error_and_close``) dropped a delta."""
         with self._lock:
             return self._lagged
 
