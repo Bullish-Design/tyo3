@@ -61,11 +61,6 @@ _AUTHORED_CFG = (
 )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 6: discard commits a revision but never publishes; the "
-    "post-commit path is not yet unified across every write kind",
-)
 def test_every_write_kind_publishes_exactly_one_delta(tmp_path):
     s = _open(
         tmp_path,

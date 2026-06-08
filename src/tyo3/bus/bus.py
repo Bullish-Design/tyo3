@@ -9,7 +9,6 @@ The bus is fed *after* publication, never touches the write transaction.
 
 from __future__ import annotations
 
-import logging
 import threading
 from typing import TYPE_CHECKING, Literal
 
@@ -17,8 +16,6 @@ if TYPE_CHECKING:
     from tyo3.bus.delta import Delta
     from tyo3.bus.interest import Interest
     from tyo3.bus.subscription import Subscription
-
-logger = logging.getLogger(__name__)
 
 
 class Bus:
@@ -88,34 +85,39 @@ class Bus:
             if self._closed or not self._subs:
                 return
 
-            # Defensive: assert monotonic revisions.
-            if delta.revision <= self._last_published_revision:
-                logger.error(
-                    "Bus.publish received revision %d after %d — "
-                    "revision order broken (write lock may not be held).",
-                    delta.revision,
-                    self._last_published_revision,
-                )
-            self._last_published_revision = max(
-                self._last_published_revision, delta.revision
+            # Revision order is a real invariant now (Phase 5: publication is
+            # the strictly-last in-lock step under one serialised native
+            # commit), so assert it — each commit publishes once, in order. If
+            # this fires, a caller double-published or published out of order;
+            # fix the caller, never relax to >=.
+            assert delta.revision > self._last_published_revision, (
+                f"bus received revision {delta.revision} after "
+                f"{self._last_published_revision} — revision order broken"
             )
+            self._last_published_revision = delta.revision
 
-            # Snapshot current subscribers to avoid holding the set lock
-            # across _offer calls (which may block for "block" policy).
+            # Snapshot current subscribers so we fan out outside the set lock.
             subs_snapshot = list(self._subs)
 
         # Fan out outside the set lock.
         for sub in subs_snapshot:
             interest = sub.interest
-            # Rescan deltas are delivered to every subscriber (§4.3.5).
-            if delta.rescan or interest.matches(
+            # ALL / rescan: every committed revision is delivered
+            # unconditionally — even an empty one — so the subscriber can pin a
+            # snapshot at exactly this revision (§5.11 "ALL: every committed
+            # revision"; rescan is "everything").
+            if interest.all or delta.rescan:
+                sub._offer(delta.scoped_to(interest))
+                continue
+            # Scoped interest (ids / files / layers): deliver only a non-empty
+            # intersection.
+            if interest.matches(
                 affected_ids=delta.affected,
                 affected_files=delta.files,
                 touched_layers=delta.layers,
             ):
                 scoped = delta.scoped_to(interest)
-                # Deliver if not empty OR it's a rescan ("everything").
-                if not scoped.is_empty() or scoped.rescan:
+                if not scoped.is_empty():
                     sub._offer(scoped)
 
     def has_subscribers(self) -> bool:
