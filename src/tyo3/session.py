@@ -1530,11 +1530,19 @@ class Snapshot(_ReadOps):
         return SnapshotDiff.compute(self, before)
 
     def graph(self):
-        """Return an immutable CodeGraph pinned at this snapshot's revision."""
+        """Return an immutable CodeGraph pinned at this snapshot's revision.
+
+        Built by applying the snapshot's **own frozen-database** native code
+        delta (4.4) to a fresh CodeGraph — no read-surface walk, no session
+        reference, no identity priming. The result is consistent with the
+        snapshot's pinned revision and mutates no session state.
+        """
         self._check_open()
         if self._graph is not None:
             return self._graph
 
+        # Fast path: if the live HEAD graph is already materialised at exactly
+        # this revision, pin a copy of it (avoids recomputing the frozen delta).
         head_graph = self._head_graph_getter() if self._head_graph_getter is not None else None
         if head_graph is not None and head_graph.revision == self.revision:
             self._graph = head_graph._pin_at(self.revision)
@@ -1542,7 +1550,10 @@ class Snapshot(_ReadOps):
 
         from tyo3.graph import CodeGraph
 
-        self._graph = CodeGraph.build(self, root=self._root)._pin_at(self.revision)
+        g = CodeGraph()
+        g._root = self._root
+        g.apply_code_delta(self._inner.full_code_delta())  # frozen-db delta (4.4)
+        self._graph = g._pin_at(self.revision)
         return self._graph
 
     def derived(self, layer: str, durable_id: str) -> DerivedValue:

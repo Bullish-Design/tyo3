@@ -2463,6 +2463,31 @@ impl PySnapshot {
         Ok(py.detach(move || compute_files(&state)))
     }
 
+    // ── Native code delta (Phase 4.4) ────────────────────────────
+
+    /// Produce a **full** (`rescan = true`, scope = all) native code delta for
+    /// this snapshot's pinned revision, computed over the snapshot's **own
+    /// frozen database** and pinned identity registry — the snapshot analogue of
+    /// `PyTyProject::full_code_delta`.
+    ///
+    /// `Snapshot.graph()` applies this to a fresh `CodeGraph`, so the pinned
+    /// graph is a pure projection of *this* revision's content (§5.2 / §5.9). It
+    /// reads only the frozen generation (no disk, no live head) and mutates no
+    /// session state. It reuses the exact `produce_code_delta` path the head
+    /// accessor uses, so a snapshot graph and a head graph at the same revision
+    /// agree structurally (parity).
+    fn full_code_delta<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let state = clone_locked_state(&self.inner, "full_code_delta")?;
+        let revision = self.revision;
+        let empty = crate::code_layer::CodeLayer::new();
+        let delta = py.detach(move || {
+            let (_next, delta) =
+                crate::code_layer::produce_code_delta(&state, &empty, revision, true, None);
+            delta
+        });
+        pythonize(py, &delta).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
     // ── Check ────────────────────────────────────────────────────
 
     /// Run the type checker on the snapshot's pinned revision (GIL released).
