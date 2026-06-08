@@ -756,10 +756,11 @@ class TyO3Session(_ReadOps):
         self._refinement_mode: str = cg.refinement
         from tyo3.sidecar import Sidecar
         self._sidecar = Sidecar(str(root_str))
-        # Read coordination config from sidecar (defaults if absent).
-        self._coord_cfg = self._read_coordination_config()
+        # Coordination settings come from the one validated native config
+        # (single source; no second TOML parser, no silent default fallback).
+        self._coord_cfg = self._config.coordination
         # Auto-start watcher if configured (Step 7).
-        if self._coord_cfg.get("watcher_enabled"):
+        if self._coord_cfg.watcher_enabled:
             self._start_watcher_loop()
 
     @property
@@ -860,37 +861,6 @@ class TyO3Session(_ReadOps):
         )
         dag.invalidate(self, dirty, set(result.deleted_ids), result.revision)
 
-    # ── Coordination config (Gate 8) ───────────────────────────────
-
-    def _read_coordination_config(self) -> dict:
-        """Read coordination settings from the sidecar config.toml.
-
-        Returns defaults when the file is absent or the section is missing.
-        """
-        cfg = {
-            "bus_capacity": 1024,
-            "bus_overflow": "coalesce",
-            "watcher_enabled": False,
-            "watcher_debounce_ms": 200,
-        }
-        try:
-            import tomllib
-            config_path = self._sidecar.config_path()
-            if config_path.exists():
-                with open(config_path, "rb") as f:
-                    data = tomllib.load(f)
-                bus = data.get("coordination", {}).get("bus", {})
-                watcher = data.get("coordination", {}).get("watcher", {})
-                if isinstance(bus, dict):
-                    cfg["bus_capacity"] = bus.get("queue_capacity", cfg["bus_capacity"])
-                    cfg["bus_overflow"] = bus.get("overflow", cfg["bus_overflow"])
-                if isinstance(watcher, dict):
-                    cfg["watcher_enabled"] = watcher.get("enabled", cfg["watcher_enabled"])
-                    cfg["watcher_debounce_ms"] = watcher.get("debounce_ms", cfg["watcher_debounce_ms"])
-        except Exception:
-            pass
-        return cfg
-
     # ── Watcher lifecycle (Gate 8 Step 7) ──────────────────────────
 
     def _start_watcher_loop(self) -> None:
@@ -909,7 +879,7 @@ class TyO3Session(_ReadOps):
 
         # Start the auto-poll daemon thread.
         self._watcher_stop = threading.Event()
-        debounce = self._coord_cfg.get("watcher_debounce_ms", 200) / 1000.0
+        debounce = self._coord_cfg.watcher_debounce_ms / 1000.0
 
         def _poll_loop() -> None:
             while not self._watcher_stop.is_set():
@@ -958,8 +928,8 @@ class TyO3Session(_ReadOps):
         if self._bus is None:
             from tyo3.bus.bus import Bus
             self._bus = Bus(
-                capacity=self._coord_cfg["bus_capacity"],
-                overflow=self._coord_cfg["bus_overflow"],
+                capacity=self._coord_cfg.bus_capacity,
+                overflow=self._coord_cfg.bus_overflow,
             )
         return self._bus
 

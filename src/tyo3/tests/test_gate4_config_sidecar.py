@@ -270,6 +270,96 @@ def test_invalid_configs_rejected_with_config_error(
         TyO3Session(tmp_path)
 
 
+def test_coordination_config_is_exposed_from_native(tmp_path: Path) -> None:
+    """Coordination settings come from the one validated native config (Phase 12).
+
+    Proves the bus/watcher knobs reach Python via ``config_json`` (single source),
+    not a second TOML parser.
+    """
+    _project(tmp_path)
+    _write_config(
+        tmp_path,
+        """
+schema_version = 1
+[hashing.profiles.structure]
+[coordination.bus]
+queue_capacity = 7
+overflow = "drop_and_mark_lagged"
+[coordination.watcher]
+enabled = false
+debounce_ms = 321
+""",
+    )
+
+    with TyO3Session(tmp_path) as session:
+        coord = session.config.coordination
+        assert coord.bus_capacity == 7
+        assert coord.bus_overflow == "drop_and_mark_lagged"
+        assert coord.watcher_enabled is False
+        assert coord.watcher_debounce_ms == 321
+
+
+def test_coordination_config_defaults_when_absent(tmp_path: Path) -> None:
+    _project(tmp_path)
+
+    with TyO3Session(tmp_path) as session:
+        coord = session.config.coordination
+        assert coord.bus_capacity == 1024
+        assert coord.bus_overflow == "coalesce"
+        assert coord.watcher_enabled is False
+        assert coord.watcher_debounce_ms == 200
+
+
+@pytest.mark.parametrize(
+    ("config_text", "pattern"),
+    [
+        # Invalid bus overflow policy — a writer-blocking/unknown value (§5.11).
+        (
+            """
+schema_version = 1
+[hashing.profiles.structure]
+[coordination.bus]
+overflow = "block"
+""",
+            "block",
+        ),
+        # Invalid code_graph precision (Phase 9).
+        (
+            """
+schema_version = 1
+[hashing.profiles.structure]
+[code_graph]
+precision = "molecule"
+""",
+            "molecule",
+        ),
+        # Invalid code_graph refinement (Phase 9).
+        (
+            """
+schema_version = 1
+[hashing.profiles.structure]
+[code_graph]
+refinement = "eventually"
+""",
+            "eventually",
+        ),
+    ],
+)
+def test_invalid_coordination_config_fails_loudly_at_open(
+    tmp_path: Path, config_text: str, pattern: str
+) -> None:
+    """Phase 12: an invalid coordination/precision knob raises ConfigError at open.
+
+    The deleted silent ``try/except → defaults`` re-read used to hide these; the
+    single validated native source surfaces them loudly at ``TyO3Session(root)``.
+    """
+    _project(tmp_path)
+    _write_config(tmp_path, config_text)
+
+    with pytest.raises(ConfigError, match=pattern):
+        TyO3Session(tmp_path)
+
+
 def test_sidecar_is_sole_path_owner_in_source() -> None:
     repo = Path(__file__).parents[3]
     allowed = {

@@ -75,6 +75,23 @@ class CodeGraphConfig:
 
 
 @dataclass(frozen=True)
+class CoordinationConfig:
+    """Subscription-bus + watcher coordination settings (Concept V2 §5.11/§5.12).
+
+    A flat projection of the native ``[coordination.bus]`` / ``[coordination.watcher]``
+    tables, fed from the one validated native config (no second TOML parser). The
+    field names mirror the bus/watcher consumer sites in ``session.py``:
+    ``bus_capacity``/``bus_overflow`` build the :class:`~tyo3.bus.bus.Bus`;
+    ``watcher_enabled``/``watcher_debounce_ms`` drive the auto-poll loop.
+    """
+
+    bus_capacity: int = 1024
+    bus_overflow: str = "coalesce"
+    watcher_enabled: bool = False
+    watcher_debounce_ms: int = 200
+
+
+@dataclass(frozen=True)
 class SidecarConfig:
     gitignore_cache: bool
 
@@ -89,6 +106,7 @@ class TyConfig:
     stores: dict[str, StoreConfig]
     sidecar: SidecarConfig
     code_graph: CodeGraphConfig
+    coordination: CoordinationConfig
     topo_order: tuple[str, ...]
 
     @classmethod
@@ -122,6 +140,7 @@ class TyConfig:
             },
             sidecar=SidecarConfig(**raw["sidecar"]),
             code_graph=_code_graph(raw.get("code_graph", {})),
+            coordination=_coordination(raw.get("coordination", {})),
             topo_order=topo_order,
         )
 
@@ -150,6 +169,17 @@ def _code_graph(data: dict[str, Any]) -> CodeGraphConfig:
     )
 
 
+def _coordination(data: dict[str, Any]) -> CoordinationConfig:
+    bus = data.get("bus") or {}
+    watcher = data.get("watcher") or {}
+    return CoordinationConfig(
+        bus_capacity=bus.get("queue_capacity", 1024),
+        bus_overflow=bus.get("overflow", "coalesce"),
+        watcher_enabled=watcher.get("enabled", False),
+        watcher_debounce_ms=watcher.get("debounce_ms", 200),
+    )
+
+
 def _generator(data: dict[str, Any]) -> GeneratorConfig:
     return GeneratorConfig(
         type=data.get("type"),
@@ -166,6 +196,7 @@ def _generator(data: dict[str, Any]) -> GeneratorConfig:
 
 __all__ = [
     "CodeGraphConfig",
+    "CoordinationConfig",
     "GeneratorConfig",
     "HashProfileConfig",
     "LayerConfig",

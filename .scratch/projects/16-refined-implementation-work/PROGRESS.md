@@ -586,6 +586,80 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 
 ---
 
+### §9.12 — V2 Phase 12: single validated config source ✅ **DONE** (2026-06-08)
+
+> **There is now exactly one config authority — the native validated config —
+> and Python consumes it as JSON. The second, silently-falling-back TOML parser
+> is deleted, so invalid coordination/precision config fails loudly at
+> `TyO3Session(root)` instead of being swallowed into defaults (V1 §5.12 / §6.3
+> deviation #9).** Pure-Python phase — **no Rust change, no rebuild**: the native
+> side already emits and validates the full coordination + precision config
+> (Phases 6 and 9 front-loaded it).
+>
+> **What was wrong.** `session.py::_read_coordination_config` re-parsed
+> `.tyo3/config.toml` with `tomllib` inside `try/except Exception: pass →
+> defaults`, while the validated native config was already in hand at
+> `self._config = TyConfig.from_json(self._inner.config_json())`. Two parsers,
+> one of which silently ignored every error. A bad `bus.overflow`,
+> `code_graph.precision`, or `code_graph.refinement` was rejected natively at
+> open for the *graph* path but the *coordination* settings came from the
+> fallback parser, which never raised.
+>
+> **Verified first (no rebuild needed).** A scratch open confirmed
+> `config_json()` already carries `raw.coordination.bus.{queue_capacity,overflow}`,
+> `raw.coordination.watcher.{enabled,debounce_ms}`, and
+> `raw.code_graph.{precision,refinement}`. `config.rs::validate` (~462/470/480)
+> already rejects unknown overflow/precision/refinement as `ConfigError` at open,
+> and every nested cfg struct is `#[serde(deny_unknown_fields)]`. **So 12.2 was
+> confirmation only — Rust untouched.**
+>
+> **Shape decision (12.1): flat `CoordinationConfig`, NOT nested bus/watcher.**
+> The four consumer sites want `bus_capacity`/`bus_overflow`/`watcher_enabled`/
+> `watcher_debounce_ms` directly, and every other dataclass in `config.py`
+> (`SpineConfig`, `CodeGraphConfig`, …) is a flat frozen dataclass. A nested
+> mirror (`coordination.bus.queue_capacity`) would force every call site to reach
+> through sub-objects for no gain. Flat keeps the call sites stable and matches
+> the module's convention.
+>
+> **The changes.**
+>   - `config.py`: new `@dataclass(frozen=True) CoordinationConfig`
+>     (`bus_capacity=1024`, `bus_overflow="coalesce"`, `watcher_enabled=False`,
+>     `watcher_debounce_ms=200`) + a `_coordination()` helper that maps the native
+>     `bus`/`watcher` sub-tables onto the flat fields. Added a `coordination`
+>     field to `TyConfig`, parsed in `from_json` alongside `_code_graph`, exported
+>     in `__all__`.
+>   - `session.py`: **deleted `_read_coordination_config` entirely** (the lone
+>     `try/except → defaults` semantics re-read). `self._coord_cfg` is now
+>     `self._config.coordination`; the four consumers re-routed to attribute
+>     access — `.watcher_enabled` (auto-start), `.watcher_debounce_ms / 1000.0`
+>     (debounce, ms→s conversion preserved), `.bus_capacity`/`.bus_overflow` (bus
+>     construction).
+>   - `sidecar.py::config_path()` is a *path* facade, not a semantics parser —
+>     **kept** (it's the sole sidecar path owner, asserted by
+>     `test_sidecar_is_sole_path_owner_in_source`).
+>
+> **No surviving silent-default config path in Python.** Grep for
+> `tomllib`/`toml.load`/`config.toml` across `src/tyo3` (non-test) returns only
+> `sidecar.py`'s path facade and the `config.toml` docstring/exception text —
+> **zero** `try/except → defaults` config reads remain (Pitfall #1 cleared).
+>
+> **Tests (12.3).** Added to `test_gate4_config_sidecar.py`:
+> `test_coordination_config_is_exposed_from_native` (positive: the flat fields
+> reflect the TOML), `test_coordination_config_defaults_when_absent`, and a
+> parametrized `test_invalid_coordination_config_fails_loudly_at_open` proving an
+> invalid `bus.overflow` / `code_graph.precision` / `code_graph.refinement`
+> raises `ConfigError` at `TyO3Session(root)` — the loud-failure the deleted
+> fallback used to hide.
+>
+> **Gate (2026-06-08).** `test_gate4_config_sidecar.py` + `test_config_discovery.py`
+> + `test_watch.py` **34/34** green (`-rA`); `test_gate8_bus.py` **40/40** green
+> (the bus still reads capacity/overflow from the re-routed config); cargo
+> `config` **29/29** + `sidecar` **6/6** green. Full `pytest -q --no-cov` green —
+> Phase-11 baseline preserved, **zero new xfail/XPASS**.
+> [[phase11-read-surface-done]] [[spine-refactor-v2-plan]]
+
+---
+
 ## 1. The six defects this refactor removes (from §6.3 of the Concept)
 
 | # | Defect | Status |
@@ -598,7 +672,7 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 | 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | ✅ **DONE** (the single `_after_commit` hook makes "publish every revision" true by construction) |
 | 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | ✅ **V2 Phase 11 DONE** (`_OwnedView` owns/pins the snapshot; eager `entity`/`diff` materialise-then-close; floating-latest `graph()` non-canonical; layer views stop swallowing read failures) |
 | 8 | Hashing is text-heuristic not AST-canonical (collapses whitespace inside string literals) | 🔴 **V2 Phase 10** |
-| 9 | Config parsed twice with silent fallback (Python re-reads config.toml, swallows errors) | 🔴 **V2 Phase 12** |
+| 9 | Config parsed twice with silent fallback (Python re-reads config.toml, swallows errors) | ✅ **V2 Phase 12 DONE** (`_read_coordination_config` deleted; coordination read from the one validated native config via `TyConfig.coordination`; invalid overflow/precision/refinement fails loudly at open) |
 | 10 | Three central files are monoliths (`project.rs`, `session.py`, `graph/graph.py`) | 🔴 **V2 Phase 13** |
 
 > **Phase numbers in this table are V2** (see §0). Beyond these 10 defects, V2 adds
