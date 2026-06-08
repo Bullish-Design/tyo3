@@ -17,7 +17,7 @@
 | 1 | Snapshot construction reads live disk (`pre_populate_generation` at snapshot time) | ✅ **Phase 1 DONE** |
 | 2 | Transaction split across the lock boundary (Rust lock released before Python graph delta + bus) | 🔴 **Phase 5 + 6** |
 | 3 | Read accessor performs a write (`session.graph` → `sync_all` → advances head) | 🔴 **Phase 4** |
-| 4 | Delta is path-shaped not id-level (`SyncResultDto` has file-path strings, not `DurableId`s) | 🔴 **Phase 3** |
+| 4 | Delta is path-shaped not id-level (`SyncResultDto` has file-path strings, not `DurableId`s) | ✅ **Phase 3 DONE** |
 | 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | 🔴 **Phase 7** |
 | 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | 🔴 **Phase 6** |
 | 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | 🔴 **Phase 8** |
@@ -34,7 +34,7 @@
 | **0** | Invariant tests + parity oracle | 8 test files | — | `parity_oracle.py`, 8 test files | ✅ **DONE** |
 | **1** | Complete committed generations (content gate) | `test_final_content_spine.py` | `content.rs`, `project.rs`, `overlay.rs` | — | ✅ **DONE** (2 carry-overs → Phase 5) |
 | **2** | Native code layer + code delta (parity-only) | Parity suite | `code_layer.rs` (new), `entity.rs`, `dto/code_delta.rs` (new) | `graph/graph.py` (applier), `parity_oracle.py` (existing) | ✅ **DONE** |
-| **3** | Id-level commit delta | `test_final_commit_delta_contract.py` | `identity.rs`, `dto/sync.rs`, `project.rs` | `CommitDelta` model (new) | 🔴 **Not started** |
+| **3** | Id-level commit delta | `test_final_commit_delta_contract.py` | `identity.rs`, `dto/commit_delta.rs` (new), `code_layer.rs`, `project.rs` | `models/delta.py` (new) | ✅ **DONE** |
 | **4** | Cutover: Python graph as pure applier | `test_final_no_read_side_writes.py`, parity suite | `project.rs`, snapshot code-delta accessor | `graph/graph.py` (heavily edit) | 🔴 **Not started** |
 | **5** | Single native `commit()` with staging + rollback | `test_final_transaction_rollback.py` | `project.rs`, `sidecar.rs`, `authored.rs` | — | 🔴 **Not started** |
 | **6** | One post-commit path; non-blocking bus | `test_final_bus_contract.py` | `config.rs` (overflow policy) | `session.py`, `bus/` | 🔴 **Not started** |
@@ -250,7 +250,55 @@ devenv shell -- pytest src/tyo3/tests/test_final_parity_oracle.py -q --no-cov
 
 ---
 
-## 6. Phase 3 — Id-level commit delta 🔴 **Not started**
+## 6. Phase 3 — Id-level commit delta ✅ **DONE**
+
+> **Completed & verified 2026-06-07.** The public per-write value is now the
+> id-level `CommitDelta` (Rust `CommitDeltaDto`, Python `models/delta.py`), with
+> the Phase 2 `CodeDeltaDto` **nested**. All 6 `test_final_commit_delta_contract.py`
+> tests pass; module-level `xfail` removed. Milestone gate green: **Rust 155
+> passed / 0 failed**; **Python 639 passed, 19 xfailed, 3 failed** — the 3 being
+> the documented pre-existing later-phase baseline (`test_final_derived_contract`
+> ×2 → Phase 7; `test_final_hash_ast::test_formatting_only_hashes_same` → Phase 9).
+> `test_concurrency` green; suite ~2:19 (no Phase 2 per-commit regression).
+>
+> **What landed**
+> - `dto/commit_delta.rs` (new): `CommitDeltaDto` + `MovedEntityDto`. Nests
+>   `CodeDeltaDto` (gained `Default`; shape unchanged). Carries id-level
+>   `created_ids`/`changed_ids`/`deleted_ids`/structured `moved`/`authored_ids`/
+>   `affected_ids`, the nested `code_delta`, and **path-shaped metadata**
+>   (`touched_files` + per-category `created`/`changed`/`deleted`) consumed by the
+>   still-path-shaped Phase 6/7 post-commit helpers.
+> - `identity.rs`: `Binding` variants carry `old_hash` (captured **before** the
+>   in-pass rebind). New `Reconciliation::classify(entities) -> ReconcileClasses`
+>   gives the **precise, hash-based** changed set (no over-fire), structured
+>   `MovedBinding` (id + old/new qualified path + old/new file via the single
+>   tested `file_of_qualified_path` helper), created (minted), deleted (retired).
+>   7 new unit tests (edit / whitespace / two-funcs / pure-move / delete / new /
+>   split).
+> - `code_layer.rs`: `CodeLayer::affected_closure(seeds)` — deterministic BFS over
+>   `reverse_deps` (+ 2 unit tests, incl. the empty-layer = seeds-only case).
+> - `project.rs`: `run_identity_reconciliation` surfaces the id-level classes +
+>   `affected_ids`; all 6 commit bodies build `CommitDeltaDto` via a shared
+>   `build_commit_delta`; `sync_path` on a project-config file (`is_project_config_file`)
+>   signals **rescan** (coarse change, §5.4). `SyncResultDto` retired from the
+>   write path (the Rust struct + Python `SyncResult` model are kept for the
+>   legacy bus unit tests).
+> - Python: `models/delta.py` (`CommitDelta` + `MovedEntity`, default factories);
+>   every write method returns `CommitDelta`; `bus/delta.py` + `graph/graph.py`
+>   post-commit helpers duck-type structured `moved` + `authored_ids` so the
+>   path-shaped bus/graph/derived consumers keep working (rewrite is Phase 6–7).
+>
+> **Deliberately deferred (user-confirmed 2026-06-07 — "Option B"):** live native
+> reverse-dep maintenance. `head.code_layer` stays **empty** in Phase 3 (the
+> in-commit producer is full-build and too expensive — the Phase 2 regression),
+> so `affected_ids` equals the seeds (`changed ∪ deleted`). The transitive
+> closure lights up in **Phase 4** when the code layer becomes authoritative and
+> is built+maintained. No capability lost: the bus still computes transitive
+> affected via the Python `CodeGraph`. The `affected_closure` algorithm itself is
+> landed and unit-tested. Rationale: doing it now duplicates the hardest deferred
+> Phase 2 work against a still-legacy-authoritative graph, at high regression risk
+> and with no contract-level validation (the contract tests don't assert
+> `affected_ids`).
 
 ### 6.1 What needs to happen
 
@@ -570,13 +618,13 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 | `test_gate8_bus.py::test_inject_changes_fires_bus` (carry-over) | 1 | Phase 5 |
 | `test_graph_build.py::...incrementally...` (carry-over) | 1 | Phase 5 |
 | `test_final_no_read_side_writes.py` | 2 (was 3; `snapshot().graph()` went green via Phase 1.3) | Phase 4 |
-| `test_final_commit_delta_contract.py` | 6 (module-level) | Phase 3 |
+| `test_final_commit_delta_contract.py` | 0 (✅ Phase 3 done) | — |
 | `test_final_transaction_rollback.py` | 3 (module-level) | Phase 5 |
 | `test_final_bus_contract.py` | 3 | Phase 6 |
 | `test_final_derived_contract.py` | 5 | Phase 7 |
 | `test_final_hash_ast.py` | 2 | Phase 9 |
 | `test_final_parity_oracle.py` | 0 (✅ Phase 2 done) | — |
-| **Total** | **27** (was 24: content-spine −1, no-read-side-writes −1; +5 Phase 1→5 carry-over xfails) | |
+| **Total** | **21** (Phase 3 closed the 6 commit-delta xfails) | |
 
 ---
 
@@ -633,4 +681,4 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 
 ---
 
-*Last updated: 2026-06-07 — Phase 0 complete. **Phase 1 (content gate) complete and verified**: six steps implemented + audited, full Phase 1 acceptance gate green, plus a config-load fix and four test corrections found during verification. Two regressions (`sync_all` disk re-ingest; watcher buffer-vs-ingest) were deliberately deferred to Phase 5 and documented there as carry-overs (xfail-marked). Phases 2–13 ahead.*
+*Last updated: 2026-06-07 — Phases 0–2 complete. **Phase 3 (id-level commit delta) complete and verified**: `CommitDeltaDto`/`CommitDelta` with nested `code_delta`, precise hash-based `changed_ids` (no over-fire), structured `moved`, and the `affected_closure` helper. All 6 `test_final_commit_delta_contract.py` pass; milestone gate green (Rust 155/0; Python 639 passed / 3 pre-existing baseline failures / 19 xfailed). Live native reverse-dep maintenance deliberately deferred to Phase 4 (user-confirmed); `affected_ids` is seeds-only meanwhile. Phases 4–13 ahead.*

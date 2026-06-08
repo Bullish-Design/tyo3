@@ -2122,7 +2122,12 @@ class CodeGraph:
         # 0a. Handle moved entities: update location payload without changing
         #     the DurableId or churning edges — preserves §5.5.1 at the graph
         #     level and avoids needless edge churn.
-        moved = {_to_relative(root, p) for p in delta.moved}
+        #     ``delta.moved`` is structured (``MovedEntity``) on the Phase 3
+        #     ``CommitDelta`` and a path string on the legacy ``SyncResult``;
+        #     resolve to the moved file (the new location) for either shape.
+        moved = {
+            _to_relative(root, getattr(m, "new_file", m)) for m in delta.moved
+        }
         self._handle_moved_entities(source, moved, root, native_by_graph)
 
         # 0b. Snapshot inbound dependencies BEFORE removal — step 1 deletes the edges

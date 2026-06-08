@@ -35,7 +35,8 @@ from tyo3.exceptions import (
 )
 from tyo3.config import TyConfig
 from tyo3.models.advanced import SemanticToken
-from tyo3.models.analysis import CheckResult, Range, SyncResult
+from tyo3.models.analysis import CheckResult, Range
+from tyo3.models.delta import CommitDelta
 from tyo3.models.authored import AuthoredValue, AuthoredVersion
 from tyo3.models.derived import DerivedValue
 from tyo3.models.editor import FoldingRange, Hint, InlayHint
@@ -750,7 +751,7 @@ class TyO3Session(_ReadOps):
             self._derivation = DerivationDAG.from_session(self)
         return self._derivation
 
-    def _invalidate_derived(self, result: SyncResult) -> None:
+    def _invalidate_derived(self, result: CommitDelta) -> None:
         """Invalidate derived artifacts from the write delta (Step 5)."""
         dag = self._get_derivation()
         if dag.is_empty:
@@ -870,7 +871,7 @@ class TyO3Session(_ReadOps):
         self._check_open()
         return self._get_bus().subscribe(interest)
 
-    def _publish_delta(self, result: SyncResult) -> None:
+    def _publish_delta(self, result: CommitDelta) -> None:
         """Publish a committed delta to the bus after publication.
 
         Called from every write method after ``_apply_graph_delta``,
@@ -936,7 +937,7 @@ class TyO3Session(_ReadOps):
 
     # ── Write path ────────────────────────────────────────────────────
 
-    def edit(self, path: str | StdPath, text: str) -> SyncResult:
+    def edit(self, path: str | StdPath, text: str) -> CommitDelta:
         """Overlay ``path`` with in-memory ``text`` (no disk write).
         Returns a SyncResult with the new revision and affected paths."""
         self._check_open()
@@ -947,12 +948,12 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit(): {e}") from e
-        result = SyncResult.model_validate(native_result)
+        result = CommitDelta.model_validate(native_result)
         self._apply_graph_delta(result)
         self._publish_delta(result)
         return result
 
-    def edit_many(self, edits: dict[str, str]) -> SyncResult:
+    def edit_many(self, edits: dict[str, str]) -> CommitDelta:
         """Overlay many files atomically (one publish, one revision)."""
         self._check_open()
         self._invalidate_head_snap()
@@ -962,12 +963,12 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit_many(): {e}") from e
-        result = SyncResult.model_validate(native_result)
+        result = CommitDelta.model_validate(native_result)
         self._apply_graph_delta(result)
         self._publish_delta(result)
         return result
 
-    def edit_virtual(self, uri: str, text: str) -> SyncResult:
+    def edit_virtual(self, uri: str, text: str) -> CommitDelta:
         """Overlay a virtual/unsaved buffer (e.g. "untitled:1").
         No disk involvement."""
         self._check_open()
@@ -978,12 +979,12 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit_virtual(): {e}") from e
-        result = SyncResult.model_validate(native_result)
+        result = CommitDelta.model_validate(native_result)
         self._apply_graph_delta(result)
         self._publish_delta(result)
         return result
 
-    def sync_path(self, path: str | StdPath) -> SyncResult:
+    def sync_path(self, path: str | StdPath) -> CommitDelta:
         """Ingest a disk change for ``path``: drop any overlay and re-read
         disk."""
         self._check_open()
@@ -994,12 +995,12 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_path(): {e}") from e
-        result = SyncResult.model_validate(native_result)
+        result = CommitDelta.model_validate(native_result)
         self._apply_graph_delta(result)
         self._publish_delta(result)
         return result
 
-    def discard(self, path: str | StdPath) -> SyncResult:
+    def discard(self, path: str | StdPath) -> CommitDelta:
         """Drop the overlay buffer for ``path``, reverting to disk."""
         self._check_open()
         self._invalidate_head_snap()
@@ -1009,11 +1010,11 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in discard(): {e}") from e
-        result = SyncResult.model_validate(native_result)
+        result = CommitDelta.model_validate(native_result)
         self._apply_graph_delta(result)
         return result
 
-    def sync_all(self) -> SyncResult:
+    def sync_all(self) -> CommitDelta:
         """Rescan everything (in-place). Existing overlay buffers are
         preserved; ty re-walks and re-reads all files."""
         self._check_open()
@@ -1024,7 +1025,7 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_all(): {e}") from e
-        result = SyncResult.model_validate(native_result)
+        result = CommitDelta.model_validate(native_result)
         self._apply_graph_delta(result)
         self._publish_delta(result)
         return result
@@ -1066,7 +1067,7 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in flush_watch(): {e}") from e
 
-    def poll_changes(self) -> SyncResult | None:
+    def poll_changes(self) -> CommitDelta | None:
         """Drain every change the watcher has observed and fold it into HEAD
         as one revision. Returns the SyncResult, or None if nothing was
         pending (or every event was for a path with a live overlay buffer,
@@ -1085,7 +1086,7 @@ class TyO3Session(_ReadOps):
 
         if native_result is None:
             return None
-        result = SyncResult.model_validate(native_result)
+        result = CommitDelta.model_validate(native_result)
         self._apply_graph_delta(result)
         self._publish_delta(result)
         return result
@@ -1100,7 +1101,7 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in _inject_changes(): {e}") from e
 
-    def _apply_graph_delta(self, result: SyncResult) -> None:
+    def _apply_graph_delta(self, result: CommitDelta) -> None:
         """Apply a write delta to the materialized HEAD graph, if any."""
         if self._head_graph is None:
             return
@@ -1220,7 +1221,7 @@ class TyO3Session(_ReadOps):
 
     # ── Authored (Gate 6) ───────────────────────────────────────────
 
-    def author(self, layer: str, durable_id: str, value: Any) -> SyncResult:
+    def author(self, layer: str, durable_id: str, value: Any) -> CommitDelta:
         """Author (write) an authored value for ``(layer, durable_id)``.
 
         An authored write is a real revision-producing commit: it bumps the
@@ -1236,7 +1237,7 @@ class TyO3Session(_ReadOps):
             raise ProjectClosedError(str(e)) from e
         except Exception as e:
             raise InternalTyError(f"Unexpected error in author(): {e}") from e
-        result = SyncResult.model_validate(native)
+        result = CommitDelta.model_validate(native)
         # Do NOT call _apply_graph_delta — authored writes produce no code/derived delta.
         self._publish_delta(result)
         return result

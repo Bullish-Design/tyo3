@@ -132,7 +132,17 @@ class Delta:
         changed_raw = frozenset(result.changed)
         deleted_raw = frozenset(result.deleted)
         created_raw = frozenset(result.created)
-        moved_raw = frozenset(result.moved)
+        # ``moved`` is path-shaped on the legacy ``SyncResult`` but structured
+        # (``MovedEntity`` with ``id`` + old/new file) on the Phase 3
+        # ``CommitDelta``.  Detect the latter: take the ids directly and the
+        # old/new files for file-interest matching.
+        moved_items = list(result.moved)
+        if moved_items and hasattr(moved_items[0], "id"):
+            _structured_moved_ids: frozenset[str] | None = frozenset(m.id for m in moved_items)
+            moved_raw = frozenset(f for m in moved_items for f in (m.old_file, m.new_file))
+        else:
+            _structured_moved_ids = None
+            moved_raw = frozenset(moved_items)
 
         # Normalise paths when root is available.
         if root is not None:
@@ -158,8 +168,16 @@ class Delta:
             created_ids = created_files
             moved_ids = moved_files
 
-        # Authored ids are already DurableIds (from SyncResult.authored).
-        authored_ids = frozenset(result.authored)
+        # Structured CommitDelta moves carry the DurableId directly — use it
+        # rather than the file→id mapping.
+        if _structured_moved_ids is not None:
+            moved_ids = _structured_moved_ids
+
+        # Authored ids are already DurableIds. ``CommitDelta`` exposes them as
+        # ``authored_ids``; the legacy ``SyncResult`` as ``authored``.
+        authored_ids = frozenset(
+            getattr(result, "authored_ids", None) or getattr(result, "authored", ())
+        )
 
         # Transitive affected set (§4.3.3).
         seed = changed_ids | deleted_ids

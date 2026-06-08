@@ -14,6 +14,10 @@ from tyo3.models.analysis import (
     Range,
     SyncResult,
 )
+from tyo3.models.delta import (
+    CommitDelta,
+    MovedEntity,
+)
 from tyo3.models.editor import (
     FoldingRange,
     FoldingRangeKind,
@@ -54,6 +58,8 @@ __all__ = [  # noqa: F405
     "FileRange",
     "CheckResult",
     "SyncResult",
+    "CommitDelta",
+    "MovedEntity",
     "DiagnosticSeverity",
     "Diagnostic",
     # Symbols

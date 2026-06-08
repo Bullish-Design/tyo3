@@ -49,12 +49,7 @@ def _moved_id(entry: Any) -> str:
     raise AssertionError(f"moved entry is not structured (no id): {entry!r}")
 
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    reason="Phases 2–3: the id-level CommitDelta (changed_ids/created_ids/"
-    "deleted_ids/structured moved/affected_ids) does not exist yet; the write "
-    "result is still path-shaped",
-)
+# Phase 3 landed the id-level CommitDelta — these contracts are live (xfail removed).
 
 
 # ── 1. Editing one function returns its DurableId in changed_ids ─────────────
