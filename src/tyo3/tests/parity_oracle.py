@@ -43,7 +43,7 @@ wants — not a correctness proof.
 This module has these parts:
 
 1. :func:`compare_graphs` — the pure, tiered comparator.  Given two
-   :class:`~tyo3.graph.graph.CodeGraph` objects it returns a
+   :class:`~tyo3.graph.projection.CodeGraph` objects it returns a
    :class:`ParityReport` separating structural problems from cosmetic ones.
 2. :func:`assert_graphs_equal` — asserts structural parity always, and cosmetic
    parity per the ``cosmetic`` mode.
@@ -65,7 +65,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from tyo3.graph.graph import CodeGraph
+from tyo3.graph.projection import CodeGraph
 from tyo3.graph.models import SymbolNode
 
 logger = logging.getLogger(__name__)

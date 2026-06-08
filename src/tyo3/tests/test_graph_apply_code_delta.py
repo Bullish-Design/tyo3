@@ -15,7 +15,7 @@ Phase 4 guide §4.1 calls out:
 
 from __future__ import annotations
 
-from tyo3.graph.graph import CodeGraph
+from tyo3.graph.projection import CodeGraph
 
 
 def _rng(sl: int, sc: int, el: int, ec: int) -> dict:
