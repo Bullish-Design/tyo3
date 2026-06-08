@@ -334,41 +334,42 @@ impl ContentStore {
         filter: impl Fn(&SystemPath) -> bool + Send + Clone,
     ) -> Revision {
         let native = OsSystem::new(root.to_path_buf());
-        let walker = native.walk_directory(root);
-        let disk_reads = Arc::clone(&self.disk_reads);
+        let paths = walk_relevant_files(&native, root, filter);
+        let changes = self.read_disk_changes(&native, &paths);
+        self.apply_batch(changes)
+    }
 
-        // Collect relevant file paths.
-        let paths: Arc<Mutex<Vec<SystemPathBuf>>> = Arc::new(Mutex::new(Vec::new()));
-        let paths_clone = Arc::clone(&paths);
-        walker.run(move || {
-            let paths = Arc::clone(&paths_clone);
-            let filter = filter.clone();
-            Box::new(move |entry: std::result::Result<
-                ruff_db::system::walk_directory::DirectoryEntry,
-                ruff_db::system::walk_directory::Error,
-            >| {
-                if let Ok(entry) = entry {
-                    if entry.file_type().is_file() && filter(entry.path()) {
-                        if let Ok(mut v) = paths.lock() {
-                            v.push(entry.path().to_path_buf());
-                        }
-                    }
-                }
-                WalkState::Continue
-            })
-        });
+    /// Walk the project once and read every relevant file from disk, producing
+    /// the **staged next generation** (current content with each re-read file
+    /// overlaid) WITHOUT mutating the store's revision/generation/retained
+    /// window. Paths in `skip` (genuinely unsaved overlay buffers) are left
+    /// untouched so a `sync_all` rescan preserves in-memory edits while still
+    /// discovering new/changed disk files (Phase 5 carry-over of the Phase 1
+    /// `sync_all` gap). The result is published only by the commit's tail.
+    pub fn stage_reingest(
+        &mut self,
+        root: &SystemPath,
+        filter: impl Fn(&SystemPath) -> bool + Send + Clone,
+        skip: &std::collections::HashSet<SystemPathBuf>,
+    ) -> Generation {
+        let native = OsSystem::new(root.to_path_buf());
+        let paths: Vec<SystemPathBuf> = walk_relevant_files(&native, root, filter)
+            .into_iter()
+            .filter(|p| !skip.contains(p))
+            .collect();
+        let changes = self.read_disk_changes(&native, &paths);
+        self.stage(changes)
+    }
 
-        let paths = Arc::try_unwrap(paths)
-            .unwrap_or_else(|_| panic!("ingest_project: walk_dir still owning Arc"))
-            .into_inner()
-            .unwrap();
-
-        // Build changes: for each relevant file, read from disk and intern.
+    /// Read each path from disk once, bumping the disk-read counter, and turn
+    /// the result into `Change`s (Insert with content, tombstone if absent).
+    /// Shared by `ingest_project` and `stage_reingest`.
+    fn read_disk_changes(&self, native: &OsSystem, paths: &[SystemPathBuf]) -> Vec<Change> {
         let mut changes = Vec::with_capacity(paths.len());
-        for path_buf in &paths {
+        for path_buf in paths {
             match native.read_to_string(path_buf) {
                 Ok(text) => {
-                    disk_reads.fetch_add(1, Ordering::Relaxed);
+                    self.disk_reads.fetch_add(1, Ordering::Relaxed);
                     changes.push(Change::Insert {
                         path: path_buf.clone(),
                         text: Arc::from(text),
@@ -383,14 +384,81 @@ impl ContentStore {
                 Err(e) => {
                     // Genuine IO error — surface via log, don't silently skip.
                     log::warn!(
-                        "ingest_project: failed to read {}: {e} — skipping",
+                        "read_disk_changes: failed to read {}: {e} — skipping",
                         path_buf.as_str()
                     );
                 }
             }
         }
+        changes
+    }
 
-        self.apply_batch(changes)
+    // ── Phase 5: staged (deferred-publish) commit primitives ─────────────
+    //
+    // A staged commit builds the next generation WITHOUT advancing the store,
+    // publishes it to the live overlay so the head db can analyse it, runs the
+    // fallible commit steps, and only then calls `publish_staged` as the single,
+    // last in-lock observable mutation of the content store (§5.3 publish-last).
+    // A commit that fails before `publish_staged` never touches the store, so
+    // `head`, the retained window, and snapshot content all stay at R−1.
+
+    /// Build the next generation by applying `changes` to a clone of the
+    /// current content, WITHOUT bumping the revision / swapping the generation /
+    /// recording the retained window. Version numbers are consumed from the
+    /// monotonic counter (gaps left by a dropped stage are harmless).
+    pub fn stage(&mut self, changes: Vec<Change>) -> Generation {
+        let mut map = (*self.generation).clone();
+        for c in changes {
+            match c {
+                Change::Insert { path, text } => {
+                    self.version_counter += 1;
+                    let d = Document::text(text, self.version_counter);
+                    map.system = map.system.insert(path, d);
+                }
+                Change::Delete { path } => {
+                    self.version_counter += 1;
+                    map.system =
+                        map.system.insert(path, Document::Deleted { version: self.version_counter });
+                }
+                Change::Forget { path } => {
+                    map.system = map.system.remove(&path);
+                }
+                Change::InsertVirtual { path, text } => {
+                    self.version_counter += 1;
+                    let d = Document::text(text, self.version_counter);
+                    map.virtual_files = map.virtual_files.insert(path, d);
+                }
+                Change::ForgetVirtual { path } => {
+                    map.virtual_files = map.virtual_files.remove(&path);
+                }
+            }
+        }
+        Arc::new(map)
+    }
+
+    /// Capture the current content as a staged generation without any change —
+    /// the next revision will retain identical content (used by authored and
+    /// rescan commits that bump the revision without editing content).
+    pub fn stage_unchanged(&self) -> Generation {
+        Arc::clone(&self.generation)
+    }
+
+    /// Publish a previously-staged generation as the store's new revision: the
+    /// single, last in-lock observable mutation of a staged commit (§5.3).
+    /// Swaps the generation, bumps the revision exactly once, and records the
+    /// retained window. Returns the new revision.
+    pub fn publish_staged(&mut self, generation: Generation) -> Revision {
+        self.generation = generation;
+        self.revision = Revision(self.revision.0 + 1);
+        self.record_retained();
+        self.revision
+    }
+
+    /// The revision a staged commit will publish next (`current + 1`), without
+    /// mutating anything. Reconciliation uses this for `last_seen_rev`
+    /// bookkeeping before the deferred publish.
+    pub fn next_revision(&self) -> Revision {
+        Revision(self.revision.0 + 1)
     }
 
     /// Re-read a specific set of disk paths once and intern them as one
@@ -460,6 +528,41 @@ impl ContentStore {
     pub fn oldest_retained(&self) -> Revision {
         *self.retained.keys().next().unwrap_or(&self.revision)
     }
+}
+
+/// Walk `root` once and collect every relevant file path (a regular file the
+/// `filter` accepts). Shared by `ingest_project` (open) and `stage_reingest`
+/// (`sync_all`). Reads no file content — only enumerates paths.
+fn walk_relevant_files(
+    native: &OsSystem,
+    root: &SystemPath,
+    filter: impl Fn(&SystemPath) -> bool + Send + Clone,
+) -> Vec<SystemPathBuf> {
+    let walker = native.walk_directory(root);
+    let paths: Arc<Mutex<Vec<SystemPathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+    let paths_clone = Arc::clone(&paths);
+    walker.run(move || {
+        let paths = Arc::clone(&paths_clone);
+        let filter = filter.clone();
+        Box::new(move |entry: std::result::Result<
+            ruff_db::system::walk_directory::DirectoryEntry,
+            ruff_db::system::walk_directory::Error,
+        >| {
+            if let Ok(entry) = entry {
+                if entry.file_type().is_file() && filter(entry.path()) {
+                    if let Ok(mut v) = paths.lock() {
+                        v.push(entry.path().to_path_buf());
+                    }
+                }
+            }
+            WalkState::Continue
+        })
+    });
+
+    Arc::try_unwrap(paths)
+        .unwrap_or_else(|_| panic!("walk_relevant_files: walk_dir still owning Arc"))
+        .into_inner()
+        .unwrap()
 }
 
 /// Look a system path up inside a captured generation.

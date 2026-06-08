@@ -209,6 +209,10 @@ class TestPythonizeEdgeCases:
             "FormatVersionError",
             # Gate 1 §1.3.6: typed error for reading an evicted revision.
             "RevisionEvictedError",
+            # Phase 5 §5.12: the typed commit-transaction error model.
+            "SidecarWriteError",
+            "CommitFailed",
+            "ReconcileAmbiguous",
         }
         for name in dir(_native):
             if name.startswith("_"):

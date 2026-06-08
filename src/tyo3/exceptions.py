@@ -9,12 +9,15 @@ from __future__ import annotations
 
 try:
     from tyo3._native_impl import (
+        CommitFailed,
         ConfigError,
         FormatVersionError,
         PathResolutionError,
         PositionError,
         ProjectClosedError,
+        ReconcileAmbiguous,
         RevisionEvictedError,
+        SidecarWriteError,
         TyO3Error,
     )
 except ImportError:
@@ -38,6 +41,17 @@ except ImportError:
 
     class RevisionEvictedError(TyO3Error):
         """Raised when a requested MVCC revision is no longer retained."""
+
+    class SidecarWriteError(TyO3Error):
+        """Raised when a commit's sidecar persistence (identity registry or an
+        authored record) fails to write atomically; the commit rolls back (§5.10)."""
+
+    class CommitFailed(TyO3Error):
+        """Raised when an in-lock commit step fails and the whole commit rolls
+        back to the prior revision with no torn publish (§5.3)."""
+
+    class ReconcileAmbiguous(TyO3Error):
+        """Raised when identity reconciliation cannot bind deterministically (§5.5)."""
 
 
 class ProjectOpenError(TyO3Error):
@@ -80,6 +94,9 @@ __all__ = [
     "PathResolutionError",
     "PositionError",
     "RevisionEvictedError",
+    "SidecarWriteError",
+    "CommitFailed",
+    "ReconcileAmbiguous",
     "AnalysisError",
     "InternalTyError",
 ]

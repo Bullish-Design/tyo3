@@ -59,13 +59,6 @@ def _arm_fault(session: TyO3Session, stage: str) -> None:
     )
 
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    reason="Phase 5: staged commit + rollback and the native fault-injection "
-    "seam do not exist yet",
-)
-
-
 def test_identity_persist_failure_rolls_back(tmp_path):
     s = _open(tmp_path, {"a.py": "def foo():\n    return 1\n"})
     try:

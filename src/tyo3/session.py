@@ -32,6 +32,7 @@ from tyo3.exceptions import (
     ProjectClosedError,
     ProjectOpenError,
     RevisionEvictedError,
+    TyO3Error,
 )
 from tyo3.config import TyConfig
 from tyo3.models.advanced import SemanticToken
@@ -972,6 +973,10 @@ class TyO3Session(_ReadOps):
             native_result = self._inner.edit(str(path), text)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except TyO3Error:
+            # Native commit-transaction errors (CommitFailed / SidecarWriteError)
+            # are already typed — surface them untouched, never re-wrap (§5.12).
+            raise
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit(): {e}") from e
         result = CommitDelta.model_validate(native_result)
@@ -987,6 +992,10 @@ class TyO3Session(_ReadOps):
             native_result = self._inner.edit_many(edits)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except TyO3Error:
+            # Native commit-transaction errors (CommitFailed / SidecarWriteError)
+            # are already typed — surface them untouched, never re-wrap (§5.12).
+            raise
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit_many(): {e}") from e
         result = CommitDelta.model_validate(native_result)
@@ -1003,6 +1012,10 @@ class TyO3Session(_ReadOps):
             native_result = self._inner.edit_virtual(uri, text)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except TyO3Error:
+            # Native commit-transaction errors (CommitFailed / SidecarWriteError)
+            # are already typed — surface them untouched, never re-wrap (§5.12).
+            raise
         except Exception as e:
             raise InternalTyError(f"Unexpected error in edit_virtual(): {e}") from e
         result = CommitDelta.model_validate(native_result)
@@ -1019,6 +1032,10 @@ class TyO3Session(_ReadOps):
             native_result = self._inner.sync_path(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except TyO3Error:
+            # Native commit-transaction errors (CommitFailed / SidecarWriteError)
+            # are already typed — surface them untouched, never re-wrap (§5.12).
+            raise
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_path(): {e}") from e
         result = CommitDelta.model_validate(native_result)
@@ -1034,6 +1051,10 @@ class TyO3Session(_ReadOps):
             native_result = self._inner.discard(str(path))
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except TyO3Error:
+            # Native commit-transaction errors (CommitFailed / SidecarWriteError)
+            # are already typed — surface them untouched, never re-wrap (§5.12).
+            raise
         except Exception as e:
             raise InternalTyError(f"Unexpected error in discard(): {e}") from e
         result = CommitDelta.model_validate(native_result)
@@ -1049,6 +1070,10 @@ class TyO3Session(_ReadOps):
             native_result = self._inner.sync_all()
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except TyO3Error:
+            # Native commit-transaction errors (CommitFailed / SidecarWriteError)
+            # are already typed — surface them untouched, never re-wrap (§5.12).
+            raise
         except Exception as e:
             raise InternalTyError(f"Unexpected error in sync_all(): {e}") from e
         result = CommitDelta.model_validate(native_result)
@@ -1107,6 +1132,10 @@ class TyO3Session(_ReadOps):
             native_result = self._inner.poll_changes()
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except TyO3Error:
+            # Native commit-transaction errors (CommitFailed / SidecarWriteError)
+            # are already typed — surface them untouched, never re-wrap (§5.12).
+            raise
         except Exception as e:
             raise InternalTyError(f"Unexpected error in poll_changes(): {e}") from e
 
@@ -1284,6 +1313,10 @@ class TyO3Session(_ReadOps):
             native = self._inner.author(layer, durable_id, payload)
         except _NativeClosedError as e:
             raise ProjectClosedError(str(e)) from e
+        except TyO3Error:
+            # Native commit-transaction errors (CommitFailed / SidecarWriteError)
+            # are already typed — surface them untouched, never re-wrap (§5.12).
+            raise
         except Exception as e:
             raise InternalTyError(f"Unexpected error in author(): {e}") from e
         result = CommitDelta.model_validate(native)

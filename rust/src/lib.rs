@@ -12,6 +12,17 @@ create_exception!(tyo3._native_impl, PositionError, TyO3Error);
 create_exception!(tyo3._native_impl, RevisionEvictedError, TyO3Error);
 create_exception!(tyo3._native_impl, ConfigError, TyO3Error);
 create_exception!(tyo3._native_impl, FormatVersionError, TyO3Error);
+// Phase 5 (§5.12): the typed commit-transaction error model.
+// `SidecarWriteError` — a write_atomic/temp-rename failure while persisting
+//   identity or an authored record (carries the path + the IO error).
+// `CommitFailed` — any other in-lock failure that forced a rollback (engine
+//   apply, code-layer staging, delta computation, or a fired non-sidecar fault).
+// `ReconcileAmbiguous` — reconciliation could not bind deterministically
+//   (the §5.5 rule-3 ambiguity). Registered now; raised once structural
+//   reconciliation can be ambiguous (no call site yet).
+create_exception!(tyo3._native_impl, SidecarWriteError, TyO3Error);
+create_exception!(tyo3._native_impl, CommitFailed, TyO3Error);
+create_exception!(tyo3._native_impl, ReconcileAmbiguous, TyO3Error);
 
 mod hash;
 mod config;
@@ -45,6 +56,9 @@ fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("RevisionEvictedError", m.py().get_type::<RevisionEvictedError>())?;
     m.add("ConfigError", m.py().get_type::<ConfigError>())?;
     m.add("FormatVersionError", m.py().get_type::<FormatVersionError>())?;
+    m.add("SidecarWriteError", m.py().get_type::<SidecarWriteError>())?;
+    m.add("CommitFailed", m.py().get_type::<CommitFailed>())?;
+    m.add("ReconcileAmbiguous", m.py().get_type::<ReconcileAmbiguous>())?;
 
     Ok(())
 }

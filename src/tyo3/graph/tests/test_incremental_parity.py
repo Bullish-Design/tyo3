@@ -363,11 +363,13 @@ def test_multi_level_inheritance_chain_parity(
 
 @pytest.mark.xfail(
     strict=False,
-    reason="Deferred to Phase 5 (watcher carry-over): this drives the move via "
-    "_inject_changes/poll_changes, whose buffer-vs-ingest guard drops the injected "
-    "'deleted' event (so the rename is seen as a fresh create, not a move) — the "
-    "same Phase 1→5 carry-over the test_watch inject tests xfail on. Re-home to a "
-    "sync_path-driven move (or land the watcher fix) in Phase 5.",
+    reason="Phase 5 fixed the watcher event-dropping half (poll_changes now "
+    "processes the injected deleted+created batch — see test_watch), but a "
+    "watcher-driven *cross-file* move is still not reported as a single `moved` "
+    "entry here: the scoped reconcile sees the delete + create but does not emit "
+    "the hash-matched move in the form this test asserts. That is identity-layer "
+    "move detection (§5.5 rule 2), outside Phase 5's commit-funnel scope and "
+    "outside the gated testpaths; non-strict so it neither blocks nor xpass-fails.",
 )
 def test_moved_entity_preserves_id_and_updates_location(tmp_path: StdPath) -> None:
     """Rename a file with unchanged body — node id preserved, location updated.

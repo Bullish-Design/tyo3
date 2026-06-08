@@ -15,7 +15,7 @@
 | # | Defect | Status |
 |---|--------|--------|
 | 1 | Snapshot construction reads live disk (`pre_populate_generation` at snapshot time) | ✅ **Phase 1 DONE** |
-| 2 | Transaction split across the lock boundary (Rust lock released before Python graph delta + bus) | 🔴 **Phase 5 + 6** |
+| 2 | Transaction split across the lock boundary (Rust lock released before Python graph delta + bus) | 🟡 **Phase 5 partial** (in-lock stage→publish-last→rollback done; bus / post-commit-path half → **Phase 6**) |
 | 3 | Read accessor performs a write (`session.graph` → `sync_all` → advances head) | ✅ **Phase 4 DONE** |
 | 4 | Delta is path-shaped not id-level (`SyncResultDto` has file-path strings, not `DurableId`s) | ✅ **Phase 3 DONE** |
 | 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | 🔴 **Phase 7** |
@@ -36,7 +36,7 @@
 | **2** | Native code layer + code delta (parity-only) | Parity suite | `code_layer.rs` (new), `entity.rs`, `dto/code_delta.rs` (new) | `graph/graph.py` (applier), `parity_oracle.py` (existing) | ✅ **DONE** |
 | **3** | Id-level commit delta | `test_final_commit_delta_contract.py` | `identity.rs`, `dto/commit_delta.rs` (new), `code_layer.rs`, `project.rs` | `models/delta.py` (new) | ✅ **DONE** |
 | **4** | Cutover: Python graph as pure applier | `test_final_no_read_side_writes.py`, parity suite | `project.rs`, snapshot code-delta accessor, `code_layer.rs` (producer bound), `dto/commit_delta.rs` (`Option`) | `graph/graph.py` (~1140 lines deleted), `session.py` | ✅ **DONE** |
-| **5** | Single native `commit()` with staging + rollback | `test_final_transaction_rollback.py` | `project.rs`, `sidecar.rs`, `authored.rs` | — | 🔴 **Not started** |
+| **5** | Single native `commit()` with staging + rollback | `test_final_transaction_rollback.py` | `project.rs`, `content.rs`, `lib.rs` | `exceptions.py`, `session.py` | ✅ **DONE** |
 | **6** | One post-commit path; non-blocking bus | `test_final_bus_contract.py` | `config.rs` (overflow policy) | `session.py`, `bus/` | 🔴 **Not started** |
 | **7** | Repair derived layers | `test_final_derived_contract.py` | — | `derive/`, `stores/` | 🔴 **Not started** |
 | **8** | Read surface + convenience APIs | `test_final_no_read_side_writes.py` | — | `session.py` | 🔴 **Not started** |
@@ -453,7 +453,66 @@ devenv shell -- pytest src/tyo3/tests/test_final_no_read_side_writes.py \
 
 ---
 
-## 8. Phase 5 — Single native `commit()` with staging + rollback 🔴 **Not started**
+## 8. Phase 5 — Single native `commit()` with staging + rollback ✅ **DONE**
+
+> **Completed & verified 2026-06-08.** Every write (`edit` / `edit_many` /
+> `edit_virtual` / `sync_path` / `discard` / `sync_all` / `author` /
+> `poll_changes`) funnels through one native `commit(mutation)` that STAGES all
+> next-state, runs every fallible step against the stage, and PUBLISHES the
+> revision LAST. The three rollback-contract cases are real green assertions
+> (module xfail removed); the focused gate (`test_final_transaction_rollback` +
+> `test_write_path` + `test_gate6_authored`) and `cargo test project authored
+> sidecar` are green. The two Phase-1 carry-overs are closed (xfails removed:
+> `test_watch` ×3 + `test_gate8_bus::test_inject_changes_fires_bus`).
+>
+> **Strategy chosen (user-confirmed 2026-06-08): "B+ deferred-publish."** True
+> Strategy A (stage a separate next-db, swap on success) is *provably* blocked by
+> salsa: `ProjectDatabase::apply_changes(&mut self)` calls `trigger_cancellation`
+> and a `db.clone()` shares `Zalsa` storage, so a rollback-clone would deadlock
+> the next mutation (and a fresh per-commit db is the documented ~100× perf trap).
+> So the **store** (the observable `head` revision + snapshot content + retained
+> window) is kept genuinely publish-last: `ContentStore::stage` builds the next
+> generation without advancing the store, the commit publishes it to the *overlay*
+> only (so the live db can analyse it for reconciliation), and the store
+> `publish_staged` (revision bump + retained-record) is the single, last in-lock
+> step. A failed commit never touches the store. The `registry`/`authored`/overlay
+> are reconciled in place and restored from a captured `Baseline` on failure; the
+> salsa db is left benignly ahead (it re-reads the restored overlay → same content
+> → recomputes equal). Fault seam = an always-compiled-but-inert `armed_fault`
+> field (no cargo feature), one-shot, taken at commit start.
+>
+> **What landed**
+> - `lib.rs` / `exceptions.py`: typed `SidecarWriteError` / `CommitFailed` /
+>   `ReconcileAmbiguous` (subclasses of `TyO3Error`, registered + re-exported;
+>   `ReconcileAmbiguous` has no call site yet — registered with a note).
+> - `content.rs`: `stage` / `stage_unchanged` / `publish_staged` / `next_revision`
+>   (deferred-publish primitives) + `stage_reingest` (sync_all disk re-ingest,
+>   preserving unsaved buffers) + shared `walk_relevant_files` / `read_disk_changes`.
+> - `project.rs`: one `commit(head, Mutation)` funnel (`Mutation` enum +
+>   `StagedCommit`/`AuthoredPlan`/`Baseline` + `build_plan`/`run_staged`/
+>   `check_fault`/`persist_identity`/`rollback`). `run_identity_reconciliation`
+>   no longer persists (was a swallowed `log::error!`) and takes `next_rev`;
+>   persistence is a staged, propagated step. Identity persistence is also an
+>   explicit propagated step at open. Authored write is now stage→persist→publish
+>   with the in-memory-only `prior` rollback **deleted**. PyO3 write methods are
+>   thin (parse → `Mutation` → `commit` → pythonize). `_fault_inject(stage)` seam.
+>   New `HeadState` fields: `unsaved_overlays` (the watcher buffer-wins set, now
+>   gated on genuinely-unsaved edits, not `has_overlay`) and `armed_fault`.
+> - `session.py`: write methods re-raise native `TyO3Error` subclasses untouched
+>   (no re-wrap into `InternalTyError`) so typed commit errors surface (§5.12).
+>
+> **Defect #2 is Phase 5 *partial*:** the in-lock half (stage → publish-last →
+> rollback under the native `Mutex`) is closed; the bus / Python post-commit-path
+> half completes in **Phase 6**.
+>
+> **Deliberately NOT done (out of scope, unchanged):** the in-commit code-layer
+> producer stays deferred (the `code_layer` fault still fires at its real staged
+> boundary, but it stages nothing — `code_delta` remains `None` → Phase-4
+> head-graph rebuild); the `CommitDelta` shape and the bus are untouched.
+> `graph/tests/test_incremental_parity.py::test_moved_entity_...` stays a
+> *non-strict* xfail: Phase 5 fixed the watcher event-dropping half, but
+> watcher-driven cross-file *move detection* is an identity-layer (§5.5 rule 2)
+> matter outside the commit funnel and outside the gated testpaths.
 
 ### 8.1 What needs to happen
 
@@ -693,22 +752,24 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 | File | `xfail` count | Will turn green in |
 |------|---------------|-------------------|
 | `test_final_content_spine.py` | 0 (✅ Phase 1 done) | — |
-| `test_watch.py` (Phase 1 carry-over) | 3 | Phase 5 |
-| `test_gate8_bus.py::test_inject_changes_fires_bus` (carry-over) | 1 | Phase 5 |
+| `test_watch.py` (Phase 1 carry-over) | 0 (✅ Phase 5 done; markers removed) | — |
+| `test_gate8_bus.py::test_inject_changes_fires_bus` (carry-over) | 0 (✅ Phase 5 done) | — |
 | `test_graph_build.py::...incrementally...` (carry-over) | 0 (✅ Phase 4 migrated it to the native head path; marker removed) | — |
 | `test_final_no_read_side_writes.py` | 0 (✅ Phase 4 done; all 3 reads side-effect-free) | — |
 | `test_final_commit_delta_contract.py` | 0 (✅ Phase 3 done) | — |
-| `test_final_transaction_rollback.py` | 3 (module-level) | Phase 5 |
+| `test_final_transaction_rollback.py` | 0 (✅ Phase 5 done; module xfail removed) | — |
 | `test_final_bus_contract.py` | 3 | Phase 6 |
 | `test_final_derived_contract.py` | 5 | Phase 7 |
 | `test_final_hash_ast.py` | 2 | Phase 9 |
 | `test_final_parity_oracle.py` | 0 (✅ Phase 2 done) | — |
-| **Total** | **17** (Phase 4 closed the 2 no-read-side-writes xfails + the graph_build carry-over) | |
+| **Total** | **10** (Phase 5 closed the 3 rollback + 3 watch + 1 bus carry-over xfails) | |
 
-> Note: `graph/tests/test_incremental_parity.py::test_moved_entity_...` carries a
-> **non-strict** xfail (move via `_inject_changes`/`poll_changes` — the same Phase
-> 1→5 watcher carry-over the `test_watch` inject tests xfail on). It is **not** in
-> the milestone `testpaths` (`src/tyo3/tests`), so it is outside the gated count.
+> Note: `graph/tests/test_incremental_parity.py::test_moved_entity_...` keeps its
+> **non-strict** xfail. Phase 5 fixed the watcher event-dropping half (the
+> `test_watch` inject tests now pass), but watcher-driven *cross-file* move
+> detection is an identity-layer (§5.5 rule 2) matter outside the commit funnel.
+> It is **not** in the milestone `testpaths` (`src/tyo3/tests`), so it is outside
+> the gated count.
 
 ---
 
@@ -721,7 +782,7 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 | 3 | `feat(rust): native code layer + code delta behind the parity oracle` | **2 ✅** |
 | 4 | `refactor(delta): id-level commit delta with structured moves + affected closure` | **3 ✅** |
 | 5 | `refactor(graph): cut over to a pure applier; remove read-surface build + priming` | **4 ✅** |
-| 6 | `refactor(commit): single native commit() with staging + rollback` | **5 🔴** |
+| 6 | `refactor(commit): single native commit() with staging + rollback` | **5 ✅** |
 | 7 | `fix(session/bus): one post-commit path; publish every write; non-blocking overflow` | **6 🔴** |
 | 8 | `fix(derived): id-level invalidation; read-time staleness; close snapshots; typed stores` | **7 🔴** |
 | 9 | `fix(read): eager / owned-lifetime convenience views; stop swallowing read errors` | **8 🔴** |
@@ -765,4 +826,4 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 
 ---
 
-*Last updated: 2026-06-07 — Phases 0–4 complete. **Phase 4 (cutover: pure applier) complete and verified**: the native code delta is authoritative; `CodeGraph.apply_code_delta` is the only graph builder/updater (head + snapshot), revision-gated; the read-surface build, `apply_delta`, and `_prime_identity_registry`/`_graph_identity_primed` are deleted (~1140 lines); no read accessor advances head (both no-read-side-writes xfails removed); the snapshot graph builds over its own frozen db; the native producer is bounded to project content. `CommitDeltaDto.code_delta` is `Option` with three-state semantics — the in-commit producer is deferred (user-confirmed); `head.code_layer`/`reverse_deps` empty, `affected_ids` seeds-only meanwhile. Milestone gate green (Rust 156/0; Python 647 passed / 3 pre-existing Phase 7×2 + Phase 9 baseline failures / 16 xfailed; `test_concurrency` green). Defect #3 closed. Phases 5–13 ahead.*
+*Last updated: 2026-06-08 — Phases 0–5 complete. **Phase 5 (single native `commit()` with staging + rollback) complete and verified**: every write funnels through one native `commit(mutation)` that stages all next-state and publishes the revision LAST, using the user-confirmed "Strategy B+ deferred-publish" (the store is never touched before the publish tail; registry/authored/overlay restore-on-failure; the salsa db is left benignly ahead because it cannot be rolled back). Typed `SidecarWriteError`/`CommitFailed`/`ReconcileAmbiguous` surfaced; identity persistence no longer swallowed; authored write is stage→persist→publish (in-memory `prior` rollback deleted); test-only one-shot fault seam (`_fault_inject`, always-compiled-inert). The 3 rollback-contract cases are green (module xfail removed) and the 2 Phase-1 carry-overs are closed (`test_watch` ×3 + `test_gate8_bus::test_inject_changes_fires_bus`). Milestone gate: Rust 156/0; Python — focused gate green (rollback ×3 + write_path + gate6_authored + watch + gate8_bus), full-suite baseline unchanged (3 pre-existing Phase 7×2 + Phase 9 failures; xfail countdown 17→10). Defect #2 now Phase-5-partial (bus/post-commit half → Phase 6). Phases 6–13 ahead.*

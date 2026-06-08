@@ -7,7 +7,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::pythonize;
 
-use crate::{ConfigError as PyConfigError, FormatVersionError, ProjectClosedError, PathResolutionError, PositionError, RevisionEvictedError};
+use crate::{ConfigError as PyConfigError, FormatVersionError, ProjectClosedError, PathResolutionError, PositionError, RevisionEvictedError, SidecarWriteError, CommitFailed};
 
 use ruff_db::files::File;
 use ruff_db::source::source_text;
@@ -124,6 +124,20 @@ struct HeadState {
     /// is not maintained until Phase 4 makes it authoritative. While empty,
     /// `affected_closure` returns exactly the seeds (`changed ∪ deleted`).
     code_layer: crate::code_layer::CodeLayer,
+    /// Paths carrying a genuinely *unsaved* overlay edit (from `edit` /
+    /// `edit_virtual`), as opposed to content ingested from disk at open or via
+    /// `sync_path`. The watcher's buffer-wins rule (a disk event is dropped when
+    /// an unsaved buffer exists for the path) gates on THIS set, not on
+    /// `ContentStore::has_overlay` — Phase 1 interns every project file at open,
+    /// so `has_overlay` is true for all of them and would drop every watcher
+    /// event (Phase 5 carry-over of the Phase 1 watcher gap).
+    unsaved_overlays: HashSet<SystemPathBuf>,
+    /// TEST-ONLY one-shot commit fault. `None` in normal use (a no-op). Armed by
+    /// the `_fault_inject` PyO3 seam and consumed (taken) by the very next
+    /// `commit`, which fires a typed error at the named staged boundary BEFORE
+    /// the publish tail so the rollback contract can be exercised without
+    /// filesystem permission tricks (§0.4). Never fires unless armed.
+    armed_fault: Option<String>,
 }
 
 /// Anything that can produce the cheap, GIL-releasable read clone.
@@ -1027,6 +1041,8 @@ fn build_head_with_config(
         config,
         authored: AuthoredStore::default(),
         code_layer: crate::code_layer::CodeLayer::new(),
+        unsaved_overlays: HashSet::new(),
+        armed_fault: None,
     }
 }
 
@@ -1154,6 +1170,12 @@ fn classify_overlay_edit(
 /// Classify a *disk ingest* for `path`: first the overlay for this path has
 /// been forgotten, so `ExistingPathKind::from_system` reads the underlying disk
 /// truth through the overlay. Returns the appropriate `ChangeEvent`.
+///
+/// Phase 5 inlines the equivalent classification into `build_plan`'s `SyncPath`
+/// arm (from the disk-read result + db interning, before the overlay is
+/// republished), so this standalone helper is now exercised only by the
+/// `sync_path_reingests_disk` unit test that documents the classification.
+#[cfg_attr(not(test), allow(dead_code))]
 fn classify_disk_sync(
     system: &OverlaySystem,
     db: &ProjectDatabase,
@@ -1201,6 +1223,7 @@ fn identity_scope_from_events(events: &[ChangeEvent]) -> Option<HashSet<String>>
     }
 }
 
+#[derive(Default)]
 struct IdentityDelta {
     /// Minted ids this revision.
     created_ids: Vec<String>,
@@ -1366,6 +1389,7 @@ fn derive_authored_status(
 fn run_identity_reconciliation(
     head: &mut HeadState,
     scope: Option<&HashSet<String>>,
+    next_rev: Revision,
 ) -> IdentityDelta {
     let state = TyProjectState {
         db: head.db.clone(),
@@ -1381,9 +1405,12 @@ fn run_identity_reconciliation(
         None => extract_entities(&state),
     };
     let extracted = entities.len();
+    // Reconcile against the revision this staged commit WILL publish
+    // (`next_rev`), not the store's current (pre-publish) revision — the store
+    // bump is deferred to the publish tail (§5.3 publish-last).
     let recon = match scope {
-        Some(scope) => reconcile_scoped(&mut head.registry, &entities, head.store.revision(), scope),
-        None => reconcile(&mut head.registry, &entities, head.store.revision()),
+        Some(scope) => reconcile_scoped(&mut head.registry, &entities, next_rev, scope),
+        None => reconcile(&mut head.registry, &entities, next_rev),
     };
 
     // Id-level classification (§5.4): created / changed (hash-based, no over-fire)
@@ -1424,16 +1451,13 @@ fn run_identity_reconciliation(
     let (authored_needs_review, authored_orphaned) =
         compute_authored_lifecycle(&head.config, &head.authored, &needs_review, &orphaned);
 
-    // Persist.
-    match head.registry.to_bytes() {
-        Ok(bytes) => {
-            let identity_path = head.sidecar.identity_db_path();
-            if let Err(e) = head.sidecar.write_atomic(&identity_path, &bytes) {
-                log::error!("Failed to persist identity registry: {}", e);
-            }
-        }
-        Err(e) => log::error!("Failed to serialise identity registry: {}", e),
-    }
+    // NOTE (Phase 5): identity persistence is NO LONGER done here. It used to
+    // `write_atomic` the registry and *swallow* the error (log-and-continue),
+    // which is the §5.3 "succeeds in memory but fails to persist" / §5.12 "do
+    // not swallow" violation this phase removes. Persistence is now a staged,
+    // fallible, *propagated* step in `commit` (`persist_identity` → the typed
+    // `SidecarWriteError`), run BEFORE the deferred publish so a write failure
+    // rolls the whole commit back to R−1.
 
     // NOTE (Phase 2): the native code layer is *not* produced eagerly here.
     // The Phase 2 producer is a full build (full semantic analysis: occurrence
@@ -1459,151 +1483,329 @@ fn run_identity_reconciliation(
     }
 }
 
-/// Publish the captured store generation, apply `events` to the db, run
-/// reconciliation against the identity registry, and build the SyncResult.
-///
-/// PRECONDITION: `head.store` is already mutated; this captures+publishes it.
-fn commit_head(
-    head: &mut HeadState,
-    events: &[ChangeEvent],
+// ── Phase 5: the single native commit(mutation) funnel ───────────────────
+//
+// Every write kind (edit / edit_many / edit_virtual / sync_path / discard /
+// sync_all / author / watcher poll_changes) funnels through `commit`. It STAGES
+// all next-state, runs every fallible step (serialise, write_atomic, engine
+// apply, code-layer stage, delta compute) against the stage, and PUBLISHES the
+// revision LAST (`ContentStore::publish_staged`). A failure in any in-lock step
+// returns a typed error and rolls back to R−1 with no torn publish and no bus
+// delta (§5.3). Strategy B+ ("deferred publish"): the content store — the
+// observable `head` revision, snapshot content, and retained window — is never
+// mutated until the publish tail, so a failed commit cannot have advanced it.
+// The registry/authored/overlay are mutated in place (reconciliation must run
+// the live db over the staged content) and restored from a baseline on failure;
+// the salsa db is left benignly ahead (it re-reads the restored overlay → same
+// content → recomputes equal) because salsa cannot be rolled back: it shares
+// `Zalsa` storage with any clone, and a rollback clone would deadlock the next
+// `apply_changes` (it blocks until it is the sole live handle).
+
+/// What a write does, decoupled from how it commits.
+enum Mutation {
+    /// edit / edit_many / edit_virtual — overlay buffer edits already classified
+    /// against the pre-edit content by the thin PyO3 method.
+    Overlay {
+        changes: Vec<crate::content::Change>,
+        events: Vec<ChangeEvent>,
+        created: Vec<String>,
+        changed: Vec<String>,
+        /// System paths that gained a genuinely unsaved buffer (for the watcher
+        /// buffer-wins set). Empty for virtual edits.
+        unsaved: Vec<SystemPathBuf>,
+    },
+    /// sync_path / discard — re-read one path from disk.
+    SyncPath { abs: SystemPathBuf },
+    /// sync_all — re-ingest the whole project from disk (one rescan revision).
+    SyncAll,
+    /// author — write one authored record (no content / engine change).
+    Author { layer: String, id: String, value: serde_json::Value },
+    /// watcher poll_changes — fold a drained batch of disk events.
+    Poll { events: Vec<ChangeEvent> },
+}
+
+/// An authored record staged for persistence (the §5.3 stage → persist →
+/// publish ordering). Built before any state moves; persisted as a staged step;
+/// the in-memory store swap happens only at the publish tail.
+struct AuthoredPlan {
+    next_store: AuthoredStore,
+    record_path: std::path::PathBuf,
+    bytes: Vec<u8>,
+    id: String,
+}
+
+/// The fully-built next-state of a commit, ready for the staged transaction.
+/// Nothing here is observable to a reader until `run_staged` reaches its tail.
+struct StagedCommit {
+    /// The next generation, built without advancing the store.
+    staged_gen: Generation,
+    /// Engine change events to apply to the head db.
+    events: Vec<ChangeEvent>,
+    /// Path-shaped delta metadata (Phase 3 still carries these alongside ids).
     created: Vec<String>,
     changed: Vec<String>,
     deleted: Vec<String>,
     rescan: bool,
-) -> dto::CommitDeltaDto {
-    // 2. publish BEFORE apply so apply_changes re-reads new content.
-    head.system.publish(head.store.capture());
-    // 3. ty does all incremental work.
-    let result = head.db.apply_changes(events, None);
-    let project_changed = result.project_changed();
-    let custom_stdlib_changed = result.custom_stdlib_changed();
-
-    // 4. Run reconciliation (Gate 2).
-    let scope = if rescan { None } else { identity_scope_from_events(events) };
-    let identity = run_identity_reconciliation(head, scope.as_ref());
-
-    // 5. Build the id-level commit delta.
-    build_commit_delta(
-        head.store.revision().0,
-        created,
-        changed,
-        deleted,
-        identity,
-        rescan,
-        project_changed,
-        custom_stdlib_changed,
-    )
+    /// Identity reconciliation scope (None ⇒ full reconcile).
+    scope: Option<HashSet<String>>,
+    /// Run identity reconciliation + persist the registry? (false for author.)
+    reconcile: bool,
+    /// Authored record to persist + swap in at the publish tail (author only).
+    authored: Option<AuthoredPlan>,
+    /// Paths to add to the unsaved-overlay set at the publish tail.
+    unsaved_insert: Vec<SystemPathBuf>,
+    /// Paths to drop from the unsaved-overlay set at the publish tail.
+    unsaved_remove: Vec<SystemPathBuf>,
 }
 
-/// Shared body of `sync_path` and `discard`: forget the overlay for `abs`, publish
-/// so the overlay falls through to disk, classify, apply, and build the result.
-/// Shared body of `sync_path` and `discard`: read disk once for `abs`,
-/// produce a `Change::Insert` (with content) or `Change::Delete` (tombstone),
-/// apply it as a single-change batch so the revision's generation records the
-/// disk content (§1.3.2).  Then publish and apply to the engine.
-fn sync_path_inner(head: &mut HeadState, abs: SystemPathBuf) -> dto::CommitDeltaDto {
-    // Read disk once.  The content (or its absence) is recorded in the
-    // generation so a snapshot at the resulting revision is stable even if
-    // disk changes again later.
-    let disk_text = std::fs::read_to_string(abs.as_std_path());
-    let change: crate::content::Change = match disk_text {
-        Ok(text) => crate::content::Change::Insert {
-            path: abs.clone(),
-            text: Arc::from(text),
-        },
-        Err(_) => crate::content::Change::Delete {
-            path: abs.clone(),
-        },
-    };
-
-    // 1. Apply to store (records content in the generation, bumps revision).
-    head.store.apply_batch(vec![change]);
-
-    // 2. Publish the new generation.
-    head.system.publish(head.store.capture());
-
-    // 3. Classify and apply to the engine.
-    let event = classify_disk_sync(&head.system, &head.db, &abs);
-    let path_str = abs.as_str().to_string();
-    let (created, changed, deleted) = match &event {
-        ChangeEvent::Created { .. } => (vec![path_str], vec![], vec![]),
-        ChangeEvent::Deleted { .. } => (vec![], vec![], vec![path_str]),
-        _ => (vec![], vec![path_str], vec![]),
-    };
-    let result = head.db.apply_changes(std::slice::from_ref(&event), None);
-    let project_changed = result.project_changed();
-    let custom_stdlib_changed = result.custom_stdlib_changed();
-
-    // Syncing a project-config file is a coarse change (§5.4): the precise
-    // per-entity delta is unknown, so signal rescan and reconcile the whole
-    // project (scope = None). Source-file syncs stay scoped/precise.
-    let rescan = crate::content::is_project_config_file(&abs);
-    let scope = if rescan {
-        None
-    } else {
-        identity_scope_from_events(std::slice::from_ref(&event))
-    };
-    let identity = run_identity_reconciliation(head, scope.as_ref());
-
-    build_commit_delta(
-        head.store.revision().0,
-        created,
-        changed,
-        deleted,
-        identity,
-        rescan,
-        project_changed,
-        custom_stdlib_changed,
-    )
+/// State a failed commit must restore. The store is NOT here: it is never
+/// mutated before the publish tail (deferred publish), so there is nothing to
+/// undo for it.
+struct Baseline {
+    published_gen: Generation,
+    registry: IdentityRegistry,
+    authored: AuthoredStore,
 }
 
-// ── Phase 8: Watcher drain-and-apply core ───────────────────────────────
+/// TEST-ONLY: fire the armed one-shot fault if it names `stage`. The arm is
+/// taken once at the top of the commit, so this is a pure check; it returns the
+/// typed error the rollback contract expects (a sidecar persist failure →
+/// `SidecarWriteError`; a non-sidecar stage → `CommitFailed`). Inert (always
+/// `Ok`) unless the test armed exactly this stage.
+fn check_fault(armed: &Option<String>, stage: &str) -> PyResult<()> {
+    if armed.as_deref() == Some(stage) {
+        return Err(match stage {
+            "identity_persist" | "authored_persist" => {
+                SidecarWriteError::new_err(format!("injected commit fault at stage {stage:?}"))
+            }
+            other => CommitFailed::new_err(format!("injected commit fault at stage {other:?}")),
+        });
+    }
+    Ok(())
+}
 
-/// Fold a batch of watcher-produced ChangeEvents into HEAD as ONE revision.
-///
-/// Returns `None` if, after filtering, there is nothing to apply (so the caller
-/// returns None to Python without bumping the revision). Otherwise publishes,
-/// applies, bumps the revision, and returns the SyncResult.
-///
-/// Rules:
-///  * A `Rescan` anywhere in the batch ⇒ rescan wholesale (like sync_all).
-///  * Events for a path with a live overlay buffer are DROPPED (the buffer wins).
-///  * Virtual events are skipped (the watcher never emits them for real dirs).
-///  * The remaining events are applied in one `apply_changes` call.
-fn apply_watch_events(
+/// Serialise the reconciled identity registry and persist it crash-safely.
+/// Propagates a `SidecarWriteError` on a write failure (§5.12 — never swallowed,
+/// as the pre-Phase-5 `log::error!`-and-continue did), so the `?` short-circuits
+/// BEFORE the deferred publish and the commit rolls back.
+fn persist_identity(head: &HeadState) -> PyResult<()> {
+    let bytes = head.registry.to_bytes().map_err(|e| {
+        CommitFailed::new_err(format!("failed to serialise identity registry: {e}"))
+    })?;
+    let identity_path = head.sidecar.identity_db_path();
+    head.sidecar.write_atomic(&identity_path, &bytes).map_err(|e| {
+        SidecarWriteError::new_err(format!(
+            "failed to persist identity registry at {identity_path:?}: {e}"
+        ))
+    })
+}
+
+/// Restore the baseline after a failed commit and hand the error back. The store
+/// is untouched (deferred publish), so head / retained / snapshot content are
+/// already at R−1; this re-publishes the prior generation to the live overlay
+/// and restores the in-place registry / authored mutations.
+fn rollback(head: &mut HeadState, base: Baseline, err: PyErr) -> PyErr {
+    head.system.publish(base.published_gen);
+    head.registry = base.registry;
+    head.authored = base.authored;
+    err
+}
+
+/// A disk-read result → a store `Change` (Insert with content, or a tombstone
+/// when the file could not be read).
+fn disk_change(path: &SystemPathBuf, disk_text: std::io::Result<String>) -> crate::content::Change {
+    match disk_text {
+        Ok(text) => crate::content::Change::Insert { path: path.clone(), text: Arc::from(text) },
+        Err(_) => crate::content::Change::Delete { path: path.clone() },
+    }
+}
+
+/// Build the next-state plan for `mutation` WITHOUT mutating any observable head
+/// state. Returns `Ok(None)` for a no-op (an empty watcher poll), or `Err` for a
+/// pre-stage validation failure (author config / JSON / id checks). Disk reads,
+/// event classification, and authored serialisation all happen here, before the
+/// staged transaction begins.
+fn build_plan(head: &mut HeadState, mutation: Mutation) -> PyResult<Option<StagedCommit>> {
+    match mutation {
+        Mutation::Overlay { changes, events, created, changed, unsaved } => {
+            let staged_gen = head.store.stage(changes);
+            let scope = identity_scope_from_events(&events);
+            Ok(Some(StagedCommit {
+                staged_gen,
+                events,
+                created,
+                changed,
+                deleted: vec![],
+                rescan: false,
+                scope,
+                reconcile: true,
+                authored: None,
+                unsaved_insert: unsaved,
+                unsaved_remove: vec![],
+            }))
+        }
+        Mutation::SyncPath { abs } => {
+            // Read disk once; classify Created/Changed/Deleted from the result
+            // and the db's current interning (equivalent to classify_disk_sync,
+            // but without depending on the overlay being already republished).
+            let disk_text = std::fs::read_to_string(abs.as_std_path());
+            let path_str = abs.as_str().to_string();
+            let (change, event, created, changed, deleted) = match disk_text {
+                Ok(text) => {
+                    let is_new = head
+                        .db
+                        .files()
+                        .try_system(&head.db, &abs)
+                        .is_none_or(|f: File| !f.exists(&head.db));
+                    let change = crate::content::Change::Insert {
+                        path: abs.clone(),
+                        text: Arc::from(text),
+                    };
+                    if is_new {
+                        (change,
+                         ChangeEvent::Created { path: abs.clone(), kind: CreatedKind::File },
+                         vec![path_str], vec![], vec![])
+                    } else {
+                        (change,
+                         ChangeEvent::Changed { path: abs.clone(), kind: ChangedKind::Any },
+                         vec![], vec![path_str], vec![])
+                    }
+                }
+                Err(_) => (
+                    crate::content::Change::Delete { path: abs.clone() },
+                    ChangeEvent::Deleted { path: abs.clone(), kind: DeletedKind::Any },
+                    vec![], vec![], vec![path_str],
+                ),
+            };
+            let staged_gen = head.store.stage(vec![change]);
+            // Syncing a project-config file is a coarse change (§5.4): rescan.
+            let rescan = crate::content::is_project_config_file(&abs);
+            let scope = if rescan {
+                None
+            } else {
+                identity_scope_from_events(std::slice::from_ref(&event))
+            };
+            Ok(Some(StagedCommit {
+                staged_gen,
+                events: vec![event],
+                created,
+                changed,
+                deleted,
+                rescan,
+                scope,
+                reconcile: true,
+                authored: None,
+                unsaved_insert: vec![],
+                // A disk sync supersedes any unsaved buffer for this path.
+                unsaved_remove: vec![abs],
+            }))
+        }
+        Mutation::SyncAll => {
+            // Re-ingest the whole project from disk so files created/changed
+            // after open are discovered (Phase 5 carry-over of the Phase 1
+            // `sync_all` gap). Unsaved overlay buffers are preserved.
+            let root = head.root.clone();
+            let skip = head.unsaved_overlays.clone();
+            let staged_gen = head.store.stage_reingest(&root, is_project_relevant, &skip);
+            Ok(Some(StagedCommit {
+                staged_gen,
+                events: vec![ChangeEvent::Rescan],
+                created: vec![],
+                changed: vec![],
+                deleted: vec![],
+                rescan: true,
+                scope: None,
+                reconcile: true,
+                authored: None,
+                unsaved_insert: vec![],
+                unsaved_remove: vec![],
+            }))
+        }
+        Mutation::Author { layer, id, value } => {
+            // Pre-stage validation (may return ConfigError / ValueError before
+            // any state moves).
+            let lcfg = head.config.authored_layer_config(&layer).ok_or_else(|| {
+                PyConfigError::new_err(format!("'{layer}' is not a declared authored layer"))
+            })?;
+            let history = lcfg.history;
+            let durable_id = DurableId(id.clone());
+            if head.registry.get(&durable_id).is_none() {
+                return Err(PyValueError::new_err(format!(
+                    "durable id '{id}' is not known to the identity registry"
+                )));
+            }
+            // Stage the copy-on-write authored store and serialise the record —
+            // do NOT swap it into head yet (that is the publish tail, §5.3).
+            let version = crate::authored::AuthoredVersion {
+                value,
+                revision: head.store.next_revision().0,
+            };
+            let new_map = head.authored.put(&layer, &id, version, history);
+            let next_store = AuthoredStore::new(new_map);
+            let rec = next_store.records_get(&layer, &id).unwrap();
+            let doc = AuthoredRecordDoc {
+                format_version: crate::authored::AUTHORED_FORMAT_VERSION,
+                layer: layer.clone(),
+                durable_id: id.clone(),
+                current: rec.current.clone(),
+                history: rec.history.clone(),
+            };
+            let bytes = doc.to_bytes().map_err(|e| {
+                CommitFailed::new_err(format!("failed to serialise authored record: {e}"))
+            })?;
+            let record_path = head.sidecar.record_path(&layer, &id);
+            Ok(Some(StagedCommit {
+                // No content change: the authored edit is a revision with
+                // identical content (an empty bump, retained).
+                staged_gen: head.store.stage_unchanged(),
+                events: vec![],
+                created: vec![],
+                changed: vec![],
+                deleted: vec![],
+                rescan: false,
+                scope: None,
+                reconcile: false,
+                authored: Some(AuthoredPlan { next_store, record_path, bytes, id }),
+                unsaved_insert: vec![],
+                unsaved_remove: vec![],
+            }))
+        }
+        Mutation::Poll { events } => build_poll_plan(head, events),
+    }
+}
+
+/// Build the staged plan for a drained watcher batch (the old `apply_watch_events`
+/// fold). Returns `Ok(None)` when nothing survives filtering, so `poll_changes`
+/// returns `None` WITHOUT bumping the revision (a no-op, never a published empty
+/// revision).
+fn build_poll_plan(
     head: &mut HeadState,
     events: Vec<ChangeEvent>,
-) -> Option<dto::CommitDeltaDto> {
+) -> PyResult<Option<StagedCommit>> {
     if events.is_empty() {
-        return None;
+        return Ok(None);
     }
-
-    // Rescan short-circuit: if ty lost sync, redo everything.
+    // Rescan short-circuit: if ty lost sync, redo everything (like sync_all, but
+    // the watcher path stages the current content — the engine re-walks disk).
     if events.iter().any(|e| e.is_rescan()) {
-        head.system.publish(head.store.capture());
-        let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
-        let project_changed = result.project_changed();
-        let custom_stdlib_changed = result.custom_stdlib_changed();
-        let revision = head.store.bump_revision().0;
-
-        // Run full reconciliation for rescans.
-        let identity = run_identity_reconciliation(head, None);
-
-        return Some(build_commit_delta(
-            revision,
-            vec![],
-            vec![],
-            vec![],
-            identity,
-            true,
-            project_changed,
-            custom_stdlib_changed,
-        ));
+        return Ok(Some(StagedCommit {
+            staged_gen: head.store.stage_unchanged(),
+            events: vec![ChangeEvent::Rescan],
+            created: vec![],
+            changed: vec![],
+            deleted: vec![],
+            rescan: true,
+            scope: None,
+            reconcile: true,
+            authored: None,
+            unsaved_insert: vec![],
+            unsaved_remove: vec![],
+        }));
     }
 
-    // Filter: keep only real-path events whose path is NOT overlaid.
-    // For each kept event, read disk once and produce a Change for the
-    // store so the content is recorded in the generation (§1.3.2).
+    // Keep only real-path events whose path is NOT a genuinely unsaved buffer
+    // (the buffer-wins rule, now gated on `unsaved_overlays`, not `has_overlay`
+    // — Phase 1 interns every file at open, so `has_overlay` would drop them all).
     let mut store_changes: Vec<crate::content::Change> = Vec::with_capacity(events.len());
     let mut kept_events: Vec<ChangeEvent> = Vec::with_capacity(events.len());
     let (mut created, mut changed, mut deleted) = (Vec::new(), Vec::new(), Vec::new());
@@ -1612,46 +1814,24 @@ fn apply_watch_events(
             continue;
         };
         let path = path.to_path_buf();
-        if head.store.has_overlay(&path) {
+        if head.unsaved_overlays.contains(&path) {
             // Unsaved buffer wins; ignore the disk event.
             continue;
         }
         let path_str = path.as_str().to_string();
-
-        // Read disk once.  Record content (or tombstone) in the generation.
         let disk_text = std::fs::read_to_string(path.as_std_path());
         match &event {
             ChangeEvent::Created { .. } => {
-                created.push(path_str.clone());
-                if let Ok(text) = disk_text {
-                    store_changes.push(crate::content::Change::Insert {
-                        path: path.clone(),
-                        text: Arc::from(text),
-                    });
-                } else {
-                    store_changes.push(crate::content::Change::Delete {
-                        path: path.clone(),
-                    });
-                }
+                created.push(path_str);
+                store_changes.push(disk_change(&path, disk_text));
             }
             ChangeEvent::Deleted { .. } => {
-                deleted.push(path_str.clone());
-                store_changes.push(crate::content::Change::Delete {
-                    path: path.clone(),
-                });
+                deleted.push(path_str);
+                store_changes.push(crate::content::Change::Delete { path: path.clone() });
             }
             ChangeEvent::Changed { .. } => {
-                changed.push(path_str.clone());
-                if let Ok(text) = disk_text {
-                    store_changes.push(crate::content::Change::Insert {
-                        path: path.clone(),
-                        text: Arc::from(text),
-                    });
-                } else {
-                    store_changes.push(crate::content::Change::Delete {
-                        path: path.clone(),
-                    });
-                }
+                changed.push(path_str);
+                store_changes.push(disk_change(&path, disk_text));
             }
             _ => continue,
         }
@@ -1659,34 +1839,147 @@ fn apply_watch_events(
     }
 
     if kept_events.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    // 1. Apply all disk-content changes as one batch (one revision).
-    let revision = head.store.apply_batch(store_changes).0;
-
-    // 2. Publish the new generation so the engine reads from it.
-    head.system.publish(head.store.capture());
-
-    // 3. Apply the ty-level ChangeEvents for incremental analysis.
-    let result = head.db.apply_changes(&kept_events, None);
-    let project_changed = result.project_changed();
-    let custom_stdlib_changed = result.custom_stdlib_changed();
-
-    // Run scoped reconciliation.
+    let staged_gen = head.store.stage(store_changes);
     let scope = identity_scope_from_events(&kept_events);
-    let identity = run_identity_reconciliation(head, scope.as_ref());
-
-    Some(build_commit_delta(
-        revision,
+    Ok(Some(StagedCommit {
+        staged_gen,
+        events: kept_events,
         created,
         changed,
         deleted,
+        rescan: false,
+        scope,
+        reconcile: true,
+        authored: None,
+        unsaved_insert: vec![],
+        unsaved_remove: vec![],
+    }))
+}
+
+/// Run the staged transaction: publish the staged content to the live overlay,
+/// apply the engine change, reconcile, fire the staged fault boundaries, persist
+/// the sidecar, and PUBLISH the revision LAST. Any `?` failure leaves the store
+/// untouched (the publish tail was never reached) and propagates so the caller
+/// rolls the in-place mutations back.
+fn run_staged(
+    head: &mut HeadState,
+    staged: StagedCommit,
+    armed: &Option<String>,
+) -> PyResult<dto::CommitDeltaDto> {
+    let next_rev = head.store.next_revision();
+
+    // 1. Publish the staged content to the live overlay so the head db analyses
+    //    the next generation. (Observable only to lock-guarded floating reads;
+    //    new snapshots pin the store, which is still at R−1.)
+    head.system.publish(Arc::clone(&staged.staged_gen));
+
+    // 2. Apply the engine change (skipped for authored writes — no content
+    //    changed, so the db must not be touched).
+    let (project_changed, custom_stdlib_changed) = if staged.events.is_empty() {
+        (false, false)
+    } else {
+        let result = head.db.apply_changes(&staged.events, None);
+        (result.project_changed(), result.custom_stdlib_changed())
+    };
+
+    // 3 + 4 + 5. Identity reconcile → code-layer stage → identity persist.
+    let identity = if staged.reconcile {
+        let identity = run_identity_reconciliation(head, staged.scope.as_ref(), next_rev);
+        // Code-layer staging boundary: the in-commit producer is deferred, so
+        // this stages nothing today — but the fault seam must still fire here so
+        // a code-layer failure publishes no partial revision (rollback test 3).
+        check_fault(armed, "code_layer")?;
+        // Identity persistence: a staged, fallible, PROPAGATED step.
+        check_fault(armed, "identity_persist")?;
+        persist_identity(head)?;
+        identity
+    } else {
+        IdentityDelta::default()
+    };
+
+    // 6. Authored persistence (author only): stage → persist (publish at tail).
+    if let Some(ap) = &staged.authored {
+        check_fault(armed, "authored_persist")?;
+        head.sidecar.write_atomic(&ap.record_path, &ap.bytes).map_err(|e| {
+            SidecarWriteError::new_err(format!(
+                "failed to persist authored record at {:?}: {e}",
+                ap.record_path
+            ))
+        })?;
+    }
+
+    // 7. PUBLISH LAST — the single, last in-lock observable mutation. After this
+    //    point nothing can fail; before it, every failure path left the store at
+    //    R−1.
+    let revision = head.store.publish_staged(staged.staged_gen).0;
+
+    // Swap in the authored store and update the unsaved-overlay set now that the
+    // commit is irrevocable.
+    let authored_ids = if let Some(ap) = staged.authored {
+        head.authored = ap.next_store;
+        vec![ap.id]
+    } else {
+        vec![]
+    };
+    for p in staged.unsaved_insert {
+        head.unsaved_overlays.insert(p);
+    }
+    for p in &staged.unsaved_remove {
+        head.unsaved_overlays.remove(p);
+    }
+
+    // 8. Build the id-level commit delta.
+    let mut dto = build_commit_delta(
+        revision,
+        staged.created,
+        staged.changed,
+        staged.deleted,
         identity,
-        false,
+        staged.rescan,
         project_changed,
         custom_stdlib_changed,
-    ))
+    );
+    if !authored_ids.is_empty() {
+        dto.authored_ids = authored_ids;
+    }
+    Ok(dto)
+}
+
+/// The single native commit funnel (§5.3). Builds the plan, captures the
+/// rollback baseline, takes the one-shot fault arm, runs the staged transaction,
+/// and rolls back on any failure. Returns `Ok(None)` for a no-op (an empty
+/// watcher poll → Python `None`, NOT a published empty revision).
+fn commit(head: &mut HeadState, mutation: Mutation) -> PyResult<Option<dto::CommitDeltaDto>> {
+    let Some(staged) = build_plan(head, mutation)? else {
+        return Ok(None);
+    };
+    let base = Baseline {
+        published_gen: head.store.capture(),
+        registry: head.registry.clone(),
+        authored: head.authored.clone(),
+    };
+    // One-shot: consumed by THIS commit whether or not its stage is reached, so
+    // a stale arm can never leak into a later unrelated write.
+    let armed = head.armed_fault.take();
+    match run_staged(head, staged, &armed) {
+        Ok(dto) => Ok(Some(dto)),
+        Err(e) => Err(rollback(head, base, e)),
+    }
+}
+
+/// Pythonize a commit result for the write methods that always publish a
+/// revision (every kind except `poll_changes`). A `None` here would mean a
+/// staged plan reported a no-op for a write that must produce a delta — a bug,
+/// surfaced as `CommitFailed` rather than silently swallowed.
+fn commit_dto_to_py<'py>(
+    py: Python<'py>,
+    dto: Option<dto::CommitDeltaDto>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let dto = dto.ok_or_else(|| CommitFailed::new_err("commit produced no delta"))?;
+    pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
 // ── PyO3 Methods ─────────────────────────────────────────────────────────
@@ -1763,8 +2056,16 @@ impl PyTyProject {
 
         // Phase 1: reconcile identity at open so the registry is populated
         // before any read occurs.  Identity must already be resolved so a
-        // later graph read never calls sync_all (Phase 4).
-        run_identity_reconciliation(&mut head, None);
+        // later graph read never calls sync_all (Phase 4). The open ingest
+        // already published the initial revision, so reconcile against the
+        // current revision (not next_revision — that offset is for the
+        // deferred-publish commit path).
+        let open_rev = head.store.revision();
+        run_identity_reconciliation(&mut head, None, open_rev);
+        // Persist the reconciled registry at open so a reopen restores bindings
+        // (§5.10). Previously done inside reconciliation; Phase 5 makes identity
+        // persistence an explicit, propagated step.
+        persist_identity(&head)?;
 
         // Load authored records for each declared authored layer (§11.3.2).
         head.authored = load_authored_records(&head.config, &head.sidecar)
@@ -1867,22 +2168,31 @@ impl PyTyProject {
     /// Overlay `path` with in-memory `text` (no disk write). Returns a
     /// SyncResult dict with the new revision and the affected paths.
     fn edit<'py>(&self, py: Python<'py>, path: &str, text: &str) -> PyResult<Bound<'py, PyAny>> {
-        let mut guard = lock_state(&self.inner, "edit")?;
-        let head = guard.as_mut().unwrap();
-
-        let abs = resolve_sync_path(&head.root, path);
-        let event = classify_overlay_edit(&head.system, &head.db, &abs); // classify BEFORE mutating
-        head.store.insert_text(abs.clone(), text); // 1. mutate
-
-        let path_str = abs.as_str().to_string();
-        let (created, changed) = match &event {
-            ChangeEvent::Created { .. } => (vec![path_str], vec![]),
-            _ => (vec![], vec![path_str]),
+        let dto = {
+            let mut guard = lock_state(&self.inner, "edit")?;
+            let head = guard.as_mut().unwrap();
+            let abs = resolve_sync_path(&head.root, path);
+            // Classify against the pre-edit content BEFORE the staged mutation.
+            let event = classify_overlay_edit(&head.system, &head.db, &abs);
+            let path_str = abs.as_str().to_string();
+            let (created, changed) = match &event {
+                ChangeEvent::Created { .. } => (vec![path_str], vec![]),
+                _ => (vec![], vec![path_str]),
+            };
+            let changes = vec![crate::content::Change::Insert {
+                path: abs.clone(),
+                text: Arc::from(text),
+            }];
+            let mutation = Mutation::Overlay {
+                changes,
+                events: vec![event],
+                created,
+                changed,
+                unsaved: vec![abs],
+            };
+            commit(head, mutation)?
         };
-        let dto =
-            commit_head(head, std::slice::from_ref(&event), created, changed, vec![], false);
-        drop(guard);
-        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        commit_dto_to_py(py, dto)
     }
 
     /// Overlay many files atomically (one publish, one `apply_changes`, one
@@ -1892,34 +2202,34 @@ impl PyTyProject {
         py: Python<'py>,
         edits: std::collections::HashMap<String, String>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let mut guard = lock_state(&self.inner, "edit_many")?;
-        let head = guard.as_mut().unwrap();
+        let dto = {
+            let mut guard = lock_state(&self.inner, "edit_many")?;
+            let head = guard.as_mut().unwrap();
 
-        // Build one Vec<Change> and one Vec<ChangeEvent>, then apply
-        // as a single batch — one revision for the entire multi-edit (§6.1.1).
-        let mut changes = Vec::with_capacity(edits.len());
-        let mut events = Vec::with_capacity(edits.len());
-        let (mut created, mut changed) = (Vec::new(), Vec::new());
-        for (path, text) in edits {
-            let abs = resolve_sync_path(&head.root, &path);
-            let event = classify_overlay_edit(&head.system, &head.db, &abs);
-            changes.push(crate::content::Change::Insert {
-                path: abs.clone(),
-                text: Arc::from(text),
-            });
-            match &event {
-                ChangeEvent::Created { .. } => created.push(abs.as_str().to_string()),
-                _ => changed.push(abs.as_str().to_string()),
+            // Build one Vec<Change> and one Vec<ChangeEvent> classified against
+            // the pre-edit content — one revision for the entire multi-edit.
+            let mut changes = Vec::with_capacity(edits.len());
+            let mut events = Vec::with_capacity(edits.len());
+            let (mut created, mut changed) = (Vec::new(), Vec::new());
+            let mut unsaved = Vec::with_capacity(edits.len());
+            for (path, text) in edits {
+                let abs = resolve_sync_path(&head.root, &path);
+                let event = classify_overlay_edit(&head.system, &head.db, &abs);
+                changes.push(crate::content::Change::Insert {
+                    path: abs.clone(),
+                    text: Arc::from(text),
+                });
+                match &event {
+                    ChangeEvent::Created { .. } => created.push(abs.as_str().to_string()),
+                    _ => changed.push(abs.as_str().to_string()),
+                }
+                unsaved.push(abs);
+                events.push(event);
             }
-            events.push(event);
-        }
-
-        // 1. Apply all changes as one batch (one revision).
-        head.store.apply_batch(changes);
-        // 2+3. Publish + apply to engine.
-        let dto = commit_head(head, &events, created, changed, vec![], false);
-        drop(guard);
-        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            let mutation = Mutation::Overlay { changes, events, created, changed, unsaved };
+            commit(head, mutation)?
+        };
+        commit_dto_to_py(py, dto)
     }
 
     /// Overlay a virtual/unsaved buffer (e.g. "untitled:1"). No disk involvement.
@@ -1929,36 +2239,48 @@ impl PyTyProject {
         uri: &str,
         text: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let mut guard = lock_state(&self.inner, "edit_virtual")?;
-        let head = guard.as_mut().unwrap();
+        let dto = {
+            let mut guard = lock_state(&self.inner, "edit_virtual")?;
+            let head = guard.as_mut().unwrap();
 
-        let vpath = SystemVirtualPathBuf::from(uri.to_string());
-        let is_new = head.db.files().try_virtual_file(&vpath).is_none();
-        head.store.insert_virtual(vpath.clone(), text);
-
-        let event = if is_new {
-            ChangeEvent::CreatedVirtual(vpath.clone())
-        } else {
-            ChangeEvent::ChangedVirtual(vpath.clone())
+            let vpath = SystemVirtualPathBuf::from(uri.to_string());
+            let is_new = head.db.files().try_virtual_file(&vpath).is_none();
+            let event = if is_new {
+                ChangeEvent::CreatedVirtual(vpath.clone())
+            } else {
+                ChangeEvent::ChangedVirtual(vpath.clone())
+            };
+            let (created, changed) = if is_new {
+                (vec![uri.to_string()], vec![])
+            } else {
+                (vec![], vec![uri.to_string()])
+            };
+            let changes = vec![crate::content::Change::InsertVirtual {
+                path: vpath,
+                text: Arc::from(text),
+            }];
+            // Virtual buffers are never watched, so they do not join the
+            // unsaved-overlay (buffer-wins) set.
+            let mutation = Mutation::Overlay {
+                changes,
+                events: vec![event],
+                created,
+                changed,
+                unsaved: vec![],
+            };
+            commit(head, mutation)?
         };
-        let (created, changed) = if is_new {
-            (vec![uri.to_string()], vec![])
-        } else {
-            (vec![], vec![uri.to_string()])
-        };
-        let dto =
-            commit_head(head, std::slice::from_ref(&event), created, changed, vec![], false);
-        drop(guard);
-        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        commit_dto_to_py(py, dto)
     }
 
     /// Author (write) an authored value for `(layer, durable_id)`.
     ///
-    /// An authored write is a real revision-producing commit: it bumps the
-    /// revision under the single write lock, updates the `AuthoredStore`
-    /// copy-on-write, persists the record crash-safely, and returns a delta.
-    /// Atomic — on parse or persistence failure, the in-memory store is
-    /// rolled back (§5.4, §3.3.1, §3.3.6, §11.3.3).
+    /// A real revision-producing commit funnelled through `commit`: it validates
+    /// the layer/value/id, stages the copy-on-write `AuthoredStore` and serialises
+    /// the record, persists it crash-safely as a staged step, and publishes the
+    /// revision LAST (§5.3 stage → persist → publish). A persistence failure rolls
+    /// the whole commit back — head included — via the staged-commit machinery; no
+    /// in-memory-only `prior` rollback remains.
     fn author<'py>(
         &self,
         py: Python<'py>,
@@ -1966,130 +2288,70 @@ impl PyTyProject {
         id: &str,
         value_json: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let mut guard = lock_state(&self.inner, "author")?;
-        let head = guard.as_mut().unwrap();
-
-        // 1. Validate: layer is a declared authored layer.
-        let lcfg = head.config.authored_layer_config(layer).ok_or_else(|| {
-            PyConfigError::new_err(format!("'{layer}' is not a declared authored layer"))
-        })?;
-
-        // 2. Parse value JSON early (before any mutation).
-        let value: serde_json::Value = serde_json::from_str(value_json).map_err(|e| {
-            PyValueError::new_err(format!("invalid authored value JSON: {e}"))
-        })?;
-
-        // 3. Validate: id should exist in the registry.
-        let durable_id = DurableId(id.to_string());
-        if head.registry.get(&durable_id).is_none() {
-            return Err(PyValueError::new_err(format!(
-                "durable id '{id}' is not known to the identity registry"
-            )));
-        }
-
-        // 4. Bump the revision with an empty content change
-        //    (so this authored edit IS a revision with a retained generation).
-        head.store.apply_batch(Vec::new());
-        head.system.publish(head.store.capture());
-        let revision = head.store.revision();
-
-        // 5. Copy-on-write the authored store.
-        let version = crate::authored::AuthoredVersion {
-            value,
-            revision: revision.0,
+        let dto = {
+            let mut guard = lock_state(&self.inner, "author")?;
+            let head = guard.as_mut().unwrap();
+            // Parse value JSON early (before any staging); layer/id validation
+            // happens in `build_plan`, still before any state moves.
+            let value: serde_json::Value = serde_json::from_str(value_json).map_err(|e| {
+                PyValueError::new_err(format!("invalid authored value JSON: {e}"))
+            })?;
+            let mutation = Mutation::Author {
+                layer: layer.to_string(),
+                id: id.to_string(),
+                value,
+            };
+            commit(head, mutation)?
         };
-        let prior = head.authored.clone();
-        let new_map = head.authored.put(layer, id, version.clone(), lcfg.history);
-        head.authored = AuthoredStore::new(new_map);
-
-        // 6. Persist the record crash-safely (under the write lock, §11.3.3).
-        let rec = head.authored.records_get(layer, id).unwrap();
-        let doc = AuthoredRecordDoc {
-            format_version: crate::authored::AUTHORED_FORMAT_VERSION,
-            layer: layer.to_string(),
-            durable_id: id.to_string(),
-            current: rec.current.clone(),
-            history: rec.history.clone(),
-        };
-        let bytes = match doc.to_bytes() {
-            Ok(b) => b,
-            Err(e) => {
-                // Rollback on serialisation failure.
-                head.authored = prior;
-                return Err(PyRuntimeError::new_err(format!(
-                    "failed to serialise authored record: {e}"
-                )));
-            }
-        };
-        if let Err(e) = head.sidecar.write_atomic(
-            &head.sidecar.record_path(layer, id),
-            &bytes,
-        ) {
-            // Rollback on persistence failure (§3.3.6).
-            head.authored = prior;
-            return Err(PyRuntimeError::new_err(format!(
-                "failed to persist authored record: {e}"
-            )));
-        }
-
-        // 7. Build the delta — authored-only, no code/derived changes.
-        let dto = dto::CommitDeltaDto {
-            revision: revision.0,
-            authored_ids: vec![id.to_string()],
-            ..Default::default()
-        };
-        drop(guard);
-        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        commit_dto_to_py(py, dto)
     }
 
     /// Ingest a disk change for `path`: drop any overlay for it and re-read disk.
     fn sync_path<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let mut guard = lock_state(&self.inner, "sync_path")?;
-        let head = guard.as_mut().unwrap();
-        let abs = resolve_sync_path(&head.root, path);
-        let dto = sync_path_inner(head, abs);
-        drop(guard);
-        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        let dto = {
+            let mut guard = lock_state(&self.inner, "sync_path")?;
+            let head = guard.as_mut().unwrap();
+            let abs = resolve_sync_path(&head.root, path);
+            commit(head, Mutation::SyncPath { abs })?
+        };
+        commit_dto_to_py(py, dto)
     }
 
     /// Drop the overlay buffer for `path`, reverting to disk. Same semantics as
     /// `sync_path` but named for intent.
     fn discard<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
-        let mut guard = lock_state(&self.inner, "discard")?;
-        let head = guard.as_mut().unwrap();
-        let abs = resolve_sync_path(&head.root, path);
-        let dto = sync_path_inner(head, abs);
-        drop(guard);
-        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        let dto = {
+            let mut guard = lock_state(&self.inner, "discard")?;
+            let head = guard.as_mut().unwrap();
+            let abs = resolve_sync_path(&head.root, path);
+            commit(head, Mutation::SyncPath { abs })?
+        };
+        commit_dto_to_py(py, dto)
     }
 
-    /// Rescan everything (in-place, via `apply_changes`). Existing overlay
-    /// buffers are preserved; ty re-walks and re-reads all files.
+    /// Re-ingest the whole project from disk (one rescan revision). New/changed
+    /// disk files are discovered (Phase 5 carry-over of the Phase 1 `sync_all`
+    /// gap); unsaved overlay buffers are preserved.
     fn sync_all<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let mut guard = lock_state(&self.inner, "sync_all")?;
-        let head = guard.as_mut().unwrap();
+        let dto = {
+            let mut guard = lock_state(&self.inner, "sync_all")?;
+            let head = guard.as_mut().unwrap();
+            commit(head, Mutation::SyncAll)?
+        };
+        commit_dto_to_py(py, dto)
+    }
 
-        head.system.publish(head.store.capture());
-        let result = head.db.apply_changes(&[ChangeEvent::Rescan], None);
-        let project_changed = result.project_changed();
-        let custom_stdlib_changed = result.custom_stdlib_changed();
-        let revision = head.store.bump_revision().0;
-
-        // Run full reconciliation for sync_all.
-        let identity = run_identity_reconciliation(head, None);
-
-        let dto = build_commit_delta(
-            revision,
-            vec![],
-            vec![],
-            vec![],
-            identity,
-            true,
-            project_changed,
-            custom_stdlib_changed,
-        );
-        drop(guard);
-        pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    /// TEST-ONLY (§0.4): arm a one-shot commit fault at `stage`. The very next
+    /// commit fires a typed error at that staged boundary — after the stage's
+    /// work, before the publish tail — and rolls the commit back to R−1. Inert
+    /// when unarmed (a `None` cell is a pure no-op). Stage names match the
+    /// rollback test's `_FAULT_STAGES`: "code_layer", "identity_persist",
+    /// "authored_persist". This is a deliberate, documented test seam; it never
+    /// fires in normal use.
+    fn _fault_inject(&self, stage: &str) -> PyResult<()> {
+        let mut guard = lock_state(&self.inner, "_fault_inject")?;
+        guard.as_mut().unwrap().armed_fault = Some(stage.to_string());
+        Ok(())
     }
 
     // ── File watching (Phase 8) ────────────────────────────────────────
@@ -2176,11 +2438,13 @@ impl PyTyProject {
             return Ok(None);
         }
 
-        // 2. Apply under the head lock (the single-writer section).
+        // 2. Apply under the head lock (the single-writer section) through the
+        //    one commit funnel. An empty/all-filtered batch returns None — a
+        //    no-op, never a published empty revision (§5.3).
         let dto = {
             let mut guard = lock_state(&self.inner, "poll_changes")?;
             let head = guard.as_mut().unwrap();
-            apply_watch_events(head, events)
+            commit(head, Mutation::Poll { events })?
             // guard dropped here
         };
 
@@ -4187,11 +4451,17 @@ mod phase8_watch_tests {
         (dir, root)
     }
 
+    /// Drive a watcher batch through the Phase 5 commit funnel (the old
+    /// `apply_watch_events` path is now `Mutation::Poll`).
+    fn poll(head: &mut HeadState, events: Vec<ChangeEvent>) -> Option<dto::CommitDeltaDto> {
+        commit(head, Mutation::Poll { events }).unwrap()
+    }
+
     #[test]
     fn empty_batch_is_noop() {
         let (_d, root) = project(&[("a.py", "x = 1\n")]);
         let mut head = build_head(root, ContentStore::new(), IdentityRegistry::default());
-        assert!(apply_watch_events(&mut head, vec![]).is_none());
+        assert!(poll(&mut head, vec![]).is_none());
     }
 
     #[test]
@@ -4205,9 +4475,8 @@ mod phase8_watch_tests {
         let mut head_w = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let _ = head_w.db.apply_changes(&[ChangeEvent::Rescan], None); // warm discovery
         std::fs::write(a.as_std_path(), b"x: str = 'two'\n").unwrap();
-        let via_watch =
-            apply_watch_events(&mut head_w, vec![ChangeEvent::file_content_changed(a.clone())])
-                .expect("a changed file must produce a SyncResult");
+        let via_watch = poll(&mut head_w, vec![ChangeEvent::file_content_changed(a.clone())])
+            .expect("a changed file must produce a SyncResult");
 
         assert_eq!(via_watch.changed, vec![a.as_str().to_string()]);
         assert!(via_watch.created.is_empty() && via_watch.deleted.is_empty());
@@ -4223,14 +4492,16 @@ mod phase8_watch_tests {
         let a = root.join("a.py");
         let mut head = build_head(root, ContentStore::new(), IdentityRegistry::default());
 
-        // Agent overlay buffer (unsaved).
+        // Agent overlay buffer (unsaved). Phase 5 gates buffer-wins on the
+        // genuinely-unsaved set, so mark the path as carrying an unsaved edit.
         head.store.insert_text(a.clone(), "BUFFER = 2\n".to_string());
         head.system.publish(head.store.capture());
         head.db.apply_changes(&[ChangeEvent::file_content_changed(a.clone())], None);
+        head.unsaved_overlays.insert(a.clone());
 
         // A disk change underneath the buffer arrives via the watcher.
         std::fs::write(a.as_std_path(), b"DISK = 999\n").unwrap();
-        let result = apply_watch_events(&mut head, vec![ChangeEvent::file_content_changed(a.clone())]);
+        let result = poll(&mut head, vec![ChangeEvent::file_content_changed(a.clone())]);
 
         // Dropped: nothing applied, buffer still wins.
         assert!(result.is_none(), "overlaid path must not be clobbered by a disk event");
@@ -4243,7 +4514,7 @@ mod phase8_watch_tests {
         let (_d, root) = project(&[("a.py", "x = 1\n")]);
         let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let a = root.join("a.py");
-        let r = apply_watch_events(
+        let r = poll(
             &mut head,
             vec![ChangeEvent::file_content_changed(a), ChangeEvent::Rescan],
         )
@@ -4259,7 +4530,7 @@ mod phase8_watch_tests {
         let mut head = build_head(root.clone(), ContentStore::new(), IdentityRegistry::default());
         let before = head.store.revision().0;
         std::fs::write(a.as_std_path(), b"x = 2\n").unwrap();
-        let r = apply_watch_events(
+        let r = poll(
             &mut head,
             vec![
                 ChangeEvent::file_content_changed(a.clone()),
