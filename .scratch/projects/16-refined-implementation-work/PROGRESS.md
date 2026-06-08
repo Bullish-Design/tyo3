@@ -15,11 +15,11 @@
 | # | Defect | Status |
 |---|--------|--------|
 | 1 | Snapshot construction reads live disk (`pre_populate_generation` at snapshot time) | ✅ **Phase 1 DONE** |
-| 2 | Transaction split across the lock boundary (Rust lock released before Python graph delta + bus) | 🟡 **Phase 5 partial** (in-lock stage→publish-last→rollback done; bus / post-commit-path half → **Phase 6**) |
+| 2 | Transaction split across the lock boundary (Rust lock released before Python graph delta + bus) | ✅ **DONE** (Phase 5 in-lock stage→publish-last→rollback; Phase 6 closed the bus/post-commit-path half: one `_after_commit` hook, id-level deltas in asserted revision order, non-blocking bus) |
 | 3 | Read accessor performs a write (`session.graph` → `sync_all` → advances head) | ✅ **Phase 4 DONE** |
 | 4 | Delta is path-shaped not id-level (`SyncResultDto` has file-path strings, not `DurableId`s) | ✅ **Phase 3 DONE** |
 | 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | 🔴 **Phase 7** |
-| 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | 🔴 **Phase 6** |
+| 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | ✅ **DONE** (Phase 6: the single `_after_commit` hook makes "publish every revision" true by construction) |
 | 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | 🔴 **Phase 8** |
 | 8 | Hashing is text-heuristic not AST-canonical (collapses whitespace inside string literals) | 🔴 **Phase 9** |
 | 9 | Config parsed twice with silent fallback (Python re-reads config.toml, swallows errors) | 🔴 **Phase 10** |
@@ -37,7 +37,7 @@
 | **3** | Id-level commit delta | `test_final_commit_delta_contract.py` | `identity.rs`, `dto/commit_delta.rs` (new), `code_layer.rs`, `project.rs` | `models/delta.py` (new) | ✅ **DONE** |
 | **4** | Cutover: Python graph as pure applier | `test_final_no_read_side_writes.py`, parity suite | `project.rs`, snapshot code-delta accessor, `code_layer.rs` (producer bound), `dto/commit_delta.rs` (`Option`) | `graph/graph.py` (~1140 lines deleted), `session.py` | ✅ **DONE** |
 | **5** | Single native `commit()` with staging + rollback | `test_final_transaction_rollback.py` | `project.rs`, `content.rs`, `lib.rs` | `exceptions.py`, `session.py` | ✅ **DONE** |
-| **6** | One post-commit path; non-blocking bus | `test_final_bus_contract.py` | `config.rs` (overflow policy) | `session.py`, `bus/` | 🔴 **Not started** |
+| **6** | One post-commit path; non-blocking bus | `test_final_bus_contract.py` | `config.rs` (overflow policy) | `session.py`, `bus/` | ✅ **DONE** |
 | **7** | Repair derived layers | `test_final_derived_contract.py` | — | `derive/`, `stores/` | 🔴 **Not started** |
 | **8** | Read surface + convenience APIs | `test_final_no_read_side_writes.py` | — | `session.py` | 🔴 **Not started** |
 | **9** | AST-canonical hashing | `test_final_hash_ast.py` | `hash.rs` | — | 🔴 **Not started** |
@@ -545,7 +545,70 @@ devenv shell -- pytest src/tyo3/tests/test_final_transaction_rollback.py \
 
 ---
 
-## 9. Phase 6 — One post-commit path; non-blocking bus 🔴 **Not started**
+## 9. Phase 6 — One post-commit path; non-blocking bus ✅ **DONE**
+
+> **Completed & verified 2026-06-08.** Every write
+> (`edit`/`edit_many`/`edit_virtual`/`sync_path`/`discard`/`sync_all`/
+> `poll_changes`/`author`) funnels through **one** `_after_commit(delta)` hook
+> (invalidate head snap → apply graph delta → schedule derived → publish), so no
+> path can diverge and every committed revision publishes — closing **defect #6**
+> (`discard` published nothing) by construction and the **bus/post-commit-path
+> half of defect #2**. The bus `Delta` is an **id-level** projection of the
+> `CommitDelta`; the bus **asserts** revision order; and the writer-blocking
+> overflow policy is **rejected at open** with a typed `ConfigError`. All 3
+> `test_final_bus_contract.py` xfail markers removed; `test_gate8_bus` green over
+> the restructured bus. Milestone gate: **Rust 158/0** (+2 overflow tests);
+> **Python** — full suite at the documented baseline (only the 2 Phase-7 +
+> 1 Phase-9 pre-existing failures; **zero new**; xfail countdown 10→7).
+>
+> **Commits:** `refactor(bus): id-level Delta…` (6.4) · `refactor(session):
+> single _after_commit…` (6.1) · `fix(session/bus): every write publishes;
+> assert revision order; deliver ALL revisions` (6.2) · `fix(bus/config): reject
+> writer-blocking overflow…` (6.3).
+>
+> **What landed**
+> - **6.4 — id-level Delta.** `Delta.from_commit_delta(delta, graph, root)` builds
+>   the bus delta straight from the commit delta's id fields; the **lossy
+>   path→id** reconstruction is deleted (`from_sync_result`, `_ids_in_files`,
+>   `_resolve_layers_from_files`). `_layers_touched` is keyed off the id fields.
+> - **6.1 — one hook.** `_after_commit` + `_schedule_derived`; derived
+>   invalidation split out of `_apply_graph_delta`; `author` routes through the
+>   hook with `_apply_graph_delta` a no-op on an **authored-only** delta
+>   (`_is_authored_only`). Grep-proven: the only callers of
+>   `_apply_graph_delta`/`_publish_delta`/`_invalidate_head_snap`/`_schedule_derived`
+>   are inside `_after_commit` (plus the legit non-write callers `reload`/`close`).
+> - **6.2 — publish every write + assert order.** Bus order check promoted from a
+>   logged warning to a hard `assert delta.revision > last`. **ALL/rescan
+>   delivery is unconditional** (even an empty scoped slice), so an `Interest.ALL`
+>   subscriber gets exactly one delta per write; empty-drop kept only for
+>   genuinely-empty *scoped* slices.
+> - **6.3 — non-blocking bus.** `config.rs` `validate()` rejects any non-`{coalesce,
+>   drop_and_mark_lagged, error_and_close}` overflow with
+>   `ConfigError::BlockingOverflow`; the producer-side `_cond.wait()` `"block"`
+>   branch is **deleted** (no producer-side wait survives — only consumer
+>   `poll`/`__next__`). `error_and_close` closes outside the lock (close()
+>   re-acquires it).
+>
+> ### Design decisions (user-consulted 2026-06-08)
+> - **(a) Affected-set provenance → Option B (keep the transitive walk for
+>   `affected` only).** The guide-literal Option A (delete the walk, use the
+>   native seeds-only `affected_ids`) **broke** `test_gate8_bus::
+>   test_scoped_reverse_dep_delivery` (asserts reverse-dep delivery: an `app.py`
+>   subscriber notified when `models.py` changes) — the exact capability Phase 3
+>   deferred the producer *on condition of keeping* ("no capability lost: bus
+>   still computes transitive affected via the Python `CodeGraph`"). So the bus
+>   delta's **ids are a pure native projection**, but `affected` is still expanded
+>   over the materialised head graph — **id→id and id→file only**, never path→id.
+>   `_compute_affected`/`_resolve_files` are now id-keyed and land for deletion
+>   when the native in-commit producer ships a transitive `affected_ids` (zero bus
+>   change then). gate8 stays fully green; no test weakened. [[phase4-producer-deferred]]
+> - **(b) `author` → one hook** with `_apply_graph_delta` a no-op on the
+>   authored-only delta (not a bespoke tail) — genuinely one post-commit path.
+> - **(c) Overflow rename → clean rename + migrate gate8.** Reject both old names
+>   (`block`/`error`); migrate `test_gate8_bus`'s `overflow="error"` →
+>   `drop_and_mark_lagged` and its `from_sync_result`/`SyncResult` cases →
+>   `from_commit_delta`/`CommitDelta` (behaviour preserved). No back-compat shim
+>   — the guide's "delete `from_sync_result`" pitfall.
 
 ### 9.1 What needs to happen
 
@@ -758,11 +821,11 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 | `test_final_no_read_side_writes.py` | 0 (✅ Phase 4 done; all 3 reads side-effect-free) | — |
 | `test_final_commit_delta_contract.py` | 0 (✅ Phase 3 done) | — |
 | `test_final_transaction_rollback.py` | 0 (✅ Phase 5 done; module xfail removed) | — |
-| `test_final_bus_contract.py` | 3 | Phase 6 |
+| `test_final_bus_contract.py` | 0 (✅ Phase 6 done; all 3 markers removed) | — |
 | `test_final_derived_contract.py` | 5 | Phase 7 |
 | `test_final_hash_ast.py` | 2 | Phase 9 |
 | `test_final_parity_oracle.py` | 0 (✅ Phase 2 done) | — |
-| **Total** | **10** (Phase 5 closed the 3 rollback + 3 watch + 1 bus carry-over xfails) | |
+| **Total** | **7** (Phase 6 closed the 3 bus-contract xfails) | |
 
 > Note: `graph/tests/test_incremental_parity.py::test_moved_entity_...` keeps its
 > **non-strict** xfail. Phase 5 fixed the watcher event-dropping half (the
@@ -826,4 +889,6 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 
 ---
 
-*Last updated: 2026-06-08 — Phases 0–5 complete. **Phase 5 (single native `commit()` with staging + rollback) complete and verified**: every write funnels through one native `commit(mutation)` that stages all next-state and publishes the revision LAST, using the user-confirmed "Strategy B+ deferred-publish" (the store is never touched before the publish tail; registry/authored/overlay restore-on-failure; the salsa db is left benignly ahead because it cannot be rolled back). Typed `SidecarWriteError`/`CommitFailed`/`ReconcileAmbiguous` surfaced; identity persistence no longer swallowed; authored write is stage→persist→publish (in-memory `prior` rollback deleted); test-only one-shot fault seam (`_fault_inject`, always-compiled-inert). The 3 rollback-contract cases are green (module xfail removed) and the 2 Phase-1 carry-overs are closed (`test_watch` ×3 + `test_gate8_bus::test_inject_changes_fires_bus`). Milestone gate: Rust 156/0; Python — focused gate green (rollback ×3 + write_path + gate6_authored + watch + gate8_bus), full-suite baseline unchanged (3 pre-existing Phase 7×2 + Phase 9 failures; xfail countdown 17→10). Defect #2 now Phase-5-partial (bus/post-commit half → Phase 6). Phases 6–13 ahead.*
+*Last updated: 2026-06-08 — Phases 0–6 complete. **Phase 6 (one Python post-commit path; non-blocking bus) complete and verified**: every write funnels through one `_after_commit` hook (so `discard` and `author` now publish — defects #2 bus-half and #6 closed), the bus `Delta` is an id-level projection of the `CommitDelta` with asserted revision order, and the writer-blocking overflow policy is rejected at open with a typed `ConfigError` (producer-side `_cond.wait()` deleted). Design calls: (a) kept the transitive `affected` walk over the Python `CodeGraph` (id→id only) rather than the guide-literal seeds-only deletion, to preserve reverse-dep delivery per the Phase 3 "no capability lost" decision — the id→id/id→file helpers land for deletion with the native producer; (b) `author` through the one hook (no-op graph apply on authored-only deltas); (c) clean overflow rename, gate8 cases migrated off the removed `from_sync_result`/`overflow="error"` API. Milestone gate: Rust 158/0; Python full suite at the documented baseline (3 pre-existing Phase-7×2 + Phase-9 failures, zero new); xfail countdown 10→7. Phases 7–13 ahead.*
+
+*Earlier: Phase 5 (single native `commit()` with staging + rollback) complete and verified —* every write funnels through one native `commit(mutation)` that stages all next-state and publishes the revision LAST, using the user-confirmed "Strategy B+ deferred-publish" (the store is never touched before the publish tail; registry/authored/overlay restore-on-failure; the salsa db is left benignly ahead because it cannot be rolled back). Typed `SidecarWriteError`/`CommitFailed`/`ReconcileAmbiguous` surfaced; identity persistence no longer swallowed; authored write is stage→persist→publish (in-memory `prior` rollback deleted); test-only one-shot fault seam (`_fault_inject`, always-compiled-inert). The 3 rollback-contract cases are green (module xfail removed) and the 2 Phase-1 carry-overs are closed (`test_watch` ×3 + `test_gate8_bus::test_inject_changes_fires_bus`). Milestone gate: Rust 156/0; Python — focused gate green (rollback ×3 + write_path + gate6_authored + watch + gate8_bus), full-suite baseline unchanged (3 pre-existing Phase 7×2 + Phase 9 failures; xfail countdown 17→10). Defect #2 now Phase-5-partial (bus/post-commit half → Phase 6). Phases 6–13 ahead.*

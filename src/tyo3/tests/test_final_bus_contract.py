@@ -5,10 +5,10 @@ bus delta; deltas to a subscriber arrive in revision order; a slow subscriber
 never blocks the writer; and config rejects any writer-blocking overflow
 policy.
 
-Today ``discard`` commits a revision but never publishes (a hand-copied
-post-commit sequence forgot it), bus ids are path-shaped unless the graph
-happens to be materialised, and the ``block`` overflow policy is accepted.  The
-failing contracts are marked ``xfail(strict=True)`` for Phase 6.
+Phase 6 made all four contracts hold: every write funnels through one
+``_after_commit`` hook so ``discard`` (and every other write) publishes; the
+bus delta is an id-level projection of the ``CommitDelta``; the bus asserts
+revision order; and config rejects the writer-blocking overflow policy.
 """
 
 from __future__ import annotations
