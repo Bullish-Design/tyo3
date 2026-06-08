@@ -946,15 +946,21 @@ class CodeGraph:
         want_role = ReferenceRole(e["role"]) if e.get("role") else None
         src_node = self._graph[src_idx]
         tgt_node = self._graph[tgt_idx]
-        for _s, t, data in self._graph.out_edges(src_idx):
+        for ei in self._graph.incident_edges(src_idx):
+            s2, t2 = self._graph.get_edge_endpoints_by_index(ei)
+            if s2 != src_idx or t2 != tgt_idx:
+                continue
+            data = self._graph.get_edge_data_by_index(ei)
             if (
-                t == tgt_idx
-                and data.kind == kind
+                data.kind == kind
                 and data.file == e.get("file")
                 and data.range == want_range
                 and data.role == want_role
             ):
-                self._graph.remove_edge(src_idx, tgt_idx)
+                # Remove THIS specific (possibly parallel) edge by index —
+                # ``remove_edge(src, tgt)`` would drop an arbitrary parallel edge
+                # between the endpoints, corrupting multi-import/multi-ref pairs.
+                self._graph.remove_edge_from_index(ei)
                 self._semantic_subgraph_cache.clear()
                 # Prune the reverse-dep index iff this was the last IMPORTS edge
                 # connecting src.file → tgt.file (parallel imports may remain).

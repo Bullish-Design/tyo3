@@ -3,10 +3,156 @@
 > Tracks the refactoring of the TyO3 codebase so that **Rust owns committed truth**
 > and **Python is a read-only projection plus integrations**.
 >
-> The plan is defined in `.scratch/projects/15-implementation-plan/`:
-> - `REFINED_IMPLEMENTATION_CONCEPT.md` — system, vocabulary, rules (§5), current architecture, target
-> - `REFINED_IMPLEMENTATION_PLAN.md` — phase map, working rules, acceptance criteria, commit series
-> - `PHASE_1_IMPLEMENTATION_GUIDE.md` through `PHASE_6_IMPLEMENTATION_GUIDE.md` — step-by-step execution guides
+> **The plan has been revised — see `REFINED_IMPLEMENTATION_*_V2.md`.** The
+> current plan lives in `.scratch/projects/15-implementation-plan/`:
+> - **`START_HERE_V2.md`** — orientation for a fresh session (read first)
+> - `REFINED_IMPLEMENTATION_CONCEPT_V2.md` — current architecture (supersedes V1 from Phase 6)
+> - `REFINED_IMPLEMENTATION_PLAN_V2.md` — current phase map (6–14) + acceptance
+> - `PHASE_6_IMPLEMENTATION_GUIDE.md` … `PHASE_14_IMPLEMENTATION_GUIDE.md` — V2 step-by-step guides
+> - `PHASE_6_KICKOFF.md` — paste-able kickoff prompt for the next session
+> - V1 `REFINED_IMPLEMENTATION_CONCEPT.md` / `_PLAN.md` remain authoritative for **Phases 0–5** + framing/§5 rules.
+
+---
+
+## 0. V2 RE-DIRECTION (current plan — read this before §1 onward)
+
+**Everything below §0 uses the V1 phase numbering and is retained as the
+historical record of Phases 0–6.** The plan was re-sequenced on **2026-06-08**;
+§1–§19 are accurate history but their *forward-looking* numbering (Phase 7+) is
+superseded by the V2 map here.
+
+### Why the re-direction
+
+The V1 plan assumed the **native in-commit code-delta producer** (which maintains
+the reverse-dep index and emits a transitive `affected` set) already existed. It
+was deferred at Phases 3/4/5 (sound risk calls each time), so every later phase
+consumed a capability that was never built — producing accidental complexity (the
+Option-B bus bridge in `aceabf6`, the "affected seeds-only" caveat threaded
+through the phases). **V2 builds the producer first**, then deletes every bridge
+and scaffold the deferral forced into existence.
+
+### Two findings that shaped V2 (verified 2026-06-08)
+
+1. **Computing `affected` is cheap** — a graph walk over the maintained
+   `reverse_deps` index, **not** re-type-checking the blast radius. The ~100×
+   `open()` regression came from the *full, every-file* producer, never the
+   *scoped* one (dirty files ∪ one-hop importers).
+2. **The analysis engine emits no inference-flow edges** — `w = make_widget();
+   w.draw()` produces no `render → draw` edge (probed; only named refs
+   `render → make_widget → Widget`). So the synchronous `affected` set is
+   **container-granular, nominally-complete, never-miss**: coverage holds because a
+   member-body edit moves the *container's* `content_hash` (the container hash
+   subsumes member bodies) and the container is reachable by the named chain.
+   Method-level precision is an **optional async layer** (V2 Phase 9), never
+   required for correctness. Guarded by
+   `src/tyo3/graph/tests/test_inference_flow_coverage.py` (3 tests, green — **keep
+   green every phase**).
+
+### Central V2 idea
+
+`affected` is **sound-and-coarse synchronously** (in-commit, container granularity)
+and **precise-and-optional asynchronously** (a Python worker narrows
+container→method over a frozen snapshot, publishes on a bus refinement channel;
+graceful degradation since the coarse set is a sound superset). Correctness never
+depends on the async layer.
+
+### V2 phase map (remaining work) + old→new numbering
+
+| V2 | Title | Status | (was V1) |
+|----|-------|--------|----------|
+| 0–5 | content gate · native layer · id-delta · cutover · native commit | ✅ **DONE** | same |
+| **6** | **Scoped native producer (keystone)** — `affected_ids` transitive at source | ✅ **DONE** (Option B; see §9.6) | *(deferred; not a V1 phase)* |
+| 7 | Pure-projection bus; delete read-surface builder + Option-B bridge; refinement-channel seam | 🔴 **NEXT** (interim `aceabf6` landed; V2 reworks) | V1 Phase 6 (bus) |
+| 8 | Unified derived invalidation (per-layer key locality) | 🔴 | V1 Phase 7 |
+| 9 | Async precision refinement layer | 🔴 | *(new in V2)* |
+| 10 | AST-canonical hashing (+ explicit container-subsumes-members invariant) | 🔴 | V1 Phase 9 |
+| 11 | Read surface & convenience APIs | 🔴 | V1 Phase 8 |
+| 12 | Single config source (+ precision knobs) | 🔴 | V1 Phase 10 |
+| 13 | Split the monoliths | 🔴 | V1 Phase 11 |
+| 14 | Warnings/typing/hygiene + end-to-end acceptance | 🔴 | V1 Phases 12+13 |
+
+### Status of the "Phase 6 ✅ DONE" work below (§9)
+
+The one-post-commit-path / non-blocking-bus / id-level-delta work **did land**
+(`aceabf6` et al., closing defects #2 bus-half and #6) and stays. But it carries
+the **interim Option-B bridge** (`_compute_affected`/`_resolve_files` expanding
+`affected` over the materialised head graph) precisely because the producer was
+deferred. **V2 Phase 7 deletes that bridge** once **V2 Phase 6** makes
+`affected_ids` transitive at the source, and also deletes the legacy read-surface
+builder and demotes the parity oracle. So treat §9 as "interim bus landed," not
+"bus final."
+
+### What already exists (don't rebuild in Phase 6)
+
+The producer *machinery* is built and parity-verified in `rust/src/code_layer.rs`
+(`produce_code_delta`, `CodeLayer::diff_from`, `affected_closure`,
+`add_edge`/`remove_edge` maintaining `reverse_deps`). **V2 Phase 6 is the
+in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 below.
+
+### §9.6 — V2 Phase 6: scoped native producer ✅ **DONE** (2026-06-08)
+
+> **`affected_ids` is now transitive at the source.** The in-commit producer
+> re-derives the **dirty scope** (changed ∪ created ∪ deleted ∪ one-hop
+> importers) in place over the prior `head.code_layer`, maintains `reverse_deps`
+> edge-by-edge, and emits the minimal incremental `code_delta`. `code_delta =
+> None` is retired for content writes (only non-reconciling `author` carries
+> `None`, caught by `_is_authored_only`). The seeds-only-`affected` caveat
+> threaded through Phases 3–6 is **resolved**.
+>
+> **Strategy chosen (user-confirmed 2026-06-08): "Option B" — in-place scoped
+> re-derivation, not full-rebuild-plus-diff.** B honours the "cost proportional
+> to the edit" invariant and working-rule 3 ("maintain `reverse_deps`
+> edge-by-edge, never rebuild per commit"); A (full build every commit, gated to
+> cheap passes) was rejected as a guide-rule-3 violation dressed up as cheap.
+> A→B is contract-neutral (identical layer/delta/affected), so A would have been
+> thrown away; B is landed once. The strict parity oracle bounds the risk.
+>
+> **What landed**
+> - `code_layer.rs`: `CodeLayer` gained a per-file ordered node index
+>   (`file_to_nodes`) so the scoped builder reconstructs the order-sensitive
+>   `name_to_id` collision fallback identically to a full rebuild.
+>   `produce_code_delta_scoped` + `Builder::seeded`/`build_scoped`/`evict_file`/
+>   `gc_external_stubs`: seed from `prev`, evict each dirty file's nodes +
+>   outgoing edges (via `remove_edge`), re-run the engine passes
+>   (`document_symbols`/`occurrences`/`supertypes`) **only** for the dirty scope
+>   (carrying non-dirty files verbatim — sound because any cross-file edge
+>   implies an import, so an affected importer is itself one-hop dirty), GC
+>   orphaned external stubs. `affected_closure_with_deleted` walks `next`'s
+>   reverse-deps + seeds **deletions** from `prev` (a deleted id's inbound edges
+>   are gone from `next`). The full `Builder::build` survives as the
+>   **rescan/cold-start** path (load-bearing, not throwaway).
+> - `project.rs`: `run_staged` drives the producer in-lock after reconciliation,
+>   before the deferred publish; `Baseline` now captures `code_layer` and
+>   `rollback` restores it (rollback test 3 — no torn layer). `produce_layer`
+>   routes rescan / cold-start (empty `prev`) → full build, else scoped.
+>   `build_commit_delta` threads `Option<CodeDeltaDto>`; the seeds-only
+>   `affected_closure` call in `run_identity_reconciliation` is removed (computed
+>   in `run_staged` over the maintained index).
+> - **`graph.py` (applier bug the real incremental deltas exposed):**
+>   `_remove_code_edge` now removes the **specific** matched parallel edge by
+>   index (`incident_edges` → `remove_edge_from_index`); it was removing an
+>   arbitrary parallel edge by endpoints (`remove_edge(src,tgt)`), which
+>   corrupted multi-`IMPORTS`/multi-`REFERENCES` module pairs. Latent until
+>   Phase 6 — full rescans never exercised incremental edge removal.
+>
+> **Lazy population (perf):** `head.code_layer` is **not** built at open (that is
+> the `OPEN_TIMEOUT` / ~100x trap). It stays empty until the **first write**,
+> which one-time full-builds (emitted as a wholesale rescan delta); every
+> subsequent write is scoped. `open()`/concurrency/mvcc/perf slices show no
+> regression.
+>
+> **Gate (2026-06-08):** `cargo test` **158/0**. `pytest -q` — only the **3
+> documented pre-existing later-phase failures** (`test_final_derived_contract`
+> ×2 → Phase 8; `test_final_hash_ast::test_formatting_only_hashes_same` → Phase
+> 10); **zero new**. Parity oracle (`test_incremental_parity.py`, all 9
+> scenarios) is now a *real* incremental-vs-rebuild test and green;
+> `test_inference_flow_coverage.py` green; new `test_affected_closure.py`
+> (4 tests) proves transitivity + the deletion-from-prior-layer subtlety + the
+> scoped-not-full-rescan perf guard.
+>
+> **Leaves for Phase 7:** delete the interim Option-B bus bridge
+> (`_compute_affected`/`_resolve_files`) — now that `affected_ids` is transitive
+> at the source, the bus delta becomes a pure projection. [[spine-refactor-v2-plan]]
 
 ---
 
@@ -18,12 +164,17 @@
 | 2 | Transaction split across the lock boundary (Rust lock released before Python graph delta + bus) | ✅ **DONE** (Phase 5 in-lock stage→publish-last→rollback; Phase 6 closed the bus/post-commit-path half: one `_after_commit` hook, id-level deltas in asserted revision order, non-blocking bus) |
 | 3 | Read accessor performs a write (`session.graph` → `sync_all` → advances head) | ✅ **Phase 4 DONE** |
 | 4 | Delta is path-shaped not id-level (`SyncResultDto` has file-path strings, not `DurableId`s) | ✅ **Phase 3 DONE** |
-| 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | 🔴 **Phase 7** |
-| 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | ✅ **DONE** (Phase 6: the single `_after_commit` hook makes "publish every revision" true by construction) |
-| 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | 🔴 **Phase 8** |
-| 8 | Hashing is text-heuristic not AST-canonical (collapses whitespace inside string literals) | 🔴 **Phase 9** |
-| 9 | Config parsed twice with silent fallback (Python re-reads config.toml, swallows errors) | 🔴 **Phase 10** |
-| 10 | Three central files are monoliths (`project.rs`, `session.py`, `graph/graph.py`) | 🔴 **Phase 11** |
+| 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | 🔴 **V2 Phase 8** |
+| 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | ✅ **DONE** (the single `_after_commit` hook makes "publish every revision" true by construction) |
+| 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | 🔴 **V2 Phase 11** |
+| 8 | Hashing is text-heuristic not AST-canonical (collapses whitespace inside string literals) | 🔴 **V2 Phase 10** |
+| 9 | Config parsed twice with silent fallback (Python re-reads config.toml, swallows errors) | 🔴 **V2 Phase 12** |
+| 10 | Three central files are monoliths (`project.rs`, `session.py`, `graph/graph.py`) | 🔴 **V2 Phase 13** |
+
+> **Phase numbers in this table are V2** (see §0). Beyond these 10 defects, V2 adds
+> the deferred keystone — the **scoped in-commit producer (V2 Phase 6)** that makes
+> `affected_ids` transitive at the source — and a new **async precision refinement
+> layer (V2 Phase 9)**.
 
 ---
 
@@ -45,6 +196,12 @@
 | **11** | Split monolith files | Full suite | `project.rs` → many | `session.py`, `graph/graph.py` | 🔴 **Not started** |
 | **12** | Zero warnings, typing, exception hygiene | `ruff check`, `clippy` | All | All | 🔴 **Not started** |
 | **13** | End-to-end acceptance suite | `test_final_acceptance.py` | — | `test_final_acceptance.py` (new) | 🔴 **Not started** |
+
+> ⚠️ **This dashboard uses V1 numbering (historical).** For the current remaining
+> work and numbering, see **§0** and `REFINED_IMPLEMENTATION_PLAN_V2.md`. In V2:
+> the **producer is Phase 6** (next), the **bus is Phase 7** (rework the interim
+> `aceabf6`), derived → 8, async precision → 9 (new), hashing → 10, read surface →
+> 11, config → 12, split → 13, hygiene+acceptance → 14.
 
 ---
 
@@ -637,7 +794,17 @@ devenv shell -- pytest src/tyo3/tests/test_final_bus_contract.py \
 
 ---
 
-## 10. Phase 7 — Repair derived layers 🔴 **Not started**
+> ⚠️ **Sections 10–16 below are the V1 remaining-phase notes, superseded by the
+> V2 guides** (`PHASE_6_…_PHASE_14_IMPLEMENTATION_GUIDE.md`). They remain as
+> reference for the *content* of each task, but the **numbering, sequencing, and
+> approach are V2** (see §0). Notably: derived layers = **V2 Phase 8** (now with
+> per-layer key locality); hashing = **V2 Phase 10** (with the explicit
+> container-subsumes-members invariant); read surface = **V2 Phase 11**; config =
+> **V2 Phase 12** (also surfaces precision knobs); split = **V2 Phase 13**. The bus
+> rework and the new producer/async-precision phases (V2 6/7/9) are described only
+> in the V2 guides, not below.
+
+## 10. Phase 7 — Repair derived layers 🔴 **Not started** — *superseded by V2 Phase 8*
 
 ### 10.1 What needs to happen
 
@@ -889,6 +1056,8 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 
 ---
 
-*Last updated: 2026-06-08 — Phases 0–6 complete. **Phase 6 (one Python post-commit path; non-blocking bus) complete and verified**: every write funnels through one `_after_commit` hook (so `discard` and `author` now publish — defects #2 bus-half and #6 closed), the bus `Delta` is an id-level projection of the `CommitDelta` with asserted revision order, and the writer-blocking overflow policy is rejected at open with a typed `ConfigError` (producer-side `_cond.wait()` deleted). Design calls: (a) kept the transitive `affected` walk over the Python `CodeGraph` (id→id only) rather than the guide-literal seeds-only deletion, to preserve reverse-dep delivery per the Phase 3 "no capability lost" decision — the id→id/id→file helpers land for deletion with the native producer; (b) `author` through the one hook (no-op graph apply on authored-only deltas); (c) clean overflow rename, gate8 cases migrated off the removed `from_sync_result`/`overflow="error"` API. Milestone gate: Rust 158/0; Python full suite at the documented baseline (3 pre-existing Phase-7×2 + Phase-9 failures, zero new); xfail countdown 10→7. Phases 7–13 ahead.*
+*Last updated: 2026-06-08 — **PLAN RE-DIRECTED TO V2** (see §0). The producer was deferred three times; V2 builds it first (the new Phase 6), then deletes the bridges/scaffolds the deferral created. Two findings drove it: computing `affected` is a cheap reverse-dep graph walk (not blast-radius re-typecheck), and ty emits no inference-flow edges → synchronous `affected` is container-granular/never-miss with method precision as an optional async layer. New phase map: 6 scoped producer (NEXT) · 7 pure-projection bus + delete read-surface scaffolding (reworks the interim `aceabf6`) · 8 derived (per-layer key locality) · 9 async precision (new) · 10 hashing · 11 read surface · 12 config · 13 split · 14 hygiene+acceptance. Plan/guides in `15-implementation-plan/` (`START_HERE_V2.md`, `*_V2.md`, `PHASE_6..14`, `PHASE_6_KICKOFF.md`). Regression guard landed: `graph/tests/test_inference_flow_coverage.py` (3 green). Everything below §0 is the V1 historical record.*
+
+*Earlier: Phases 0–6 complete. **Phase 6 (one Python post-commit path; non-blocking bus) complete and verified** — note this is V1-Phase-6 (bus), which V2 renumbers to Phase 7 and reworks (delete the interim Option-B bridge): every write funnels through one `_after_commit` hook (so `discard` and `author` now publish — defects #2 bus-half and #6 closed), the bus `Delta` is an id-level projection of the `CommitDelta` with asserted revision order, and the writer-blocking overflow policy is rejected at open with a typed `ConfigError` (producer-side `_cond.wait()` deleted). Design calls: (a) kept the transitive `affected` walk over the Python `CodeGraph` (id→id only) rather than the guide-literal seeds-only deletion, to preserve reverse-dep delivery per the Phase 3 "no capability lost" decision — the id→id/id→file helpers land for deletion with the native producer; (b) `author` through the one hook (no-op graph apply on authored-only deltas); (c) clean overflow rename, gate8 cases migrated off the removed `from_sync_result`/`overflow="error"` API. Milestone gate: Rust 158/0; Python full suite at the documented baseline (3 pre-existing Phase-7×2 + Phase-9 failures, zero new); xfail countdown 10→7. Phases 7–13 ahead.*
 
 *Earlier: Phase 5 (single native `commit()` with staging + rollback) complete and verified —* every write funnels through one native `commit(mutation)` that stages all next-state and publishes the revision LAST, using the user-confirmed "Strategy B+ deferred-publish" (the store is never touched before the publish tail; registry/authored/overlay restore-on-failure; the salsa db is left benignly ahead because it cannot be rolled back). Typed `SidecarWriteError`/`CommitFailed`/`ReconcileAmbiguous` surfaced; identity persistence no longer swallowed; authored write is stage→persist→publish (in-memory `prior` rollback deleted); test-only one-shot fault seam (`_fault_inject`, always-compiled-inert). The 3 rollback-contract cases are green (module xfail removed) and the 2 Phase-1 carry-overs are closed (`test_watch` ×3 + `test_gate8_bus::test_inject_changes_fires_bus`). Milestone gate: Rust 156/0; Python — focused gate green (rollback ×3 + write_path + gate6_authored + watch + gate8_bus), full-suite baseline unchanged (3 pre-existing Phase 7×2 + Phase 9 failures; xfail countdown 17→10). Defect #2 now Phase-5-partial (bus/post-commit half → Phase 6). Phases 6–13 ahead.*

@@ -171,6 +171,12 @@ pub struct CodeLayer {
     pub edges: BTreeSet<Edge>,
     /// target id → sources that reference / import / inherit it.
     pub reverse_deps: BTreeMap<String, BTreeSet<String>>,
+    /// graph_file → durable_ids in document/insertion order (module first).
+    /// Mirrors `Builder::file_to_nodes`; load-bearing for the short-name
+    /// collision fallback's ordered scan, which the scoped producer must
+    /// reconstruct identically to a full rebuild (§6.1). External stub nodes are
+    /// not file-scoped and never appear here.
+    pub file_to_nodes: BTreeMap<String, Vec<String>>,
 }
 
 impl CodeLayer {
@@ -240,6 +246,46 @@ impl CodeLayer {
                 for src in sources {
                     if !visited.contains(src) {
                         queue.push_back(src.clone());
+                    }
+                }
+            }
+        }
+        visited
+    }
+
+    /// Transitive affected closure over `self` (the freshly-produced layer)
+    /// while seeding **deleted** ids' dependents from `prev` (V1 §5.4 closure
+    /// subtlety). A deleted node's inbound edges are gone from `self.reverse_deps`
+    /// (the node no longer exists), so its dependents live only in the prior
+    /// layer; we follow `prev.reverse_deps` for the deleted seeds. For all other
+    /// ids the walk uses `self`'s maintained index. Over-fire is acceptable
+    /// (§5.4 constrains `changed`, not `affected`); a miss is not.
+    pub fn affected_closure_with_deleted(
+        &self,
+        prev: &CodeLayer,
+        seeds: &BTreeSet<String>,
+        deleted: &BTreeSet<String>,
+    ) -> BTreeSet<String> {
+        let mut visited: BTreeSet<String> = BTreeSet::new();
+        let mut queue: VecDeque<String> = seeds.iter().cloned().collect();
+        while let Some(id) = queue.pop_front() {
+            if !visited.insert(id.clone()) {
+                continue;
+            }
+            if let Some(sources) = self.reverse_deps.get(&id) {
+                for src in sources {
+                    if !visited.contains(src) {
+                        queue.push_back(src.clone());
+                    }
+                }
+            }
+            // A deleted id's dependents are only in the prior layer.
+            if deleted.contains(&id) {
+                if let Some(sources) = prev.reverse_deps.get(&id) {
+                    for src in sources {
+                        if !visited.contains(src) {
+                            queue.push_back(src.clone());
+                        }
                     }
                 }
             }
@@ -399,6 +445,36 @@ pub fn produce_code_delta(
     (next, delta)
 }
 
+/// The scoped in-commit producer (§6.1): re-derive **only** the dirty scope
+/// (changed/created/deleted files ∪ their one-hop importers) in place over a
+/// clone of `prev`, and diff against `prev` for the minimal incremental delta.
+///
+/// Engine calls (`compute_document_symbols` / `compute_file_occurrences` /
+/// `compute_supertypes`) are bounded to the dirty scope; non-dirty files' nodes
+/// and dependency edges are carried verbatim from `prev` (sound because any
+/// cross-file edge implies an import, so an affected importer is itself in the
+/// dirty scope). `reverse_deps` is **maintained** edge-by-edge via
+/// `add_edge`/`remove_edge` (never rebuilt from scratch — working rule 3).
+///
+/// The result `CodeLayer` is byte-identical to a full `Builder::build` over the
+/// same final content (the parity oracle's invariant); `diff_from` then yields
+/// the incremental delta the Python applier composes onto the head graph.
+///
+/// `seed_dirty` holds the **graph paths** of the changed ∪ created ∪ deleted
+/// files. Importers are expanded internally from `prev`'s `Imports` edges.
+pub fn produce_code_delta_scoped(
+    state: &TyProjectState,
+    prev: &CodeLayer,
+    seed_dirty: &HashSet<String>,
+    revision: u64,
+) -> (CodeLayer, CodeDeltaDto) {
+    let mut builder = Builder::seeded(state, prev);
+    builder.build_scoped(seed_dirty);
+    let next = builder.layer;
+    let delta = next.diff_from(prev, revision, false);
+    (next, delta)
+}
+
 /// Per-file collected symbols, in document order.
 struct FileSymbols {
     graph_path: String,
@@ -432,6 +508,49 @@ impl<'a> Builder<'a> {
             range_cache: HashMap::new(),
             project_files: HashSet::new(),
         }
+    }
+
+    /// Seed a builder from `prev` for an incremental, scoped re-derivation: the
+    /// layer is cloned and the order-sensitive secondary indexes
+    /// (`name_to_id`, `file_to_nodes`, `range_cache`) are reconstructed from
+    /// `prev`'s nodes — no engine calls. `project_files` is left empty here and
+    /// populated by `build_scoped` from the *current* file listing (so created
+    /// files appear and deleted files drop out).
+    fn seeded(state: &'a TyProjectState, prev: &CodeLayer) -> Self {
+        let mut b = Builder {
+            state,
+            root: state.root.as_str().to_string(),
+            layer: prev.clone(),
+            name_to_id: HashMap::new(),
+            file_to_nodes: prev
+                .file_to_nodes
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            range_cache: HashMap::new(),
+            project_files: HashSet::new(),
+        };
+        // Reconstruct name_to_id by replaying registration in the stored
+        // per-file order — identical to what the full build produced (the module
+        // node registers only its "<module>" qualified name, never its stem).
+        let files: Vec<String> = b.file_to_nodes.keys().cloned().collect();
+        for file in &files {
+            let ids = b.file_to_nodes.get(file).cloned().unwrap_or_default();
+            for id in &ids {
+                let Some(node) = b.layer.nodes.get(id).cloned() else {
+                    continue;
+                };
+                if node.qualified_name == "<module>" {
+                    b.name_to_id
+                        .insert((file.clone(), "<module>".to_string()), id.clone());
+                } else {
+                    b.register_name(file, &node.name, id);
+                    b.register_name(file, &node.qualified_name, id);
+                }
+            }
+            b.build_range_cache(file);
+        }
+        b
     }
 
     /// Convert an absolute native path to a project-relative POSIX graph path.
@@ -509,6 +628,154 @@ impl<'a> Builder<'a> {
         }
         for fs in &files {
             self.overrides_pass(&fs.graph_path, &fs.symbols);
+        }
+
+        self.sync_file_to_nodes();
+    }
+
+    /// Publish the builder's per-file ordered node index onto the layer so the
+    /// scoped producer can reconstruct it on the next commit.
+    fn sync_file_to_nodes(&mut self) {
+        self.layer.file_to_nodes = self
+            .file_to_nodes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+    }
+
+    /// Re-derive only the dirty scope in place over the seeded layer (§6.1).
+    ///
+    /// `seed_dirty` are graph paths of changed ∪ created ∪ deleted files; the
+    /// full dirty set additionally includes their one-hop importers (so a
+    /// reference that became newly-(un)resolvable re-binds). Each dirty file is
+    /// evicted from the seeded layer and re-derived from the current engine
+    /// state; non-dirty files are carried verbatim. Orphaned external stubs are
+    /// garbage-collected so the result matches a full rebuild exactly.
+    fn build_scoped(&mut self, seed_dirty: &HashSet<String>) {
+        // 1. List the *current* project files (cheap — no document_symbols) to
+        //    set project_files and to find which dirty files still exist.
+        let mut current_native: HashMap<String, String> = HashMap::new(); // graph → native
+        for native_path in compute_files(self.state) {
+            let graph_path = self.to_graph_path(&native_path);
+            if graph_path == native_path {
+                continue; // outside the root — not project content
+            }
+            self.project_files.insert(graph_path.clone());
+            current_native.insert(graph_path, native_path);
+        }
+
+        // 2. Expand the dirty set with one-hop importers (sources of `Imports`
+        //    edges targeting a seed file's module), computed from the prior
+        //    layer carried in `self.layer`.
+        let mut dirty: HashSet<String> = seed_dirty.clone();
+        let seed_modules: HashSet<String> =
+            seed_dirty.iter().map(|f| make_module_durable_id(f)).collect();
+        for edge in &self.layer.edges {
+            if edge.kind == EdgeKind::Imports && seed_modules.contains(&edge.target) {
+                if let Some(src_node) = self.layer.nodes.get(&edge.source) {
+                    if !src_node.file.is_empty() && src_node.file != "<external>" {
+                        dirty.insert(src_node.file.clone());
+                    }
+                }
+            }
+        }
+
+        // 3. Evict every dirty file's nodes + outgoing edges from the seeded
+        //    layer and the secondary indexes.
+        for file in &dirty {
+            self.evict_file(file);
+        }
+
+        // 4. Re-collect symbols for dirty files that still exist (created /
+        //    changed). Deleted files are simply gone after eviction. Sorted for
+        //    deterministic processing (the final layer is order-independent, but
+        //    determinism keeps debugging sane).
+        let mut dirty_existing: Vec<String> = dirty
+            .iter()
+            .filter(|f| current_native.contains_key(*f))
+            .cloned()
+            .collect();
+        dirty_existing.sort();
+
+        let mut files: Vec<FileSymbols> = Vec::new();
+        for graph_path in &dirty_existing {
+            let native_path = current_native.get(graph_path).cloned().unwrap();
+            match compute_document_symbols(self.state, &native_path) {
+                Ok(symbols) => files.push(FileSymbols {
+                    graph_path: graph_path.clone(),
+                    native_path,
+                    symbols,
+                }),
+                Err(_) => {}
+            }
+        }
+
+        // 5. Same pass structure as a full build, restricted to dirty files.
+        for fs in &files {
+            self.materialize_file_nodes(&fs.graph_path, &fs.symbols);
+        }
+        for fs in &files {
+            self.add_containment_edges(&fs.graph_path, &fs.symbols);
+            self.build_range_cache(&fs.graph_path);
+        }
+        for fs in &files {
+            self.resolve_references(&fs.graph_path, &fs.native_path);
+        }
+        // Inheritance stays a two-pass even when scoped: all INHERITS first
+        // (across the dirty batch) so the OVERRIDES BFS sees a complete chain
+        // (its non-dirty ancestors are already carried in the layer).
+        for fs in &files {
+            self.inherits_pass(&fs.graph_path, &fs.native_path, &fs.symbols);
+        }
+        for fs in &files {
+            self.overrides_pass(&fs.graph_path, &fs.symbols);
+        }
+
+        // 6. Drop external stubs no edge points at any more (a full build never
+        //    creates an unreferenced stub, so this restores exact parity).
+        self.gc_external_stubs();
+        self.sync_file_to_nodes();
+    }
+
+    /// Remove a file's module + entity nodes and every edge originating from
+    /// them, maintaining `reverse_deps` (via `remove_edge`) and the secondary
+    /// indexes. Incoming edges from *other* files are pruned when those files
+    /// are evicted (any cross-file edge implies an import, so the other endpoint
+    /// is itself a one-hop importer in the dirty set).
+    fn evict_file(&mut self, file: &str) {
+        let ids = self.file_to_nodes.remove(file).unwrap_or_default();
+        let idset: HashSet<&String> = ids.iter().collect();
+        let outgoing: Vec<Edge> = self
+            .layer
+            .edges
+            .iter()
+            .filter(|e| idset.contains(&e.source))
+            .cloned()
+            .collect();
+        for edge in outgoing {
+            self.layer.remove_edge(&edge);
+        }
+        for id in &ids {
+            self.layer.nodes.remove(id);
+        }
+        self.range_cache.remove(file);
+        self.name_to_id.retain(|(f, _), _| f != file);
+    }
+
+    /// Remove external stub nodes with no remaining inbound edge. Externals are
+    /// only ever edge targets (never sources, never file-scoped), so a stub the
+    /// dirty re-derivation no longer references is dead and must go for parity.
+    fn gc_external_stubs(&mut self) {
+        let referenced: HashSet<&String> = self.layer.edges.iter().map(|e| &e.target).collect();
+        let doomed: Vec<String> = self
+            .layer
+            .nodes
+            .iter()
+            .filter(|(id, n)| n.external && !referenced.contains(id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in doomed {
+            self.layer.nodes.remove(&id);
         }
     }
 

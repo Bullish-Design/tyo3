@@ -1251,18 +1251,19 @@ struct IdentityDelta {
 /// Assemble the public `CommitDeltaDto` from the id-level identity classes and
 /// the path-shaped metadata the write method produced.
 ///
-/// The nested `code_delta` is emitted as `None` (absent): the in-commit
-/// code-layer producer is deferred (see `run_identity_reconciliation`), so no
-/// structural delta is computed here. The Phase 4 consumer reads `None` as
-/// "rebuild the head graph from a full native delta" — distinct from a present
-/// empty delta (a no-op). `touched_files` is the union of the path-level
-/// created/changed/deleted strings — metadata only.
+/// The nested `code_delta` (§6.2) is the minimal incremental delta from the
+/// in-commit producer (`produce_layer` → `CodeLayer::diff_from`): `Some({…})`
+/// for a structural change, `Some({})` for a cosmetic edit (applier no-op), and
+/// a full rescan-flagged delta on `rescan` / cold start. `None` is only carried
+/// by writes that don't reconcile (e.g. `author`). `touched_files` is the union
+/// of the path-level created/changed/deleted strings — metadata only.
 fn build_commit_delta(
     revision: u64,
     created: Vec<String>,
     changed: Vec<String>,
     deleted: Vec<String>,
     identity: IdentityDelta,
+    code_delta: Option<dto::CodeDeltaDto>,
     rescan: bool,
     project_changed: bool,
     custom_stdlib_changed: bool,
@@ -1279,7 +1280,7 @@ fn build_commit_delta(
         moved: identity.moved,
         authored_ids: vec![],
         affected_ids: identity.affected_ids,
-        code_delta: None,
+        code_delta,
         touched_files,
         created,
         changed,
@@ -1435,16 +1436,12 @@ fn run_identity_reconciliation(
     let needs_review: Vec<String> = recon.needs_review.iter().map(|id| id.0.clone()).collect();
     let orphaned: Vec<String> = recon.retired.iter().map(|id| id.0.clone()).collect();
 
-    // affected_ids = closure of changed ∪ deleted under the head code layer's
-    // reverse-deps. Phase 3 keeps the layer empty (in-commit producer deferred to
-    // Phase 4), so this is exactly the seeds; the transitive closure lights up
-    // once the layer is authoritative. See PROGRESS.md §6 / the Phase 3 guide.
-    let seeds: std::collections::BTreeSet<String> = changed_ids
-        .iter()
-        .chain(deleted_ids.iter())
-        .cloned()
-        .collect();
-    let affected_ids: Vec<String> = head.code_layer.affected_closure(&seeds).into_iter().collect();
+    // affected_ids is NOT computed here: the in-commit producer (§6.1) runs
+    // AFTER reconciliation and maintains `head.code_layer.reverse_deps`, so the
+    // transitive, container-granular closure is computed in `run_staged` over
+    // the freshly-updated layer (seeding deletions from the prior layer, §6.3).
+    // Left empty here and overwritten there.
+    let affected_ids: Vec<String> = Vec::new();
 
     // Authored lifecycle surfacing: intersect reconciliation output with
     // authored record ids in `review_on_change = true` layers.
@@ -1565,6 +1562,10 @@ struct Baseline {
     published_gen: Generation,
     registry: IdentityRegistry,
     authored: AuthoredStore,
+    /// The code layer before the in-commit producer ran. A failed commit must
+    /// restore it so a torn (half-re-derived) layer is never observable (§6.1 /
+    /// rollback test 3).
+    code_layer: crate::code_layer::CodeLayer,
 }
 
 /// TEST-ONLY: fire the armed one-shot fault if it names `stage`. The arm is
@@ -1608,6 +1609,7 @@ fn rollback(head: &mut HeadState, base: Baseline, err: PyErr) -> PyErr {
     head.system.publish(base.published_gen);
     head.registry = base.registry;
     head.authored = base.authored;
+    head.code_layer = base.code_layer;
     err
 }
 
@@ -1859,6 +1861,49 @@ fn build_poll_plan(
     }))
 }
 
+/// Convert an absolute native path string to a project-relative POSIX graph
+/// path (matching `code_layer::Builder::to_graph_path`). Returns `None` for a
+/// path outside the root (external — no graph node).
+fn native_to_graph(root: &SystemPathBuf, native: &str) -> Option<String> {
+    let rest = native.strip_prefix(root.as_str())?;
+    let rest = rest.strip_prefix('/').unwrap_or(rest);
+    (!rest.is_empty()).then(|| rest.to_string())
+}
+
+/// Drive the in-commit code-layer producer (§6.1/6.2). Returns the next layer
+/// and the minimal incremental `code_delta`.
+///
+/// - `rescan` (or an unscoped write) → a full build diffed against an empty
+///   layer, i.e. a full `rescan`-flagged delta the Python applier applies
+///   wholesale.
+/// - an empty `prev` (first write of a session — the head layer is built lazily,
+///   never at open, to keep `open()` off the producer's cost path) → a one-time
+///   full build, likewise emitted as a full delta.
+/// - otherwise → the scoped producer over the dirty graph paths (the identity
+///   scope = changed ∪ created ∪ deleted), expanding one-hop importers and
+///   maintaining `reverse_deps` edge-by-edge.
+fn produce_layer(
+    state: &TyProjectState,
+    prev: &crate::code_layer::CodeLayer,
+    staged: &StagedCommit,
+    next_rev: Revision,
+) -> (crate::code_layer::CodeLayer, dto::CodeDeltaDto) {
+    use crate::code_layer::{produce_code_delta, produce_code_delta_scoped, CodeLayer};
+    let rev = next_rev.0;
+    let dirty: Option<HashSet<String>> = staged.scope.as_ref().map(|s| {
+        s.iter()
+            .filter_map(|n| native_to_graph(&state.root, n))
+            .collect()
+    });
+    match dirty {
+        Some(dirty) if !staged.rescan && !prev.is_empty() => {
+            produce_code_delta_scoped(state, prev, &dirty, rev)
+        }
+        // Full build: rescan, cold start (empty prev), or an unscoped write.
+        _ => produce_code_delta(state, &CodeLayer::new(), rev, staged.rescan, None),
+    }
+}
+
 /// Run the staged transaction: publish the staged content to the live overlay,
 /// apply the engine change, reconcile, fire the staged fault boundaries, persist
 /// the sidecar, and PUBLISH the revision LAST. Any `?` failure leaves the store
@@ -1885,19 +1930,44 @@ fn run_staged(
         (result.project_changed(), result.custom_stdlib_changed())
     };
 
-    // 3 + 4 + 5. Identity reconcile → code-layer stage → identity persist.
-    let identity = if staged.reconcile {
-        let identity = run_identity_reconciliation(head, staged.scope.as_ref(), next_rev);
-        // Code-layer staging boundary: the in-commit producer is deferred, so
-        // this stages nothing today — but the fault seam must still fire here so
-        // a code-layer failure publishes no partial revision (rollback test 3).
+    // 3 + 4 + 5. Identity reconcile → code-layer produce → identity persist.
+    let (identity, code_delta) = if staged.reconcile {
+        let mut identity = run_identity_reconciliation(head, staged.scope.as_ref(), next_rev);
+
+        // ── Scoped in-commit code-layer producer (§6.1/6.2/6.3) ──
+        // Re-derive the dirty scope over the prior layer, update head.code_layer,
+        // and emit the minimal incremental code_delta. Runs inside the lock,
+        // before the deferred publish; rolled back via the captured Baseline.
+        let prev = std::mem::take(&mut head.code_layer);
+        let state = head.read_clone();
+        let (next, code_delta) = produce_layer(&state, &prev, &staged, next_rev);
+
+        // affected_ids = transitive, container-granular closure of changed ∪
+        // deleted over the freshly-maintained reverse_deps, seeding deletions
+        // from the prior layer (§6.3).
+        let seeds: std::collections::BTreeSet<String> = identity
+            .changed_ids
+            .iter()
+            .chain(identity.deleted_ids.iter())
+            .cloned()
+            .collect();
+        let deleted: std::collections::BTreeSet<String> =
+            identity.deleted_ids.iter().cloned().collect();
+        identity.affected_ids = next
+            .affected_closure_with_deleted(&prev, &seeds, &deleted)
+            .into_iter()
+            .collect();
+        head.code_layer = next;
+
+        // Code-layer staging boundary fault seam: a producer/code-layer failure
+        // must publish no partial revision (rollback test 3).
         check_fault(armed, "code_layer")?;
         // Identity persistence: a staged, fallible, PROPAGATED step.
         check_fault(armed, "identity_persist")?;
         persist_identity(head)?;
-        identity
+        (identity, Some(code_delta))
     } else {
-        IdentityDelta::default()
+        (IdentityDelta::default(), None)
     };
 
     // 6. Authored persistence (author only): stage → persist (publish at tail).
@@ -1938,6 +2008,7 @@ fn run_staged(
         staged.changed,
         staged.deleted,
         identity,
+        code_delta,
         staged.rescan,
         project_changed,
         custom_stdlib_changed,
@@ -1960,6 +2031,7 @@ fn commit(head: &mut HeadState, mutation: Mutation) -> PyResult<Option<dto::Comm
         published_gen: head.store.capture(),
         registry: head.registry.clone(),
         authored: head.authored.clone(),
+        code_layer: head.code_layer.clone(),
     };
     // One-shot: consumed by THIS commit whether or not its stage is reached, so
     // a stale arm can never leak into a later unrelated write.
