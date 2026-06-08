@@ -488,6 +488,104 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 
 ---
 
+### §9.11 — V2 Phase 11: owned-lifetime convenience reads + typed read errors ✅ **DONE** (2026-06-08)
+
+> **No convenience read returns a view backed by an already-closed snapshot
+> (deviation #7 closed), the floating-latest surface no longer hands out the
+> mutable canonical head graph, and the layer views stop swallowing read
+> failures into `None` (typed absence ≠ typed failure, V1 §5.12).** Pure-Python
+> phase — no Rust, no rebuild. The Phase-10 baseline (fully green
+> `pytest -q --no-cov`) is preserved; no new xfail/XPASS.
+>
+> **Lifetime-shape decision (11.1): view-owns-snapshot, NOT remove-the-sugar.**
+> The acceptance test `test_latest_warm_snapshot_consistent` calls `session.code`,
+> `session.layer("upper")`, `session.entity(id).code`, and `session.diff(snap2)`
+> as **one-liners** — never via `with session.snapshot()`. So the guide's
+> *preferred* "remove the lazy sugar, force an explicit pinned snapshot" shape
+> would break the gate's own call sites; the tests drove the choice to the guide's
+> *alternative* (the returned view owns + closes its snapshot).
+>   - **The two genuinely-lazy reads** (`session.code`, `session.layer`) return a
+>     new **`_OwnedView`** wrapper (`session.py`, defined just above
+>     `TyO3Session`). It pins the fresh head snapshot for the view's lifetime and
+>     closes it on context-manager exit / `close()` / GC, delegating all reads to
+>     the wrapped `CodeLayerView`/`DerivedLayerView`/`AuthoredLayerView` via
+>     `__getattr__`. **The footgun is gone by construction** — the snapshot is
+>     never closed before the view is handed back (the Pitfall the guide names).
+>   - **Why a wrapper, not an `_owns` flag on the view classes:** those classes
+>     are *shared* with `Snapshot.code`/`Snapshot.layer`, where the `Snapshot`
+>     owns the lifetime (closing there would be wrong). More subtly, a `Snapshot`
+>     **caches** its views and each view refers back to the `Snapshot` — a
+>     reference cycle. Putting the owned-snapshot on the view would drag it into
+>     that cycle, so reclamation would fall to the cyclic GC with unspecified
+>     `__del__` order → a spurious `Snapshot` `ResourceWarning`. `_OwnedView` sits
+>     **outside** the cycle (wrapper → snapshot → view → snapshot), so refcount
+>     reclaims it deterministically and the snapshot is released promptly with no
+>     warning and no leak.
+>   - **The two eager reads** (`session.entity`, `session.diff`) were already
+>     safe — `EntityView.from_snapshot` (`models/view.py`) and
+>     `SnapshotDiff.compute` (`models/diff.py`) fully materialise frozen
+>     dataclasses *before* the snapshot closes. They were rewritten to acquire the
+>     snapshot via `with self.snapshot() as snap: return snap.entity(...)` /
+>     `snap.diff(...)` so the materialise-then-close contract is explicit (and a
+>     future reader can't "fix" them into lazy state). The docstrings now state
+>     the eager-before-close rationale.
+>
+> **Floating-latest honesty (11.2).** `LatestView` already enforced the honest
+> boundary (no `entity`/`diff`/`revision`/`close` — verified, untouched). Its
+> only remaining leak was `graph()` returning `session.graph` — the **mutable,
+> in-place-maintained canonical** head graph, a reference that mutates under the
+> caller. It now returns `session.graph._pin_at(session.head)` — an **immutable,
+> `_frozen=True`, revision-stamped point-in-time copy**: clearly non-canonical,
+> floats per call (re-pins newest head), never mutates under the caller, never
+> advances head. (Sibling `graph()` accessors left canonical: `session.py:~795`
+> = `TyO3Session.graph` canonical head; `Snapshot.graph` = canonical pinned.)
+>
+> **Typed absence vs typed failure (11.3).** Removed the broad
+> `except Exception: return None` / `: continue` that conflated "not present"
+> with backend/format/graph-build failure:
+>   - `layers/authored.py` — `value()`: keep `status == "absent" → None`
+>     (legitimate absence), drop the `except` so a backend/format error
+>     propagates. `ids()`: narrow the native-fast-path `except` to
+>     `(AttributeError, NotImplementedError)` (genuinely-unsupported enumeration
+>     only — and the native snapshot has **no** `authored_ids`, so the fast path
+>     is dead and the graph scan is the live path) and drop the per-id scan
+>     `except` (absence is a *status*, not an exception). `diff()`: drop the
+>     per-id `except`.
+>   - `layers/derived.py` — `value()`: drop the `except`; `snap.derived()` already
+>     reports absence *in the value* (`status == "absent"`), never `None`, so the
+>     `except` only ever hid genuine store/scheduler/generator failures. Return
+>     type tightened `DerivedValue | None → DerivedValue`. Left
+>     `_cache_key`/`_input_hash_for`'s `node is None → None` (legitimate absence).
+>   - `layers/code.py` — **verified, no change.** Both `value()` and
+>     `_content_hash` already return `None` only for genuine absence (`node is
+>     None` / not an entity id) and never wrap the read in a broad `except`, so a
+>     graph-build failure already propagates.
+>   - **No production caller** dereferences these layer-view `value()`/`ids()`
+>     methods (only `EntityView`/`SnapshotDiff` read via `snap.authored`/
+>     `snap.derived` directly), so the tightened semantics regress nothing.
+>
+> **Phase-9 refiner carry-over: confirmed, no change.** `precision/refiner.py`
+> opens `session.snapshot(at=R)` and closes it in a `finally`
+> (`refiner.py:229-234`) — already correct; nothing to fix.
+>
+> **Reads never advance head — preserved.** `test_final_no_read_side_writes.py`
+> (3/3) stays green: `_OwnedView` only pins/copies; `LatestView.graph()` is a
+> pure projection + copy; the eager reads materialise without writing.
+>
+> **Gate (2026-06-08):** `test_gate7_read_surface.py` **15/15** +
+> `test_final_no_read_side_writes.py` **3/3** green (`-rA`). Full
+> `pytest -q --no-cov` green — Phase-10 baseline preserved, **zero new
+> xfail/XPASS**.
+>
+> **Out of scope / leaves for later.** `models/diff.py:120,133` still wrap a
+> derived/authored layer-diff in `except Exception: continue` — outside Phase 11's
+> declared layer-view scope; folds into **Phase 14.3** ("replace broad
+> `except Exception: pass` with typed handling"). Module structure (the
+> `_OwnedView` placement, view-module split) is **Phase 13**.
+> [[spine-refactor-v2-plan]] [[phase9-precision-refinement-done]]
+
+---
+
 ## 1. The six defects this refactor removes (from §6.3 of the Concept)
 
 | # | Defect | Status |
@@ -498,7 +596,7 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 | 4 | Delta is path-shaped not id-level (`SyncResultDto` has file-path strings, not `DurableId`s) | ✅ **Phase 3 DONE** |
 | 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | 🔴 **V2 Phase 8** |
 | 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | ✅ **DONE** (the single `_after_commit` hook makes "publish every revision" true by construction) |
-| 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | 🔴 **V2 Phase 11** |
+| 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | ✅ **V2 Phase 11 DONE** (`_OwnedView` owns/pins the snapshot; eager `entity`/`diff` materialise-then-close; floating-latest `graph()` non-canonical; layer views stop swallowing read failures) |
 | 8 | Hashing is text-heuristic not AST-canonical (collapses whitespace inside string literals) | 🔴 **V2 Phase 10** |
 | 9 | Config parsed twice with silent fallback (Python re-reads config.toml, swallows errors) | 🔴 **V2 Phase 12** |
 | 10 | Three central files are monoliths (`project.rs`, `session.py`, `graph/graph.py`) | 🔴 **V2 Phase 13** |

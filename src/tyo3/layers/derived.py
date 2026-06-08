@@ -44,16 +44,16 @@ class DerivedLayerView:
                 continue
             yield node.durable_id
 
-    def value(self, durable_id: str) -> DerivedValue | None:
-        """The ``DerivedValue`` at the pinned revision, or ``None``.
+    def value(self, durable_id: str) -> DerivedValue:
+        """The ``DerivedValue`` at the pinned revision.
 
-        Returns ``None`` when the id is absent at R or not applicable
-        to this layer.
+        Absence (id absent at R, or not applicable to this layer) is reported
+        *in the value* as ``status == "absent"`` by the snapshot read — never as
+        ``None`` and never as an exception. A backend/store/generator failure
+        propagates as the typed error raised by the snapshot read (V1 §5.12); it
+        is never swallowed into ``None``.
         """
-        try:
-            return self._snapshot.derived(self.name, durable_id)
-        except Exception:
-            return None
+        return self._snapshot.derived(self.name, durable_id)
 
     def diff(self, other: DerivedLayerView) -> LayerDiff:
         """Derived-layer diff between *other* (before) and *self* (after).

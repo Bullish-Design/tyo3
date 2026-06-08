@@ -649,6 +649,62 @@ class _ReadOps:
         return [TypeHierarchyItem.model_validate(o) for o in native_result]
 
 
+# ── _OwnedView — a convenience layer view that owns its snapshot ─────────────
+
+
+class _OwnedView:
+    """A convenience layer view (``session.code`` / ``session.layer(...)``) that
+    **owns** the head snapshot it reads over.
+
+    ``session.code`` / ``session.layer`` open a fresh head snapshot and build a
+    *lazy* layer view (one that reads the snapshot on demand). This wrapper holds
+    that snapshot pinned for the view's lifetime and closes it on context-manager
+    exit, explicit :meth:`close`, or garbage collection — so the returned view is
+    never backed by an already-closed snapshot (V1 §5.2, deviation #7). Views
+    taken directly from a :class:`Snapshot` (``snap.code`` / ``snap.layer``) are
+    unaffected: there the ``Snapshot`` owns its own lifetime.
+
+    The wrapper deliberately sits *outside* the ``Snapshot``↔view reference cycle
+    (a ``Snapshot`` caches its views and each view refers back to the
+    ``Snapshot``), so it is reclaimed by reference counting and releases its
+    pinned snapshot deterministically — no leak, no spurious ``ResourceWarning``.
+    It never closes the snapshot before handing the view back (the close-in-the-
+    wrong-scope footgun this phase removes).
+    """
+
+    def __init__(self, snapshot: Any, view: Any) -> None:
+        self._snapshot = snapshot
+        self._view = view
+        self._closed = False
+
+    def __getattr__(self, name: str) -> Any:
+        # Reached only for attributes absent on the wrapper itself → delegate to
+        # the wrapped view. Guard the private names so a partially constructed
+        # wrapper raises ``AttributeError`` rather than recursing.
+        if name in ("_snapshot", "_view", "_closed"):
+            raise AttributeError(name)
+        return getattr(self._view, name)
+
+    def close(self) -> None:
+        """Release the owned snapshot. Safe to call multiple times."""
+        if self._closed:
+            return
+        self._closed = True
+        self._snapshot.close()
+
+    def __enter__(self) -> _OwnedView:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 # ── TyO3Session ────────────────────────────────────────────────────────────
 
 
@@ -1476,44 +1532,67 @@ class TyO3Session(_ReadOps):
                     pass
         return sorted(set(ids))
 
-    # ── Convenience read sugar (delegates to a fresh head snapshot) ──
+    # ── Convenience read sugar (owns / pins a fresh head snapshot) ──
+    #
+    # Each convenience read opens a fresh head snapshot. ``entity`` / ``diff``
+    # build an eagerly-materialised frozen result and close the snapshot before
+    # returning, so no lazy state escapes. ``code`` / ``layer`` return a *lazy*
+    # layer view that reads the snapshot on demand, so the view owns the
+    # snapshot (via :class:`_OwnedView`) and keeps it pinned for its lifetime.
+    # No convenience read ever returns a view backed by an already-closed
+    # snapshot (V1 §5.2 / deviation #7).
 
     @property
     def code(self):
-        """A ``CodeLayerView`` over a fresh head snapshot (consistent)."""
+        """A ``CodeLayerView`` over a fresh head snapshot the view **owns**.
+
+        The returned view keeps its snapshot pinned for its lifetime — use it as
+        a context manager (``with session.code as code: ...``), call ``close()``,
+        or let GC release it. Reading it never advances ``head``.
+        """
+        self._check_open()
         snap = self.snapshot()
-        # Return the code view directly; caller must close snapshot.
-        # For convenience, we close the snapshot proactively and cache the view.
-        code_view = snap.code
-        snap.close()
-        return code_view
+        try:
+            return _OwnedView(snap, snap.code)
+        except Exception:
+            snap.close()
+            raise
 
     def layer(self, name: str):
-        """Dispatch to the right ``LayerView`` by *name* (consistent)."""
+        """Dispatch to the right ``LayerView`` by *name* over an **owned** snapshot.
+
+        The returned view owns its snapshot (see :meth:`code`). Raises
+        ``KeyError`` if *name* is not a declared layer.
+        """
+        self._check_open()
         snap = self.snapshot()
-        view = snap.layer(name)
-        snap.close()
-        return view
+        try:
+            return _OwnedView(snap, snap.layer(name))
+        except Exception:
+            snap.close()
+            raise
 
     def entity(self, durable_id: str):
-        """An ``EntityView`` over a fresh head snapshot (consistent).
+        """An ``EntityView`` for *durable_id* at a fresh head snapshot.
 
-        Sugar for ``session.snapshot().entity(id)``.
+        The cross-layer join is **eagerly materialised** against the snapshot
+        before it is closed, so the returned frozen view holds no live snapshot
+        state. Sugar for ``session.snapshot().entity(id)``.
         """
-        snap = self.snapshot()
-        ev = snap.entity(durable_id)
-        snap.close()
-        return ev
+        self._check_open()
+        with self.snapshot() as snap:
+            return snap.entity(durable_id)
 
     def diff(self, before: Snapshot) -> Any:
         """A ``SnapshotDiff`` between *before* and a fresh head snapshot.
 
-        Sugar for ``Snapshot.diff(before)``.
+        ``SnapshotDiff.compute`` **eagerly materialises** every layer diff
+        against both snapshots, so closing the after-snapshot before returning
+        is safe. Sugar for ``Snapshot.diff(before)``.
         """
-        after_snap = self.snapshot()
-        result = after_snap.diff(before)
-        after_snap.close()
-        return result
+        self._check_open()
+        with self.snapshot() as snap:
+            return snap.diff(before)
 
     def close(self) -> None:
         """Close the project and free Rust-side resources.
@@ -1904,12 +1983,21 @@ class LatestView(_ReadOps):
         return self._inner
 
     def graph(self):
-        """The live HEAD graph. Maintained incrementally by the write path;
-        warm, no copy-on-pin."""
+        """A **non-canonical, floating** code-graph projection of the live HEAD.
+
+        Returns an *immutable, point-in-time copy* pinned at the current head
+        revision — deliberately **not** the canonical mutable HEAD graph. Each
+        call re-pins the newest head (the floating contract), and the returned
+        graph never mutates under the caller. A floating view must not hand out a
+        mutable reference to the canonical graph (Phase 11.2); for the canonical
+        maintained head graph use ``session.graph``, and for a consistent pinned
+        graph use ``session.snapshot().graph()``. Reading it never advances head.
+        """
         self._check_open()
-        if self._session is not None:
-            return self._session.graph
-        raise InternalTyError("No session reference for latest graph")
+        if self._session is None:
+            raise InternalTyError("No session reference for latest graph")
+        head_graph = self._session.graph
+        return head_graph._pin_at(self._session.head)
 
     def derived(self, layer: str, durable_id: str) -> Any:
         """Warm derived read against the live HEAD. Cancellation-retried.

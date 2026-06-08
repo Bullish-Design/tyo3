@@ -36,9 +36,12 @@ class AuthoredLayerView:
         # Try the native enumeration accessor first (added by Step 4/5 hooks).
         native = self._snapshot._inner
         if hasattr(native, "authored_ids"):
+            # Fall back to the scan only when enumeration is genuinely
+            # unsupported; a real backend failure must surface, not be hidden
+            # behind a silent O(N) scan (typed failure ≠ absence, V1 §5.12).
             try:
                 return native.authored_ids(self.name)
-            except Exception:
+            except (AttributeError, NotImplementedError):
                 pass
 
         # Fallback: scan entity ids from the pinned graph and check each.
@@ -51,23 +54,25 @@ class AuthoredLayerView:
             node = graph._graph[idx]
             if not is_entity_durable_id(node.durable_id):
                 continue
-            try:
-                val = self._snapshot.authored(self.name, node.durable_id)
-                if val.status != "absent":
-                    ids.append(node.durable_id)
-            except Exception:
-                continue
+            # Absence is reported as ``status == "absent"``, not an exception; a
+            # backend/format failure propagates (it is not silently skipped).
+            val = self._snapshot.authored(self.name, node.durable_id)
+            if val.status != "absent":
+                ids.append(node.durable_id)
         return ids
 
     def value(self, durable_id: str) -> AuthoredValue | None:
-        """The ``AuthoredValue`` at the pinned revision, or ``None``."""
-        try:
-            val = self._snapshot.authored(self.name, durable_id)
-            if val.status == "absent":
-                return None
-            return val
-        except Exception:
+        """The ``AuthoredValue`` at the pinned revision, or ``None`` if no record
+        is present (typed *absence*).
+
+        A backend or format failure is **not** absence — it propagates as the
+        typed error raised by the snapshot read (V1 §5.12) and is never swallowed
+        into ``None``.
+        """
+        val = self._snapshot.authored(self.name, durable_id)
+        if val.status == "absent":
             return None
+        return val
 
     def diff(self, other: AuthoredLayerView) -> LayerDiff:
         """Authored-layer diff between *other* (before) and *self* (after).
@@ -84,13 +89,12 @@ class AuthoredLayerView:
         # "drifted" in authored terms = same id present at both, value differs.
         drifted = frozenset()
         for did in (after_ids & before_ids):
-            try:
-                a_val = self._snapshot.authored(self.name, did)
-                b_val = other._snapshot.authored(other.name, did)
-                if a_val.value != b_val.value or a_val.revision != b_val.revision:
-                    drifted = drifted | {did}
-            except Exception:
-                continue
+            # Both ids are present in their respective views, so these reads
+            # resolve; a genuine read failure propagates (V1 §5.12).
+            a_val = self._snapshot.authored(self.name, did)
+            b_val = other._snapshot.authored(other.name, did)
+            if a_val.value != b_val.value or a_val.revision != b_val.revision:
+                drifted = drifted | {did}
 
         return LayerDiff(
             layer=self.name,
