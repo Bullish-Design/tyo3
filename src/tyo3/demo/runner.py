@@ -88,7 +88,19 @@ def clone_repo(
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Entry-point: parse args, clone, index, launch CLI."""
+    """Entry-point: parse args, clone, index, launch CLI.
+
+    The ``tour`` subcommand (``tyo3-demo tour``) runs the guided walkthrough of
+    the incremental engine on a synthetic project instead of cloning a repo.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "tour":
+        from tyo3.demo.tour import main as tour_main
+
+        tour_main(argv[1:])
+        return
+
     parser = argparse.ArgumentParser(
         prog="tyo3-demo",
         description="Clone a GitHub repo, index it with TyO3, and explore interactively.",
