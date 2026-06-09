@@ -40,10 +40,14 @@ durable identity; that is AB8).
 **Layer discovery:** `layers` describes every layer in the **effective table**
 (native config ∪ layers registered programmatically via `tyo3.extend`) — `name`,
 `origin`, `entity_kinds`, `history`, `review_on_change`, `serving`,
-`key_locality`, and `display`. `display` is `panel` / `inline-note` /
+`key_locality`, `display`, and `schema`. `display` is `panel` / `inline-note` /
 `inline-summary` (AB1/QW5): a registered spec's declared display, or a name
 heuristic for built-ins (`intent` → `inline-note`, `summary` → `inline-summary`,
-else `panel`). The editor builds its "Author …" menu from this — one entry per
+else `panel`). `schema` is the layer's JSON Schema (`model_json_schema()`) when a
+registered spec declares a pydantic `schema` (AB5), else `null` — a typed client
+can build an authoring form from it, and authored writes to a schema'd layer are
+validated at author-time (`SchemaValidationError` on mismatch); un-schema'd layers
+stay free-form JSON. The editor builds its "Author …" menu from this — one entry per
 `origin == "authored"` layer — instead of hardcoding `intent`, and the daemon
 picks inline-decoration layers by `display` rather than by name. A layer
 registered through `tyo3.extend.register_layer` rides `entity_at`, `decorate`, and

@@ -469,6 +469,10 @@ class Handlers:
                     # ``display`` (QW5/AB1): registered spec's display, else a
                     # name heuristic (intent→inline-note, summary→inline-summary).
                     "display": s._display_for(name),
+                    # ``schema`` (AB5): the layer's JSON Schema if its registered
+                    # spec declares one, else ``None`` (free-form JSON). A typed
+                    # client can build a form from it; un-schema'd layers omit it.
+                    "schema": s._schema_for(name),
                 }
                 # The effective table (native ∪ registered) so a registered layer
                 # is discoverable through the same verb (AB1).

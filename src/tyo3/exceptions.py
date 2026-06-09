@@ -104,6 +104,13 @@ class InternalTyError(TyO3Error):
     """Raised when the underlying ty/Ruff engine encounters an unexpected error."""
 
 
+class SchemaValidationError(TyO3Error):
+    """Raised when an authored value fails its layer's declared schema (AB5).
+
+    Opt-in: only fires for a registered layer whose spec carries a ``schema``.
+    Un-schema'd layers stay free-form JSON and never raise this."""
+
+
 __all__ = [
     "TyO3Error",
     "ConfigError",
@@ -121,4 +128,5 @@ __all__ = [
     "ReconcileAmbiguous",
     "AnalysisError",
     "InternalTyError",
+    "SchemaValidationError",
 ]

@@ -21,6 +21,7 @@ from tyo3.exceptions import (
     ProjectClosedError,
     ProjectOpenError,
     RevisionEvictedError,
+    SchemaValidationError,
     TyO3Error,
 )
 from tyo3.models.authored import AuthoredValue
@@ -162,6 +163,20 @@ class TyO3Session(_ReadOps):
         if layer == "summary":
             return "inline-summary"
         return "panel"
+
+    def _schema_for(self, layer: str) -> dict | None:
+        """The JSON Schema for *layer*'s values, or ``None`` (AB5).
+
+        A registered spec carrying a pydantic ``schema`` is exposed as a plain
+        JSON Schema dict (``model_json_schema()`` — wire-safe) so a non-Lua
+        client can build a typed form. A native ``config.toml`` layer has no
+        pydantic type, so this returns ``None`` for it (free-form JSON)."""
+        from tyo3.extend import _LAYERS
+
+        spec = _LAYERS.get(layer)
+        if spec is not None and spec.schema is not None:
+            return spec.schema.model_json_schema()
+        return None
 
     @property
     def head(self) -> int:
@@ -808,6 +823,19 @@ class TyO3Session(_ReadOps):
         Derived layers are unaffected — authored layers are sinks (§9.2.4).
         """
         self._check_open()
+        # Opt-in author-time schema gate (AB5): only a *registered* layer whose
+        # spec declares a pydantic ``schema`` is validated. We validate, never
+        # transform — storage stays free-form JSON (``json.dumps(value)``).
+        from tyo3.extend import _LAYERS
+
+        spec = _LAYERS.get(layer)
+        if spec is not None and spec.schema is not None:
+            try:
+                spec.schema.model_validate(value)
+            except Exception as exc:  # pydantic.ValidationError (and friends)
+                raise SchemaValidationError(
+                    f"value for layer '{layer}' does not match its schema: {exc}"
+                ) from exc
         payload = json.dumps(value)
         try:
             native = self._inner.author(layer, durable_id, payload)

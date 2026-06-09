@@ -16,8 +16,10 @@ import ast
 import json
 
 import pytest
+from pydantic import BaseModel
 
 from tyo3 import TyO3Session
+from tyo3.exceptions import SchemaValidationError
 from tyo3.extend import (
     AuthoredLayerSpec,
     DerivedLayerSpec,
@@ -341,6 +343,71 @@ def test_daemon_layers_verb_lists_registered_layer(tmp_path):
         assert by_name["tests"]["display"] == "inline-note"
         assert "complexity" in by_name and by_name["complexity"]["origin"] == "derived"
         assert by_name["complexity"]["display"] == "inline-summary"
+    finally:
+        actor.stop()
+
+
+# ── AB5: optional per-layer value schemas ─────────────────────────────────────
+
+
+class TestLinks(BaseModel):
+    """The worked example from API_DESIGN §5.1 — a typed ``tests`` value."""
+
+    # Keep pytest from collecting this pydantic model as a test class.
+    __test__ = False
+
+    paths: list[str]
+    last_run: str | None = None
+
+
+def test_authored_schema_validates_at_author_time(tmp_path):
+    register_layer(AuthoredLayerSpec(name="tests", entity_kinds=("function",), schema=TestLinks))
+    proj = _make_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        did = s.id_for("m.py", 1, 5)
+        assert did is not None
+
+        # Malformed values are rejected before anything is committed.
+        with pytest.raises(SchemaValidationError):
+            s.author("tests", did, {"paths": 5})  # wrong type
+        with pytest.raises(SchemaValidationError):
+            s.author("tests", did, {"wrong": 1})  # missing required field
+
+        # A valid value commits and reads back unchanged (storage stays JSON).
+        s.author("tests", did, {"paths": ["test_m.py"]})
+        av = s.authored("tests", did)
+        assert av.status == "present"
+        assert av.value == {"paths": ["test_m.py"]}
+
+
+def test_unschema_layer_stays_free_form(tmp_path):
+    # No schema ⇒ today's behaviour: any JSON-able dict is accepted verbatim.
+    register_layer(AuthoredLayerSpec(name="tests", entity_kinds=("function",)))
+    proj = _make_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        did = s.id_for("m.py", 1, 5)
+        arbitrary = {"anything": [1, 2, 3], "nested": {"k": "v"}}
+        s.author("tests", did, arbitrary)
+        assert s.authored("tests", did).value == arbitrary
+
+
+def test_layers_verb_emits_json_schema(tmp_path):
+    register_layer(AuthoredLayerSpec(name="tests", entity_kinds=("function",), schema=TestLinks))
+    register_layer(AuthoredLayerSpec(name="notes", entity_kinds=("function",)))  # no schema
+    proj = _make_project(tmp_path)
+
+    from tyo3.daemon.handlers import Handlers
+    from tyo3.daemon.session_actor import SessionActor
+
+    actor = SessionActor(str(proj))
+    actor.start()
+    try:
+        handlers = Handlers(actor)
+        by_name = {layer["name"]: layer for layer in handlers.layers({})["layers"]}
+        assert by_name["tests"]["schema"] == TestLinks.model_json_schema()
+        assert by_name["notes"]["schema"] is None
     finally:
         actor.stop()
 
