@@ -5,10 +5,10 @@
 > reformat**, plus a live, id-level affected-set as you type. Powered by the
 > [TyO3](../../README.md) incremental engine via a small daemon.
 
-![tyo3.nvim demo](demo/tour.gif)
+![tyo3.nvim demo](demo/default/tour.gif)
 
-*(asciinema cast: [`demo/tour.cast`](demo/tour.cast) — regenerate both with
-`devenv shell -- demo-record`.)*
+*(asciinema cast: [`demo/default/tour.cast`](demo/default/tour.cast) — regenerate
+both with `devenv shell -- demo-record`.)*
 
 ---
 
@@ -191,12 +191,14 @@ project — see `demo/setup.sh`):
 ## Regenerating the demo
 
 ```
-devenv shell -- demo-record          # vhs editors/tyo3.nvim/demo/tour.tape
+devenv shell -- demo-record           # vhs editors/tyo3.nvim/demo/default/tour.tape
+devenv shell -- demo-record-context   # the cursor-CONTEXT demo (demo/context/)
 ```
 
-Renders `demo/tour.gif` + `demo/tour.cast` headlessly (no display required).
-`demo/setup.sh` builds the synthetic project fresh; `demo/init.lua` is a
-minimal, plugin-only nvim config so the recording is identical on any machine.
+Renders `demo/default/tour.gif` + `demo/default/tour.cast` headlessly (no display
+required). `demo/setup.sh` (shared) builds the synthetic project fresh and
+resolves a pristine nvim; each demo's `init.lua` is a minimal, plugin-only nvim
+config so the recording is identical on any machine.
 
 ## Development & tests
 

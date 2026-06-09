@@ -2,7 +2,7 @@
 --
 -- No user plugins; loads only tyo3.nvim (resolved from this file's location) so
 -- the recording is identical on any machine / in CI. Launched as:
---   nvim -u editors/tyo3.nvim/demo/init.lua store.py
+--   nvim -u editors/tyo3.nvim/demo/default/init.lua store.py
 
 vim.opt.compatible = false
 -- Full syntax highlighting + filetype handling. setup.sh resolves a *pristine*
@@ -18,9 +18,9 @@ vim.opt.signcolumn = "yes"
 vim.opt.termguicolors = true
 vim.opt.laststatus = 2
 
--- Resolve the plugin root from this file: demo/init.lua → editors/tyo3.nvim.
+-- Resolve the plugin root from this file: demo/default/init.lua → editors/tyo3.nvim.
 local here = vim.fn.fnamemodify(vim.fn.expand("<sfile>:p"), ":h")
-local plugin_root = vim.fn.fnamemodify(here, ":h")
+local plugin_root = vim.fn.fnamemodify(here, ":h:h")
 vim.opt.runtimepath:append(plugin_root)
 vim.cmd("runtime! plugin/tyo3.lua")
 

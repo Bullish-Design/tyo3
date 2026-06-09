@@ -288,10 +288,10 @@ in
 
   # ── Neovim plugin demo ───────────────────────────────────────
   #
-  # Render the scripted tyo3.nvim demo to a GIF + asciinema cast via vhs. The
-  # tape (editors/tyo3.nvim/demo/tour.tape) drives a real terminal nvim through
-  # the plugin's verbs; setup.sh builds the synthetic shop project fresh. CI-
-  # runnable (no display). See .scratch/projects/20-neovim-integration/DEMO_RECORDING.md.
+  # Render the scripted tyo3.nvim demos to a GIF + asciinema cast via vhs. The
+  # tapes (editors/tyo3.nvim/demo/<name>/*.tape) drive a real terminal nvim
+  # through the plugin's verbs; setup.sh builds the synthetic shop project fresh.
+  # CI-runnable (no display). See .scratch/projects/20-neovim-integration/DEMO_RECORDING.md.
   scripts.demo-record.exec = ''
     echo "═══ Recording tyo3.nvim demo (vhs) ═══"
     cd "$DEVENV_ROOT"
@@ -299,12 +299,24 @@ in
       echo "vhs not found on PATH — is the devenv shell active?"
       exit 1
     fi
-    vhs editors/tyo3.nvim/demo/tour.tape
+    vhs editors/tyo3.nvim/demo/default/tour.tape
     echo "── GIF done; recording asciinema cast ──"
     # vhs 0.11 does not emit asciinema .cast natively, so the cast is recorded
     # by a small dependency-free PTY driver running the same scripted scenes.
-    python editors/tyo3.nvim/demo/record_cast.py editors/tyo3.nvim/demo/tour.cast || true
-    echo "═══ Wrote editors/tyo3.nvim/demo/tour.gif + tour.cast ═══"
+    python editors/tyo3.nvim/demo/default/record_cast.py editors/tyo3.nvim/demo/default/tour.cast || true
+    echo "═══ Wrote editors/tyo3.nvim/demo/default/tour.gif + tour.cast ═══"
+  '';
+
+  # Render the comprehensive cursor-CONTEXT demo (context = "cursor").
+  scripts.demo-record-context.exec = ''
+    echo "═══ Recording tyo3.nvim CONTEXT demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/context/context.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/context/context.gif ═══"
   '';
 
   # ── Utility scripts ──────────────────────────────────────────

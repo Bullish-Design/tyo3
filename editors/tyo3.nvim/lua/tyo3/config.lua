@@ -17,6 +17,11 @@ M.defaults = {
   virtual_text = true,
   -- Affected-set panel: "auto" (open on first delta), "always", or "off".
   panel = "auto",
+  -- Cursor-context section in the panel: "cursor" (auto-update from the entity
+  -- under the cursor) or "off". Default off so existing behaviour is unchanged.
+  context = "off",
+  -- Debounce (ms) before the cursor-context lookup fires.
+  context_debounce_ms = 150,
   -- Command used to launch the daemon. nil ⇒ auto-detect `tyo3-daemon`, else
   -- fall back to `python -m tyo3.daemon`. Override e.g. {"uv","run","tyo3-daemon"}.
   daemon_cmd = nil,

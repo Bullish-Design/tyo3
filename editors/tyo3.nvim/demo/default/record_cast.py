@@ -12,7 +12,7 @@ synthetic shop project ``setup.sh`` builds.
 
 Run (inside the devenv shell, from the repo root)::
 
-    python editors/tyo3.nvim/demo/record_cast.py [out.cast]
+    python editors/tyo3.nvim/demo/default/record_cast.py [out.cast]
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ from pathlib import Path
 WIDTH = 120
 HEIGHT = 34
 
-HERE = Path(__file__).resolve().parent
-PLUGIN = HERE.parent
+HERE = Path(__file__).resolve().parent  # editors/tyo3.nvim/demo/default
+PLUGIN = HERE.parent.parent  # editors/tyo3.nvim
 REPO = PLUGIN.parent.parent
 
 # The scripted scenes, mirroring tour.tape. (delay_before_seconds, keys_bytes).
@@ -65,7 +65,7 @@ def main() -> int:
         # $TYO3_NVIM is the pristine neovim-unwrapped binary setup.sh resolves
         # (the home-manager wrapper injects a user after/ftplugin even under
         # --clean); --clean + -u then loads only $VIMRUNTIME + the demo init.
-        'exec "$TYO3_NVIM" --clean -u "$TYO3_PLUGIN_DIR/demo/init.lua" store.py'
+        'exec "$TYO3_NVIM" --clean -u "$TYO3_PLUGIN_DIR/demo/default/init.lua" store.py'
     )
 
     env = dict(os.environ)

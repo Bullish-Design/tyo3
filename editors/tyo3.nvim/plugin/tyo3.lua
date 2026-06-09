@@ -44,6 +44,10 @@ cmd("TyO3Panel", function()
   require("tyo3.panel").toggle()
 end, { desc = "Toggle the affected-set panel" })
 
+cmd("TyO3Context", function()
+  require("tyo3.context").toggle()
+end, { desc = "Toggle the cursor-context panel section (context = cursor/off)" })
+
 cmd("TyO3Start", function()
   local bufnr = vim.api.nvim_get_current_buf()
   require("tyo3").on_buf_enter(bufnr)
@@ -97,6 +101,14 @@ vim.api.nvim_create_autocmd("BufWritePost", {
   pattern = "*.py",
   callback = function(ev)
     require("tyo3").sync_now(ev.buf)
+  end,
+})
+
+vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+  group = group,
+  pattern = "*.py",
+  callback = function(ev)
+    require("tyo3.context").on_cursor(ev.buf)
   end,
 })
 

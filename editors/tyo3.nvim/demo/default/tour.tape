@@ -1,13 +1,13 @@
 # tyo3.nvim — scripted demo. Render from the repo root with:
-#   devenv shell -- demo-record         (or: vhs editors/tyo3.nvim/demo/tour.tape)
+#   devenv shell -- demo-record   (or: vhs editors/tyo3.nvim/demo/default/tour.tape)
 #
 # Drives a real terminal Neovim through the plugin's verbs against the synthetic
 # "shop" project. Sleeps are generous and deliberate — we wait past every async
 # beat (daemon open, debounced commit, precision refinement) so the recording is
 # deterministic. Determinism over speed.
 
-Output editors/tyo3.nvim/demo/tour.gif
-Output editors/tyo3.nvim/demo/tour.txt
+Output editors/tyo3.nvim/demo/default/tour.gif
+Output editors/tyo3.nvim/demo/default/tour.txt
 
 Require nvim
 Require python
@@ -27,7 +27,7 @@ Sleep 2s
 # $TYO3_NVIM is the pristine neovim-unwrapped binary setup.sh resolved (the
 # home-manager wrapper would inject a user after/ftplugin even under --clean);
 # --clean + -u loads only $VIMRUNTIME + the plugin-only demo init.
-Type "$TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/init.lua store.py" Enter
+Type "$TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/default/init.lua store.py" Enter
 Sleep 6s
 
 # Scene 2 — inspect checkout.
