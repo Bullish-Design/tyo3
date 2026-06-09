@@ -24,4 +24,16 @@ PY
 
 export TYO3_DEMO_DIR="${_base}/shop"
 export TYO3_PLUGIN_DIR="${_plugin}"
+
+# Fully isolate Neovim from any ambient user config. `--clean` alone is not
+# enough here (a user config under $XDG_CONFIG_HOME/nvim — often symlinked from
+# a dotfiles repo — can still load its after/ftplugin and break the recording),
+# so point all XDG bases at fresh, empty dirs. Combined with `nvim --clean -u
+# demo/init.lua`, nvim then loads *only* $VIMRUNTIME + tyo3.nvim.
+export XDG_CONFIG_HOME="${_base}/xdg/config"
+export XDG_DATA_HOME="${_base}/xdg/data"
+export XDG_STATE_HOME="${_base}/xdg/state"
+export XDG_CACHE_HOME="${_base}/xdg/cache"
+mkdir -p "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}" "${XDG_CACHE_HOME}"
+
 echo "tyo3 demo project ready: ${TYO3_DEMO_DIR}"

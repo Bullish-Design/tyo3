@@ -5,7 +5,14 @@
 --   nvim -u editors/tyo3.nvim/demo/init.lua store.py
 
 vim.opt.compatible = false
-vim.cmd("filetype plugin indent on")
+-- Keep syntax highlighting + filetype *detection* (so .py is coloured and the
+-- plugin's *.py autocmds fire), but DISABLE ftplugin/indent loading. This
+-- environment's Nix/home-manager nvim wrapper forces the user config dir onto
+-- the runtimepath even under `--clean`, and its after/ftplugin/python.lua would
+-- otherwise error in the recording. Disabling ftplugin is what keeps it clean.
+vim.cmd("syntax enable")
+vim.cmd("filetype on")
+vim.cmd("filetype plugin indent off")
 vim.opt.swapfile = false
 vim.opt.number = true
 vim.opt.signcolumn = "yes"

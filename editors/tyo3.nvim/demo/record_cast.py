@@ -62,7 +62,8 @@ def main() -> int:
     demo_cmd = (
         "source editors/tyo3.nvim/demo/setup.sh && "
         'cd "$TYO3_DEMO_DIR" && '
-        'exec nvim -u "$TYO3_PLUGIN_DIR/demo/init.lua" store.py'
+        # --clean isolates from any ambient user config (~/.config/nvim).
+        'exec nvim --clean -u "$TYO3_PLUGIN_DIR/demo/init.lua" store.py'
     )
 
     env = dict(os.environ)

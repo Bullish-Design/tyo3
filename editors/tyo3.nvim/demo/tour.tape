@@ -7,6 +7,7 @@
 # deterministic. Determinism over speed.
 
 Output editors/tyo3.nvim/demo/tour.gif
+Output editors/tyo3.nvim/demo/tour.txt
 
 Require nvim
 Require python
@@ -23,7 +24,9 @@ Type "source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR" Enter
 Sleep 2s
 
 # Scene 1 — open & ambient intelligence (daemon: open + initial decorate; panel).
-Type "nvim -u $TYO3_PLUGIN_DIR/demo/init.lua store.py" Enter
+# --clean isolates from any ambient user config (~/.config/nvim) so the
+# recording is identical everywhere; -u loads only the plugin-only demo init.
+Type "nvim --clean -u $TYO3_PLUGIN_DIR/demo/init.lua store.py" Enter
 Sleep 6s
 
 # Scene 2 — inspect checkout.
