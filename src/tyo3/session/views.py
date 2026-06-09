@@ -238,10 +238,9 @@ class Snapshot(_ReadOps):
             return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
 
         # Miss at the resolved key. Self-heal with a synchronous recompute over
-        # this pinned snapshot (§8.3). With no async worker in Phase 8 this
-        # serves both `block` and `stale` layers; the serving policy is honoured
-        # on failure, where we fall back to the last-good artifact tagged
-        # honestly. The async refinement path is Phase 9.
+        # this pinned snapshot (§8.3). With no async derived worker, this serves
+        # both `block` and `stale` layers; the serving policy is honoured on
+        # failure, where we fall back to the last-good artifact tagged honestly.
         scheduler = dag._get_scheduler()
         art = scheduler.recompute_now(dag, L, self, durable_id)
         if art is not None:

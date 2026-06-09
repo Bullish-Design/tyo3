@@ -98,21 +98,22 @@ pub(crate) struct TyProjectState {
 /// because `store`/`system` must never be cloned per-read nor exposed to
 /// snapshots.
 ///
-/// In Phase 2 `store`/`system` are wired but idle: no edits flow through them
-/// yet. Phase 3 activates them (`store.insert_text` → `system.publish` →
-/// `db.apply_changes`).
+/// Every edit flows through the substrate as one commit: stage the change into
+/// `store`, `system.publish(...)` it so the head `db` analyses it, run the
+/// fallible commit steps, then publish-last (§5.3).
 pub(crate) struct HeadState {
     pub(crate) db: ProjectDatabase,
     pub(crate) root: SystemPathBuf,
     pub(crate) store: ContentStore,
     /// Handle onto the *same* overlay content cell the `db` reads through
-    /// (clone-shares the inner `Arc<ArcSwap<…>>`). Used by Phase 3 to publish.
+    /// (clone-shares the inner `Arc<ArcSwap<…>>`). The commit publishes staged
+    /// content through it so the head `db` sees the new revision.
     pub(crate) system: OverlaySystem,
     /// Identity registry: binds DurableIds to last-known entity facts.
     /// Reconciled after every commit; persisted through the sidecar.
     pub(crate) registry: IdentityRegistry,
-    /// Code-layer identity hash policy. Defaults to Gate 2 behavior until
-    /// Step 5 loads it from validated config.
+    /// Code-layer identity hash policy: the default profile resolved from the
+    /// validated config.
     pub(crate) hash_policy: HashPolicy,
     /// Per-profile hash policies derived from the validated config.
     pub(crate) hash_policies: HashMap<String, HashPolicy>,
@@ -126,12 +127,11 @@ pub(crate) struct HeadState {
     /// Captured into snapshots alongside the registry for Snapshot
     /// isolation + time-travel (§10.2.2 authored half).
     pub(crate) authored: AuthoredStore,
-    /// Canonical native code layer (nodes + edges + reverse-deps). Phase 3 reads
-    /// its `reverse_deps` for the `affected_closure` in the commit. It stays
-    /// **empty** in Phase 3: the in-commit producer is full-build and too
-    /// expensive to run eagerly (see `run_identity_reconciliation`), so the layer
-    /// is not maintained until Phase 4 makes it authoritative. While empty,
-    /// `affected_closure` returns exactly the seeds (`changed ∪ deleted`).
+    /// Canonical native code layer (nodes + edges + reverse-deps). Maintained
+    /// in-commit by the scoped producer (`produce_layer` → `CodeLayer::diff_from`):
+    /// the commit re-derives the dirty scope over the prior layer and the commit
+    /// reads its `reverse_deps` to compute the transitive, container-granular
+    /// affected closure at the source (never-miss).
     pub(crate) code_layer: crate::code_layer::CodeLayer,
     /// Paths carrying a genuinely *unsaved* overlay edit (from `edit` /
     /// `edit_virtual`), as opposed to content ingested from disk at open or via

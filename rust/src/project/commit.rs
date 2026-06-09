@@ -166,8 +166,8 @@ pub(crate) fn build_commit_delta(
     // `touched_files` is the bus's project-relative file surface (the directly
     // edited files); normalise the absolute native paths here so the bus is a
     // pure projection with no Python path math. The per-category `created` /
-    // `changed` / `deleted` fields stay native (path-shaped metadata consumed by
-    // the still-path-shaped derived invalidation until Phase 8).
+    // `changed` / `deleted` fields stay native (path-shaped metadata for
+    // file-interest bus matching and human readability — never an entity id).
     let touched_files: Vec<String> = created
         .iter()
         .chain(changed.iter())
@@ -360,14 +360,12 @@ pub(crate) fn run_identity_reconciliation(
     // `SidecarWriteError`), run BEFORE the deferred publish so a write failure
     // rolls the whole commit back to R−1.
 
-    // NOTE (Phase 2): the native code layer is *not* produced eagerly here.
-    // The Phase 2 producer is a full build (full semantic analysis: occurrence
-    // resolution + type-hierarchy/typeshed warmup), so running it inside every
-    // commit/open would make `open()` ~100x slower and serialise on the GIL.
-    // Phase 2's deliverable is parity, served on demand by
-    // `PyTyProject::full_code_delta`. The eager in-commit hookup (§5.3 step 4)
-    // is deferred to Phase 3, where the producer becomes incremental/scoped and
-    // the commit is staged (Phase 5). See PROGRESS.md §5.
+    // NOTE: the code layer is *not* produced in this reconciliation pass. A full
+    // build (occurrence resolution + type-hierarchy/typeshed warmup) is ~100x too
+    // slow to run on the GIL per commit, so `run_staged` runs the *scoped*
+    // producer (`produce_layer`) over just the dirty scope and maintains
+    // `reverse_deps` incrementally; `PyTyProject::full_code_delta` serves a full
+    // build on demand. This keeps identity reconciliation cheap and bounded.
 
     IdentityDelta {
         created_ids,

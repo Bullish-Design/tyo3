@@ -45,7 +45,7 @@ class CommitDelta(BaseModel):
     authored_ids: list[str] = Field(default_factory=list)
     affected_ids: list[str] = Field(default_factory=list)
 
-    # ── nested structural delta (Phase 2; Phase 4 will type this) ────────
+    # ── nested structural delta (the native CodeDeltaDto, carried as a dict) ──
     code_delta: dict | None = None
 
     # ── path-shaped metadata (NOT ids) ──────────────────────────────────

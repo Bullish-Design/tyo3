@@ -229,15 +229,11 @@ impl CodeLayer {
     /// transitively. The result always contains the seeds themselves.
     ///
     /// BFS with a visited set so cycles terminate; `BTreeSet` makes the output
-    /// deterministic (§5.12).
-    ///
-    /// Phase 3 note: when `reverse_deps` is empty (the head layer is not yet
-    /// maintained in-commit — deferred to Phase 4), this returns exactly the
-    /// seeds, i.e. `changed ∪ deleted`. The transitive dependents light up once
-    /// the layer is authoritative.
+    /// deterministic (§5.12). An empty `reverse_deps` simply returns the seeds.
     ///
     /// Superseded for prod by `affected_closure_with_prev` (which handles the
-    /// deleted-seed subtlety); retained as a focused unit-test helper.
+    /// deleted-seed subtlety over the prior layer); retained as a focused
+    /// unit-test helper for the single-layer closure.
     #[cfg(test)]
     pub fn affected_closure(&self, seeds: &BTreeSet<String>) -> BTreeSet<String> {
         let mut visited: BTreeSet<String> = BTreeSet::new();

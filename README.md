@@ -7,6 +7,22 @@ TyO3 wraps ty's Rust backend via [PyO3](https://pyo3.rs/), providing a
 Pydantic-validated Python API for type checking, symbol discovery, code
 navigation, and hover information.
 
+Beyond stateless reads, TyO3 is an **incremental, transactional semantic
+engine**:
+
+- **Editable sessions** — overlay edits in memory (`session.edit` /
+  `edit_many`) without writing to disk; each edit is one atomic commit.
+- **MVCC snapshots** — `session.snapshot()` pins an immutable, thread-shareable
+  view of a revision; reads never advance head, and pinned snapshots time-travel.
+- **Durable identity** — entities carry stable `DurableId`s that survive cosmetic
+  edits and moves; a content hash changes only on a meaningful edit.
+- **Id-level commit deltas** — every write yields the transitive,
+  container-granular `affected_ids` closure, computed natively at the source.
+- **Derived & authored layers** — content-hash-keyed derived artifacts (local or
+  semantic key locality) and durable authored records, surfaced per snapshot.
+- **Delta bus** — subscribe to ordered, id-level change notifications, with an
+  optional async `precision = method` refinement channel.
+
 ## Requirements
 
 - Python &ge; 3.13

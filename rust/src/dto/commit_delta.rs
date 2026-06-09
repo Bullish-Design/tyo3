@@ -8,10 +8,10 @@
 //!   - `deleted_ids` — retired this revision (their authored records orphan, not drop)
 //!   - `moved` — structured `{id, old/new qualified path, old/new file}`; a move is
 //!     reported distinctly from create+delete so content-hash-keyed caches stay hit
-//!   - `affected_ids` — the closure of `changed ∪ deleted` under the code layer's
-//!     reverse-dependency index (Phase 3: seeds-only while the layer is empty; the
-//!     live transitive closure lands in Phase 4 when the layer is authoritative)
-//!   - `code_delta` — the Phase 2 structural `CodeDeltaDto`, **nested** (not duplicated)
+//!   - `affected_ids` — the transitive closure of `changed ∪ deleted` under the
+//!     code layer's reverse-dependency index, computed at the source
+//!     (container-granular, never-miss)
+//!   - `code_delta` — the structural `CodeDeltaDto`, **nested** (not duplicated)
 //!
 //! `touched_files` and the per-category `created`/`changed`/`deleted` path lists are
 //! **metadata only** — the file paths the write synthesised events for. They exist
@@ -49,21 +49,22 @@ pub struct CommitDeltaDto {
     pub moved: Vec<MovedEntityDto>,
     /// Ids authored this commit (the `author` write path); `[]` otherwise.
     pub authored_ids: Vec<String>,
-    /// Closure of `changed ∪ deleted` under `reverse_deps`. Phase 3: seeds-only
-    /// (the head code layer is empty until Phase 4 makes it authoritative).
+    /// Transitive closure of `changed ∪ deleted` under `reverse_deps` — the
+    /// container-granular, never-miss affected set computed in-commit.
     pub affected_ids: Vec<String>,
 
-    // ── nested structural delta (Phase 2, carried for Phase 4) ───────────
-    /// Three-state structural delta (§5.3 / Phase 4):
+    // ── nested structural delta ──────────────────────────────────────────
+    /// Three-state structural delta (§5.3):
     ///   - `None` (absent)        → no structural delta was computed this commit
     ///     ⇒ the consumer rebuilds the head graph from a full native delta;
     ///   - `Some(empty)`          → computed, nothing changed (e.g. a
     ///     whitespace-only edit) ⇒ a clean no-op apply;
     ///   - `Some(populated)`      → the incremental delta ⇒ apply it.
     ///
-    /// `build_commit_delta` emits `None` while the in-commit producer is not
-    /// running (deferred — see `run_identity_reconciliation`). Pythonizes to
-    /// `None` / a dict, matching Python `CommitDelta.code_delta: dict | None`.
+    /// `build_commit_delta` emits `None` only for writes that don't reconcile the
+    /// code layer (e.g. `author`); a structural edit always carries `Some` (an
+    /// empty delta for a cosmetic edit). Pythonizes to `None` / a dict, matching
+    /// Python `CommitDelta.code_delta: dict | None`.
     pub code_delta: Option<CodeDeltaDto>,
 
     // ── path-shaped metadata (NOT ids — for bus file-interest + readability) ─
