@@ -1665,10 +1665,10 @@ Create `src/tyo3/tests/test_final_acceptance.py` exercising the full lifecycle:
 | `test_final_commit_delta_contract.py` | 0 (✅ Phase 3 done) | — |
 | `test_final_transaction_rollback.py` | 0 (✅ Phase 5 done; module xfail removed) | — |
 | `test_final_bus_contract.py` | 0 (✅ Phase 6 done; all 3 markers removed) | — |
-| `test_final_derived_contract.py` | 5 | Phase 7 |
-| `test_final_hash_ast.py` | 2 | Phase 9 |
+| `test_final_derived_contract.py` | 0 (✅ Phase 7 done; all 5 markers removed) | — |
+| `test_final_hash_ast.py` | 0 (✅ Phase 9 done; both markers removed) | — |
 | `test_final_parity_oracle.py` | 0 (✅ Phase 2 done) | — |
-| **Total** | **7** (Phase 6 closed the 3 bus-contract xfails) | |
+| **Total** | **0** — every gated contract xfail has flipped to green | |
 
 > Note: `graph/tests/test_incremental_parity.py::test_moved_entity_...` keeps its
 > **non-strict** xfail. Phase 5 fixed the watcher event-dropping half (the
