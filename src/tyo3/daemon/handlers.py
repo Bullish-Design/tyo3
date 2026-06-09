@@ -1,0 +1,431 @@
+"""RPC handlers — one method per JSON-RPC verb, against a real ``TyO3Session``.
+
+Each handler is a thin wrapper over the engine API exercised in
+``src/tyo3/demo/tour.py`` and ``src/tyo3/tests/test_final_acceptance.py`` (the
+canonical, tested surface). Handlers run on whatever thread the server hands
+them, but **every** session call is funnelled through the :class:`SessionActor`
+so the session is only ever touched from its one owner thread.
+
+The handlers translate between the wire (project-relative posix paths, 1-based
+positions, JSON-able dicts) and the engine (``CommitDelta``, ``SymbolNode``,
+``DerivedValue``, …). Nothing here mutates engine internals — it is a projection
+layer.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from tyo3.daemon.protocol import INVALID_PARAMS, METHOD_NOT_FOUND, ProtocolError
+from tyo3.graph.identity import is_entity_durable_id
+
+if TYPE_CHECKING:
+    from tyo3 import TyO3Session
+    from tyo3.daemon.session_actor import SessionActor
+    from tyo3.daemon.tracking import AffectedTracker
+
+
+class Handlers:
+    """The RPC method table, bound to one :class:`SessionActor`."""
+
+    def __init__(self, actor: SessionActor, *, tracker: AffectedTracker | None = None) -> None:
+        self._actor = actor
+        self._root = Path(actor.root).resolve()
+        self._session_id = hashlib.sha1(str(self._root).encode()).hexdigest()[:12]
+        # Shared, thread-safe record of "what revision last affected each id",
+        # populated by the bus pump; read by entity_at. Optional (absent in the
+        # handler-only tests, present once the pump is wired).
+        self._tracker = tracker
+
+    # ── Dispatch ───────────────────────────────────────────────────
+
+    def dispatch(self, method: str, params: dict[str, Any]) -> Any:
+        """Route *method* to its handler, returning a JSON-able result.
+
+        Raises :class:`ProtocolError` (``METHOD_NOT_FOUND`` / ``INVALID_PARAMS``)
+        for protocol faults; engine exceptions propagate to the server, which
+        renders them as an ``ENGINE_ERROR`` response.
+        """
+        fn = _METHODS.get(method)
+        if fn is None:
+            raise ProtocolError(f"unknown method '{method}'", code=METHOD_NOT_FOUND)
+        return fn(self, params)
+
+    @property
+    def methods(self) -> list[str]:
+        return sorted(_METHODS)
+
+    # ── Methods ────────────────────────────────────────────────────
+
+    def open(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Idempotent project open. The session is already opened and indexed by
+        the actor; this returns its identity and current head."""
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            return {
+                "session_id": self._session_id,
+                "root": str(s.root),
+                "revision": s.head,
+                "files": [str(p) for p in s.files()],
+                "precision": s.config.code_graph.precision,
+                "layers": sorted(s.config.layers),
+            }
+
+        return self._actor.submit(work)
+
+    def sync_buffer(self, params: dict[str, Any]) -> dict[str, Any]:
+        """The editor write path: overlay *text* for *path* (no disk write),
+        commit, and return the id-level :class:`CommitDelta`."""
+        path = _require(params, "path", str)
+        text = _require(params, "text", str)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            delta = s.edit(rel, text)
+            return _commit_delta_dict(delta)
+
+        return self._actor.submit(work)
+
+    def entity_at(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Resolve the entity under *(path, line, col)* (1-based) and return its
+        cross-layer card, or ``null`` if nothing is there."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any] | None:
+            did = s.id_for(rel, line, col)
+            if did is None:
+                return None
+            return self._entity_dict(s, did)
+
+        return self._actor.submit(work)
+
+    def decorate(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Batch entity → annotation map for one file, for extmark placement.
+
+        Walks the head graph for entity nodes whose ``file`` is *path*, joining
+        the authored note layer and the derived summary layer."""
+        path = _require(params, "path", str)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> list[dict[str, Any]]:
+            note_layer = self._note_layer(s)
+            summary_layer = self._summary_layer(s)
+            out: list[dict[str, Any]] = []
+            g = s.graph
+            for idx in g._graph.node_indices():
+                node = g._graph[idx]
+                if node.file != rel or node.external or not is_entity_durable_id(node.durable_id):
+                    continue
+                did = node.durable_id
+                item: dict[str, Any] = {
+                    "durable_id": did,
+                    "name": node.name,
+                    "qualified_name": node.qualified_name,
+                    "kind": node.kind.value,
+                    "range": _range_dict(node.range),
+                }
+                if note_layer is not None:
+                    note = self._read_note(s, note_layer, did)
+                    if note is not None:
+                        item["note"] = note
+                if summary_layer is not None:
+                    summary = self._read_summary(s, summary_layer, did)
+                    if summary is not None:
+                        item["summary"] = summary
+                out.append(item)
+            # Stable order: by start line then column — matches buffer order.
+            out.sort(key=lambda d: (d["range"]["start"]["line"], d["range"]["start"]["column"]))
+            return out
+
+        return self._actor.submit(work)
+
+    def author(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Author (write) a value for ``(layer, durable_id)`` — a real commit."""
+        layer = _require(params, "layer", str)
+        durable_id = _require(params, "durable_id", str)
+        if "value" not in params:
+            raise ProtocolError("missing 'value'", code=INVALID_PARAMS)
+        value = params["value"]
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            delta = s.author(layer, durable_id, value)
+            return {"revision": delta.revision, "durable_id": durable_id, "layer": layer}
+
+        return self._actor.submit(work)
+
+    def authored(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Read the authored record for ``(layer, durable_id)`` at head."""
+        layer = _require(params, "layer", str)
+        durable_id = _require(params, "durable_id", str)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            av = s.authored(layer, durable_id)
+            return {
+                "layer": av.layer,
+                "durable_id": av.durable_id,
+                "value": av.value,
+                "status": av.status,
+                "revision": av.revision,
+            }
+
+        return self._actor.submit(work)
+
+    def locate(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Resolve a DurableId to its current ``file::qualified_path``."""
+        durable_id = _require(params, "durable_id", str)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            loc = s.locate(durable_id)
+            return {"durable_id": durable_id, "location": loc}
+
+        return self._actor.submit(work)
+
+    def diff(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Entity-level snapshot diff between ``from_rev`` and ``to_rev`` (or head)."""
+        from_rev = _require(params, "from_rev", int)
+        to_rev = params.get("to_rev")
+        if to_rev is not None and not isinstance(to_rev, int):
+            raise ProtocolError("'to_rev' must be an integer", code=INVALID_PARAMS)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            before = s.snapshot(at=from_rev)
+            try:
+                after = s.snapshot(at=to_rev) if to_rev is not None else s.snapshot()
+                try:
+                    d = after.diff(before)
+                    return {
+                        "before_revision": d.before_revision,
+                        "after_revision": d.after_revision,
+                        "added": sorted(d.code.added),
+                        "removed": sorted(d.code.removed),
+                        "changed": sorted(d.code.changed),
+                        "moved": sorted(d.code.moved),
+                    }
+                finally:
+                    after.close()
+            finally:
+                before.close()
+
+        return self._actor.submit(work)
+
+    def derived(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Resolve a derived artifact for ``(layer, durable_id)`` at head."""
+        layer = _require(params, "layer", str)
+        durable_id = _require(params, "durable_id", str)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            dv = s.derived(layer, durable_id)
+            return {
+                "layer": dv.layer,
+                "durable_id": durable_id,
+                "status": dv.status,
+                "artifact": _artifact_str(dv.artifact),
+                "revision": dv.revision,
+            }
+
+        return self._actor.submit(work)
+
+    def reindex(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Full rescan (``sync_all``) — the overseer 'reindex' task."""
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            delta = s.sync_all()
+            return _commit_delta_dict(delta)
+
+        return self._actor.submit(work)
+
+    def gc(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Evict orphaned derived artifacts (only ``gc = "orphans"`` layers)."""
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            s.gc()
+            return {"ok": True, "revision": s.head}
+
+        return self._actor.submit(work)
+
+    def check(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Run the type-checker; return diagnostics (whole project or one file)."""
+        path = params.get("path")
+        rel = self._relpath(path) if isinstance(path, str) else None
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            result = s.check_file(rel) if rel is not None else s.check()
+            data = result.model_dump(mode="json")
+            diags = data.get("diagnostics", data if isinstance(data, list) else [])
+            return {"diagnostics": diags, "count": len(diags) if isinstance(diags, list) else 0}
+
+        return self._actor.submit(work)
+
+    # ── Internal joins ─────────────────────────────────────────────
+
+    def _entity_dict(self, s: TyO3Session, did: str) -> dict[str, Any]:
+        """The full per-entity card used by ``entity_at`` (and the inspector)."""
+        node = _node_by_id(s.graph, did)
+        card: dict[str, Any] = {
+            "durable_id": did,
+            "location": s.locate(did),
+        }
+        if node is not None:
+            card.update(
+                {
+                    "name": node.name,
+                    "qualified_name": node.qualified_name,
+                    "kind": node.kind.value,
+                    "file": node.file,
+                    "range": _range_dict(node.range),
+                    "content_hash": node.content_hash,
+                }
+            )
+        # Authored records (every authored layer that has a record).
+        authored: dict[str, Any] = {}
+        for lname, lcfg in s.config.layers.items():
+            if lcfg.origin != "authored":
+                continue
+            av = s.authored(lname, did)
+            if av.status != "absent":
+                authored[lname] = {"value": av.value, "status": av.status, "revision": av.revision}
+        card["authored"] = authored
+        # Derived artifacts (every derived layer that applies to this kind).
+        derived: dict[str, Any] = {}
+        for lname, lcfg in s.config.layers.items():
+            if lcfg.origin != "derived":
+                continue
+            if node is not None and lcfg.entity_kinds and node.kind.value not in lcfg.entity_kinds:
+                continue
+            dv = s.derived(lname, did)
+            if dv.status != "absent":
+                derived[lname] = {"artifact": _artifact_str(dv.artifact), "status": dv.status}
+        card["derived"] = derived
+        # Last revision whose affected closure included this id (best-effort).
+        if self._tracker is not None:
+            card["last_affected_revision"] = self._tracker.last_affected(did)
+        return card
+
+    def _note_layer(self, s: TyO3Session) -> str | None:
+        """The authored layer to read inline notes from: prefer ``intent``."""
+        authored = [n for n, c in s.config.layers.items() if c.origin == "authored"]
+        if not authored:
+            return None
+        return "intent" if "intent" in authored else authored[0]
+
+    def _summary_layer(self, s: TyO3Session) -> str | None:
+        """The derived layer to read inline summaries from: prefer ``summary``."""
+        derived = [n for n, c in s.config.layers.items() if c.origin == "derived"]
+        if not derived:
+            return None
+        return "summary" if "summary" in derived else derived[0]
+
+    def _read_note(self, s: TyO3Session, layer: str, did: str) -> str | None:
+        av = s.authored(layer, did)
+        if av.status == "absent" or av.value is None:
+            return None
+        return _note_text(av.value)
+
+    def _read_summary(self, s: TyO3Session, layer: str, did: str) -> str | None:
+        dv = s.derived(layer, did)
+        if dv.status in ("absent", "failed") or dv.artifact is None:
+            return None
+        return _artifact_str(dv.artifact)
+
+    # ── Path translation ───────────────────────────────────────────
+
+    def _relpath(self, path: str) -> str:
+        """Project-relative posix path (graph nodes store these)."""
+        p = Path(path)
+        if p.is_absolute():
+            try:
+                return p.resolve().relative_to(self._root).as_posix()
+            except ValueError:
+                return p.as_posix()
+        return p.as_posix()
+
+
+# ── Serialisation helpers ────────────────────────────────────────────────────
+
+
+def _require(params: dict[str, Any], key: str, typ: type) -> Any:
+    if key not in params:
+        raise ProtocolError(f"missing '{key}'", code=INVALID_PARAMS)
+    val = params[key]
+    # bool is an int subclass — reject it where an int is required.
+    if typ is int and isinstance(val, bool):
+        raise ProtocolError(f"'{key}' must be of type {typ.__name__}", code=INVALID_PARAMS)
+    if not isinstance(val, typ):
+        raise ProtocolError(f"'{key}' must be of type {typ.__name__}", code=INVALID_PARAMS)
+    return val
+
+
+def _range_dict(rng: Any) -> dict[str, Any]:
+    """1-based ``{start:{line,column}, end:{line,column}}`` (TyO3 native convention)."""
+    return {
+        "start": {"line": rng.start.line, "column": rng.start.column},
+        "end": {"line": rng.end.line, "column": rng.end.column},
+    }
+
+
+def _commit_delta_dict(delta: Any) -> dict[str, Any]:
+    """Project a ``CommitDelta`` to the wire shape (id-level, JSON-able)."""
+    return {
+        "revision": delta.revision,
+        "created_ids": list(delta.created_ids),
+        "changed_ids": list(delta.changed_ids),
+        "deleted_ids": list(delta.deleted_ids),
+        "affected_ids": list(delta.affected_ids),
+        "moved": [
+            {"id": m.id, "old_file": m.old_file, "new_file": m.new_file, "new_qualified_path": m.new_qualified_path}
+            for m in delta.moved
+        ],
+        "touched_files": list(delta.touched_files),
+        "affected_files": list(delta.affected_files),
+        "rescan": delta.rescan,
+    }
+
+
+def _node_by_id(graph: Any, durable_id: str) -> Any:
+    idx = graph._id_to_index.get(durable_id)
+    return graph._graph[idx] if idx is not None else None
+
+
+def _artifact_str(artifact: Any) -> str | None:
+    """Render a derived artifact (bytes | str | None) as a wire string."""
+    if artifact is None:
+        return None
+    if isinstance(artifact, bytes):
+        return artifact.decode("utf-8", errors="replace")
+    return str(artifact)
+
+
+def _note_text(value: Any) -> str:
+    """Human-readable note text from an authored value.
+
+    Notes authored by ``:TyO3Note`` are ``{"note": text}``; fall back to a
+    string render for any other shape.
+    """
+    if isinstance(value, dict) and "note" in value:
+        return str(value["note"])
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+# Method table — name → bound function. Defined after the class so the
+# functions resolve. Mirrors OVERVIEW.md §5.
+_METHODS = {
+    "open": Handlers.open,
+    "sync_buffer": Handlers.sync_buffer,
+    "entity_at": Handlers.entity_at,
+    "decorate": Handlers.decorate,
+    "author": Handlers.author,
+    "authored": Handlers.authored,
+    "locate": Handlers.locate,
+    "diff": Handlers.diff,
+    "derived": Handlers.derived,
+    "reindex": Handlers.reindex,
+    "gc": Handlers.gc,
+    "check": Handlers.check,
+}
