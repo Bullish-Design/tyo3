@@ -300,6 +300,10 @@ in
       exit 1
     fi
     vhs editors/tyo3.nvim/demo/tour.tape
+    echo "── GIF done; recording asciinema cast ──"
+    # vhs 0.11 does not emit asciinema .cast natively, so the cast is recorded
+    # by a small dependency-free PTY driver running the same scripted scenes.
+    python editors/tyo3.nvim/demo/record_cast.py editors/tyo3.nvim/demo/tour.cast || true
     echo "═══ Wrote editors/tyo3.nvim/demo/tour.gif + tour.cast ═══"
   '';
 

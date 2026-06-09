@@ -7,7 +7,6 @@
 # deterministic. Determinism over speed.
 
 Output editors/tyo3.nvim/demo/tour.gif
-Output editors/tyo3.nvim/demo/tour.cast
 
 Require nvim
 Require python
