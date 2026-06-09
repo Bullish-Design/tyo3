@@ -4,10 +4,9 @@
 > session, run from the `tyo3` repo root. It points at the two design/execution
 > docs in this directory, which contain all the detail.
 >
-> **Base branch:** `spine-refactor-phase-1`. The kickoff docs, the design
-> overview, and the `tyo3-demo tour` all live there (they were committed after
-> the `v0.2.0` release, so they are **not** on `main`). Branch off
-> `spine-refactor-phase-1` so the new session can read them.
+> **Base branch:** `main`. As of the post-`v0.2.0` fast-forward, `main` carries
+> the kickoff docs, the design overview, and the `tyo3-demo tour`, so a fresh
+> session can branch off `main` and read its own instructions.
 
 ---
 
@@ -31,9 +30,9 @@ What to build — the full thing, not an MVP:
    an affected-set panel, Telescope pickers, commands, and :checkhealth.
 
 Constraints (from KICKOFF sections 1 and 7):
-- Create branch `nvim-plugin` off `spine-refactor-phase-1` (which contains these
-  kickoff docs and the released v0.2.0 engine). Everything through
-  `devenv shell --`. No AI attribution in commits/docs.
+- Create branch `nvim-plugin` off `main` (which contains these kickoff docs and
+  the released v0.2.0 engine). Everything through `devenv shell --`. No AI
+  attribution in commits/docs.
 - Daemon-only — do NOT change the Rust/Python engine. It is complete; you are
   wrapping it. Learn the API from src/tyo3/demo/tour.py and
   src/tyo3/tests/test_final_acceptance.py (canonical, tested usage) plus the
@@ -55,10 +54,6 @@ genuine design fork the docs don't resolve.
 
 ## Note on the PR base
 
-The new branch is cut from `spine-refactor-phase-1`, which is ahead of `main` by
-the post-`v0.2.0` doc/tour commits (projects 18–20 + `tyo3-demo tour`). A PR from
-`nvim-plugin` → `main` will therefore include those commits alongside the plugin.
-If you want the plugin PR to contain *only* plugin work, first fast-forward `main`
-to `spine-refactor-phase-1` (it is a strict ancestor, so a clean ff) and branch
-`nvim-plugin` off the updated `main` instead — then change the base line in the
-prompt to `off main`.
+`main` was fast-forwarded to include the post-`v0.2.0` doc/tour commits (projects
+18–20 + `tyo3-demo tour`), so branching `nvim-plugin` off `main` is clean: a PR
+from `nvim-plugin` → `main` will contain **only** the plugin work.
