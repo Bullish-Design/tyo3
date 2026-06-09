@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import hashlib
 import os
+from pathlib import Path
 
 from tyo3.exceptions import StoreBackendBroken
 
@@ -24,9 +24,7 @@ class FsStore:
             # error (§5.12). Every other IO failure propagates typed below.
             return None
         except OSError as exc:
-            raise StoreBackendBroken(
-                f"FsStore read failed for key {key!r}: {exc}"
-            ) from exc
+            raise StoreBackendBroken(f"FsStore read failed for key {key!r}: {exc}") from exc
 
     def put(self, key: str, artifact: bytes) -> None:
         path = self._path(key)

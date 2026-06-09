@@ -92,8 +92,7 @@ class Bus:
             # this fires, a caller double-published or published out of order;
             # fix the caller, never relax to >=.
             assert delta.revision > self._last_published_revision, (
-                f"bus received revision {delta.revision} after "
-                f"{self._last_published_revision} — revision order broken"
+                f"bus received revision {delta.revision} after {self._last_published_revision} — revision order broken"
             )
             self._last_published_revision = delta.revision
 

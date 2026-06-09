@@ -7,14 +7,15 @@ filtered by ``entity_kinds``); ``value(id)`` returns a ``DerivedValue``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterable, Literal
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Literal
 
 from tyo3.graph.identity import is_entity_durable_id
 from tyo3.layers.base import LayerDiff
 
 if TYPE_CHECKING:
-    from tyo3.models.derived import DerivedValue
     from tyo3.config import LayerConfig
+    from tyo3.models.derived import DerivedValue
     from tyo3.session import Snapshot
 
 
@@ -80,8 +81,7 @@ class DerivedLayerView:
         added = frozenset(after_ids - before_ids)
         removed = frozenset(before_ids - after_ids)
         drifted = frozenset(
-            did for did in (after_ids & before_ids)
-            if _cache_key(after_graph, did) != _cache_key(before_graph, did)
+            did for did in (after_ids & before_ids) if _cache_key(after_graph, did) != _cache_key(before_graph, did)
         )
 
         return LayerDiff(

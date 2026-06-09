@@ -6,13 +6,14 @@ returns ids with a record at R; ``value(id)`` returns an ``AuthoredValue``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterable, Literal
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Literal
 
 from tyo3.layers.base import LayerDiff
 
 if TYPE_CHECKING:
-    from tyo3.models.authored import AuthoredValue
     from tyo3.config import LayerConfig
+    from tyo3.models.authored import AuthoredValue
     from tyo3.session import Snapshot
 
 
@@ -88,7 +89,7 @@ class AuthoredLayerView:
         removed = frozenset(before_ids - after_ids)
         # "drifted" in authored terms = same id present at both, value differs.
         drifted = frozenset()
-        for did in (after_ids & before_ids):
+        for did in after_ids & before_ids:
             # Both ids are present in their respective views, so these reads
             # resolve; a genuine read failure propagates (V1 §5.12).
             a_val = self._snapshot.authored(self.name, did)

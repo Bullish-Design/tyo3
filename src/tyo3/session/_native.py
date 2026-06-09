@@ -20,6 +20,12 @@ except ImportError:
 # Import typed exception classes so we can catch Rust errors without string matching.
 try:
     from tyo3._native_impl import (
+        ConfigError as _NativeConfigError,
+    )
+    from tyo3._native_impl import (
+        FormatVersionError as _NativeFormatVersionError,
+    )
+    from tyo3._native_impl import (
         PathResolutionError as _NativePathError,
     )
     from tyo3._native_impl import (
@@ -30,10 +36,6 @@ try:
     )
     from tyo3._native_impl import (
         RevisionEvictedError as _NativeRevisionEvictedError,
-    )
-    from tyo3._native_impl import (
-        ConfigError as _NativeConfigError,
-        FormatVersionError as _NativeFormatVersionError,
     )
 except ImportError:
     # When the native extension isn't built, define dummy classes

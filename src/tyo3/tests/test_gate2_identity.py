@@ -13,10 +13,8 @@ Validates all 9 Gate 2 acceptance criteria:
 """
 
 import tempfile
-import os
 from pathlib import Path
 
-import pytest
 from tyo3 import TyO3Session
 
 
@@ -43,9 +41,12 @@ class TestCosmeticEditStability:
     def test_blank_line_above_method_preserves_id(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "models.py": "class User:\n    def save(self):\n        pass\n",
-            })
+            _write_files(
+                root,
+                {
+                    "models.py": "class User:\n    def save(self):\n        pass\n",
+                },
+            )
             s = _new_session(root)
 
             id1 = s.id_for("models.py", 3, 5)  # inside save() body
@@ -62,9 +63,12 @@ class TestCosmeticEditStability:
     def test_content_hash_unchanged_by_cosmetic_edit(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "mod.py": "VALUE = 42\n",
-            })
+            _write_files(
+                root,
+                {
+                    "mod.py": "VALUE = 42\n",
+                },
+            )
             s = _new_session(root)
 
             id1 = s.id_for("mod.py", 1, 1)
@@ -85,20 +89,25 @@ class TestUnchangedMove:
     def test_move_class_to_new_file_preserves_id(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "a.py": "class Old:\n    pass\n",
-                "b.py": "",  # empty placeholder
-            })
+            _write_files(
+                root,
+                {
+                    "a.py": "class Old:\n    pass\n",
+                    "b.py": "",  # empty placeholder
+                },
+            )
             s = _new_session(root)
 
             id1 = s.id_for("a.py", 1, 7)
             assert id1 is not None
 
             # Move the class to b.py (remove from a.py, add to b.py).
-            result = s.edit_many({
-                "a.py": "",  # empty
-                "b.py": "class Old:\n    pass\n",
-            })
+            result = s.edit_many(
+                {
+                    "a.py": "",  # empty
+                    "b.py": "class Old:\n    pass\n",
+                }
+            )
             assert result.moved, "should report moved path(s)"
 
             id2 = s.id_for("b.py", 1, 7)
@@ -117,9 +126,12 @@ class TestBodyChangeKeepsId:
     def test_edit_method_body_preserves_id(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "models.py": "class User:\n    def save(self):\n        return True\n",
-            })
+            _write_files(
+                root,
+                {
+                    "models.py": "class User:\n    def save(self):\n        return True\n",
+                },
+            )
             s = _new_session(root)
 
             id1 = s.id_for("models.py", 2, 9)
@@ -143,9 +155,12 @@ class TestNoAuthoredLoss:
     def test_delete_then_readd_preserves_id(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "mod.py": "def helper():\n    return 42\n",
-            })
+            _write_files(
+                root,
+                {
+                    "mod.py": "def helper():\n    return 42\n",
+                },
+            )
             s = _new_session(root)
 
             id1 = s.id_for("mod.py", 1, 5)
@@ -166,9 +181,12 @@ class TestNoAuthoredLoss:
     def test_vanished_symbol_is_orphaned_not_deleted(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "mod.py": "def old_func():\n    pass\n",
-            })
+            _write_files(
+                root,
+                {
+                    "mod.py": "def old_func():\n    pass\n",
+                },
+            )
             s = _new_session(root)
 
             id1 = s.id_for("mod.py", 1, 5)
@@ -195,9 +213,12 @@ class TestDeterminism:
     def test_rebuild_produces_identical_ids(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "mod.py": "class A:\n    def m1(self): pass\n\ndef top():\n    pass\n",
-            })
+            _write_files(
+                root,
+                {
+                    "mod.py": "class A:\n    def m1(self): pass\n\ndef top():\n    pass\n",
+                },
+            )
             s1 = _new_session(root)
             id_a = s1.id_for("mod.py", 1, 7)
             id_m1 = s1.id_for("mod.py", 2, 9)
@@ -224,27 +245,32 @@ class TestOneToOne:
     def test_two_entities_competing_for_one_anchor(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "a.py": "VALUE = 42\n",
-            })
+            _write_files(
+                root,
+                {
+                    "a.py": "VALUE = 42\n",
+                },
+            )
             s = _new_session(root)
             id1 = s.id_for("a.py", 1, 1)
+            assert id1 is not None
             s.close()
 
             # Re-open and add two new files with identical content.
-            _write_files(root, {
-                "b.py": "VALUE = 42\n",
-                "c.py": "VALUE = 42\n",
-            })
+            _write_files(
+                root,
+                {
+                    "b.py": "VALUE = 42\n",
+                    "c.py": "VALUE = 42\n",
+                },
+            )
             s2 = TyO3Session(str(root))
-            result = s2.sync_all()
+            s2.sync_all()
 
-            # At most one of b.py/c.py gets the same id as a.py (via hash match).
-            # The other gets a fresh minted id.
-            # Since a.py still exists in the project, both new files get minted ids
-            # (a.py still has the original id at the original path via EXACT match).
-            # The hash match only fires for moved entities (when path differs AND
-            # original is not found via EXACT match).
+            # a.py still exists at its original path, so it keeps its original id
+            # via EXACT match; the identical-content b.py/c.py do not steal it (the
+            # hash match only fires for moved entities whose original is gone).
+            assert s2.id_for("a.py", 1, 1) == id1
             s2.close()
 
 
@@ -259,14 +285,18 @@ class TestNoLocationDerivedIdentity:
         # Here we validate that ULID-based DurableIds are opaque (not derived
         # from content or location).
         import re
+
         # ULIDs are 26 chars, base-32 (Crockford), no line numbers.
         ulid_pattern = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "mod.py": "X = 1\n",
-            })
+            _write_files(
+                root,
+                {
+                    "mod.py": "X = 1\n",
+                },
+            )
             s = _new_session(root)
             idx = s.id_for("mod.py", 1, 1)
             assert idx is not None
@@ -280,9 +310,12 @@ class TestPersistenceNoLoss:
     def test_close_reopen_restores_ids(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "mod.py": "class Store:\n    pass\n",
-            })
+            _write_files(
+                root,
+                {
+                    "mod.py": "class Store:\n    pass\n",
+                },
+            )
             s1 = _new_session(root)
             id1 = s1.id_for("mod.py", 1, 7)
             s1.close()
@@ -297,9 +330,12 @@ class TestPersistenceNoLoss:
     def test_out_of_band_edit_rebinds_via_hash(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "mod.py": "VALUE = 99\n",
-            })
+            _write_files(
+                root,
+                {
+                    "mod.py": "VALUE = 99\n",
+                },
+            )
             s1 = _new_session(root)
             id1 = s1.id_for("mod.py", 1, 1)
             s1.close()
@@ -322,23 +358,28 @@ class TestNeedsReviewLifecycle:
         """Move a function to a new file with a body change → NeedsReview via STRUCT."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            _write_files(root, {
-                "a.py": "def helper(x):\n    return x + 1\n",
-                "b.py": "",
-            })
+            _write_files(
+                root,
+                {
+                    "a.py": "def helper(x):\n    return x + 1\n",
+                    "b.py": "",
+                },
+            )
             s = _new_session(root)
             id1 = s.id_for("a.py", 1, 5)
             assert id1 is not None
 
             # Move + body change.
-            result = s.edit_many({
-                "a.py": "",
-                "b.py": "def helper(x):\n    return x + 2\n",
-            })
-            # After edit_many with a fully new b.py, the entity might get
-            # a fresh minted id because path+hash both differ.
-            # Check if it appeared in moved or if a struct bind was made.
-            # In any case, verify needs_review captures ambiguous cases.
+            s.edit_many(
+                {
+                    "a.py": "",
+                    "b.py": "def helper(x):\n    return x + 2\n",
+                }
+            )
+            # After edit_many with a fully new b.py, the entity may get a fresh
+            # minted id (path+hash both differ) or a struct bind — but either way
+            # the relocated entity resolves to a durable id at its new location.
+            assert s.id_for("b.py", 1, 5) is not None
             s.close()
 
 
@@ -351,10 +392,7 @@ class TestBoundedCost:
             root = Path(d)
             _write_files(
                 root,
-                {
-                    f"mod{i}.py": f"def f{i}():\n    return {i}\n"
-                    for i in range(12)
-                },
+                {f"mod{i}.py": f"def f{i}():\n    return {i}\n" for i in range(12)},
             )
             s = _new_session(root)
             edited_id = s.id_for("mod3.py", 1, 5)
@@ -378,8 +416,7 @@ class TestBoundedCost:
             _write_files(
                 root,
                 {
-                    "target.py": "def kept():\n    return 1\n\n"
-                    "def removed():\n    return 2\n",
+                    "target.py": "def kept():\n    return 1\n\ndef removed():\n    return 2\n",
                     "other.py": "def unrelated():\n    return 3\n",
                 },
             )

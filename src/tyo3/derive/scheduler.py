@@ -48,7 +48,7 @@ class RecomputeScheduler:
 
     def enqueue(
         self,
-        layer: "DerivedLayer",
+        layer: DerivedLayer,
         durable_id: str,
         input_hash: str,
         *,
@@ -65,7 +65,7 @@ class RecomputeScheduler:
             if key not in {(w.layer_name, w.input_hash) for w in self._pending}:
                 self._pending.append(item)
 
-    def process_all(self, dag: "DerivationDAG", snapshot) -> None:
+    def process_all(self, dag: DerivationDAG, snapshot) -> None:
         """Process all pending eager items in topological order.
 
         Simple single-threaded implementation. The DAG's topological order
@@ -76,10 +76,7 @@ class RecomputeScheduler:
 
         for layer in dag.iter_layers():
             # Collect items for this layer.
-            layer_items = [
-                item for item in self._pending
-                if item.layer_name == layer.name
-            ]
+            layer_items = [item for item in self._pending if item.layer_name == layer.name]
             if not layer_items:
                 continue
 
@@ -118,9 +115,7 @@ class RecomputeScheduler:
 
         self._pending.clear()
 
-    def recompute_now(
-        self, dag: "DerivationDAG", layer: "DerivedLayer", snapshot, durable_id: str
-    ) -> bytes | None:
+    def recompute_now(self, dag: DerivationDAG, layer: DerivedLayer, snapshot, durable_id: str) -> bytes | None:
         """Synchronous recompute for blocking reads (§8.2.5)."""
         from tyo3.exceptions import GeneratorFailed
 
@@ -142,7 +137,9 @@ class RecomputeScheduler:
             layer.mark_failed(durable_id)
             logger.warning(
                 "Blocking recompute failed for layer=%s id=%s",
-                layer.name, durable_id, exc_info=True,
+                layer.name,
+                durable_id,
+                exc_info=True,
             )
 
         return None

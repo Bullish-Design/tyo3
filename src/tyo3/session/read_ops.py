@@ -580,5 +580,3 @@ class _ReadOps:
 
 
 # ── _OwnedView — a convenience layer view that owns its snapshot ─────────────
-
-

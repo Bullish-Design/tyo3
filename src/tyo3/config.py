@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -110,17 +110,13 @@ class TyConfig:
     topo_order: tuple[str, ...]
 
     @classmethod
-    def from_json(cls, text: str) -> "TyConfig":
+    def from_json(cls, text: str) -> TyConfig:
         data: dict[str, Any] = json.loads(text)
         raw: dict[str, Any] = data["raw"]
         topo_order = tuple(data["topo_order"])
 
         raw_layers = raw.get("layers", {})
-        layers = {
-            name: _layer(raw_layers[name])
-            for name in topo_order
-            if name != "code" and name in raw_layers
-        }
+        layers = {name: _layer(raw_layers[name]) for name in topo_order if name != "code" and name in raw_layers}
 
         return cls(
             schema_version=raw["schema_version"],
@@ -130,14 +126,8 @@ class TyConfig:
                 for name, profile in raw.get("hashing", {}).get("profiles", {}).items()
             },
             layers=layers,
-            generators={
-                name: _generator(generator)
-                for name, generator in raw.get("generators", {}).items()
-            },
-            stores={
-                name: StoreConfig(**store)
-                for name, store in raw.get("stores", {}).items()
-            },
+            generators={name: _generator(generator) for name, generator in raw.get("generators", {}).items()},
+            stores={name: StoreConfig(**store) for name, store in raw.get("stores", {}).items()},
             sidecar=SidecarConfig(**raw["sidecar"]),
             code_graph=_code_graph(raw.get("code_graph", {})),
             coordination=_coordination(raw.get("coordination", {})),

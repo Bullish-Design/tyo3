@@ -7,8 +7,9 @@ diff (Step 6) consume this protocol without special-casing any layer.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)

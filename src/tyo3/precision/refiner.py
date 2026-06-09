@@ -75,9 +75,7 @@ class PrecisionRefiner:
         """Start the daemon worker (async mode only; idempotent)."""
         if self._mode != "async" or self._started:
             return
-        self._thread = threading.Thread(
-            target=self._run, daemon=True, name="tyo3-precision-refiner"
-        )
+        self._thread = threading.Thread(target=self._run, daemon=True, name="tyo3-precision-refiner")
         self._started = True
         self._thread.start()
 
@@ -124,9 +122,7 @@ class PrecisionRefiner:
 
     # ── Core: narrow + publish ─────────────────────────────────────
 
-    def _compute_and_publish(
-        self, revision: int, changed_ids: list[str], affected_ids: list[str]
-    ) -> None:
+    def _compute_and_publish(self, revision: int, changed_ids: list[str], affected_ids: list[str]) -> None:
         # No bus / no subscribers ⇒ nothing to refine. Read the *already-built*
         # bus directly; never call _get_bus() (it would build a bus the writer
         # never asked for).
@@ -139,13 +135,9 @@ class PrecisionRefiner:
         narrowed = self._compute_narrowed(revision, changed_ids, affected_ids)
         if narrowed is None:
             return
-        bus.publish_refinement(
-            AffectedRefinement(revision=revision, narrowed=frozenset(narrowed))
-        )
+        bus.publish_refinement(AffectedRefinement(revision=revision, narrowed=frozenset(narrowed)))
 
-    def _compute_narrowed(
-        self, revision: int, changed_ids: list[str], affected_ids: list[str]
-    ) -> set[str] | None:
+    def _compute_narrowed(self, revision: int, changed_ids: list[str], affected_ids: list[str]) -> set[str] | None:
         """Resolve member-access over a frozen snapshot at ``revision`` and
         return the narrowed affected set (subset of coarse ∪ ``changed_ids``).
 
@@ -225,12 +217,17 @@ class PrecisionRefiner:
 
             return (kept & affected) | changed
         except Exception:
+            # Graceful degradation: any failure narrowing the set returns None,
+            # which the caller treats as "no refinement" (the sound coarse set
+            # already shipped on the primary channel).
             return None
         finally:
             if snap is not None:
                 try:
                     snap.close()
                 except Exception:
+                    # Best-effort cleanup of the frozen snapshot; a close failure
+                    # must not mask the refinement result.
                     pass
 
 
@@ -255,18 +252,16 @@ def _build_file_index(g: Any, root: Any) -> dict[str, list]:
     return index
 
 
-def _range_contains(rng: "Range", pos: "Position") -> bool:
+def _range_contains(rng: Range, pos: Position) -> bool:
     p = (pos.line, pos.column)
     return (rng.start.line, rng.start.column) <= p <= (rng.end.line, rng.end.column)
 
 
-def _range_size(rng: "Range") -> tuple[int, int]:
+def _range_size(rng: Range) -> tuple[int, int]:
     return (rng.end.line - rng.start.line, rng.end.column - rng.start.column)
 
 
-def _enclosing_entity_id(
-    file_index: dict[str, list], g: Any, abs_path: str, pos: "Position"
-) -> str | None:
+def _enclosing_entity_id(file_index: dict[str, list], g: Any, abs_path: str, pos: Position) -> str | None:
     """The durable id of the **tightest** entity whose range contains *pos*.
 
     A reference occurrence (``w.draw()`` inside ``consume_a``) maps to the entity

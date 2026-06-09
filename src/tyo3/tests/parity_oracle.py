@@ -65,8 +65,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from tyo3.graph.projection import CodeGraph
 from tyo3.graph.models import SymbolNode
+from tyo3.graph.projection import CodeGraph
 
 logger = logging.getLogger(__name__)
 
@@ -230,9 +230,7 @@ class ParityReport:
         )
 
     def cosmetic_message(self, label_expected: str, label_actual: str) -> str:
-        return "\n".join(
-            [f"cosmetic parity mismatch ({label_expected} vs {label_actual}):", *self.cosmetic_problems]
-        )
+        return "\n".join([f"cosmetic parity mismatch ({label_expected} vs {label_actual}):", *self.cosmetic_problems])
 
 
 def _format_node_set_diff(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]:
@@ -289,9 +287,7 @@ def compare_graphs(
         report.structural_problems.extend(_format_node_set_diff(exp_struct, act_struct))
 
     # ── structural: per-node structural payload ──
-    report.structural_problems.extend(
-        _format_payload_field_diff(exp_struct, act_struct, descriptor="payload")
-    )
+    report.structural_problems.extend(_format_payload_field_diff(exp_struct, act_struct, descriptor="payload"))
 
     # ── structural: edge relation set ──
     exp_rel, act_rel = edge_relation_set(expected), edge_relation_set(actual)
@@ -305,9 +301,7 @@ def compare_graphs(
             report.structural_problems.append(f"  relations only in actual ({len(only_a)}): {only_a[:10]}")
 
     # ── cosmetic: per-node cosmetic payload ──
-    report.cosmetic_problems.extend(
-        _format_payload_field_diff(exp_cos, act_cos, descriptor="cosmetic payload")
-    )
+    report.cosmetic_problems.extend(_format_payload_field_diff(exp_cos, act_cos, descriptor="cosmetic payload"))
 
     # ── cosmetic: edge multiset, restricted to relations present on both sides ──
     exp_multi, act_multi = edge_multiset(expected), edge_multiset(actual)
@@ -397,8 +391,7 @@ def native_delta_graph(source: Any, *, root: Path | None = None) -> CodeGraph:
     code_delta = _extract_native_code_delta(source)
     if code_delta is None:
         raise ParityOracleNotReady(
-            "native code delta is not available yet — lands in Phase 2 "
-            "(producer) and becomes applier-ready in Phase 4"
+            "native code delta is not available yet — lands in Phase 2 (producer) and becomes applier-ready in Phase 4"
         )
     graph = CodeGraph()
     if root is not None:
@@ -408,9 +401,7 @@ def native_delta_graph(source: Any, *, root: Path | None = None) -> CodeGraph:
     # Phase 4: graph.apply_code_delta(code_delta)
     apply = getattr(graph, "apply_code_delta", None)
     if apply is None:
-        raise ParityOracleNotReady(
-            "CodeGraph.apply_code_delta does not exist yet — lands in Phase 4"
-        )
+        raise ParityOracleNotReady("CodeGraph.apply_code_delta does not exist yet — lands in Phase 4")
     apply(code_delta)
     return graph
 
@@ -447,6 +438,4 @@ def assert_parity(
     """
     legacy = legacy_graph(source, root=root)
     native = native_delta_graph(source, root=root)
-    return assert_graphs_equal(
-        legacy, native, cosmetic=cosmetic, label_expected="legacy", label_actual="native"
-    )
+    return assert_graphs_equal(legacy, native, cosmetic=cosmetic, label_expected="legacy", label_actual="native")

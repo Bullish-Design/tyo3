@@ -101,9 +101,7 @@ def _run_child(tmp_path, code, *, timeout=20.0):
     # for the child or `import tyo3` fails with ModuleNotFoundError.
     src_dir = Path(__file__).resolve().parent.parent.parent
     env = {**os.environ}
-    env["PYTHONPATH"] = os.pathsep.join(
-        p for p in (str(src_dir), env.get("PYTHONPATH", "")) if p
-    )
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(src_dir), env.get("PYTHONPATH", "")) if p)
     return subprocess.run(
         [sys.executable, str(script)],
         cwd=str(tmp_path),

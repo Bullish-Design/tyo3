@@ -35,9 +35,7 @@ def _num_diags(check_result) -> int:
 
 def _project(tmp_path: StdPath) -> StdPath:
     """Create a minimal project with pyproject.toml so discovery is fast."""
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname = \"mvcc-stress\"\nversion = \"0.1.0\"\n"
-    )
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "mvcc-stress"\nversion = "0.1.0"\n')
     (tmp_path / "a.py").write_text("x: int = 0\n")
     return tmp_path
 
@@ -94,7 +92,7 @@ def test_snapshot_readers_survive_hot_writer(tmp_path: StdPath) -> None:
 
         threads = [
             threading.Thread(target=reader, args=(snap, rev), daemon=True)
-            for snap, rev in zip(snapshots, expected_revisions)
+            for snap, rev in zip(snapshots, expected_revisions, strict=True)
         ]
         for t in threads:
             t.start()

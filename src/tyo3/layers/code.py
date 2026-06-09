@@ -7,7 +7,8 @@ entity DurableIds (excluding ``<module>`` / ``<external>`` synthetics);
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterable, Literal
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any, Literal
 
 from tyo3.graph.identity import is_entity_durable_id
 from tyo3.layers.base import LayerDiff
@@ -59,7 +60,6 @@ class CodeLayerView:
         view for the combined diff.
         """
         # Deferred import to avoid circularity; implemented in Step 3.
-        from tyo3.models.diff import CodeDiff
 
         cd = _code_layer_diff_detail(self, other)
         return LayerDiff(
@@ -73,10 +73,16 @@ class CodeLayerView:
 def _code_layer_diff_detail(after: CodeLayerView, before: CodeLayerView) -> Any:
     """Compute the detailed CodeDiff (Step 3) — factored out for reuse."""
     # Will be replaced by the full CodeDiff impl in Step 3.
-    after_ids = {n.durable_id for idx in after.graph._graph.node_indices()
-                 if is_entity_durable_id((n := after.graph._graph[idx]).durable_id)}
-    before_ids = {n.durable_id for idx in before.graph._graph.node_indices()
-                  if is_entity_durable_id((n := before.graph._graph[idx]).durable_id)}
+    after_ids = {
+        n.durable_id
+        for idx in after.graph._graph.node_indices()
+        if is_entity_durable_id((n := after.graph._graph[idx]).durable_id)
+    }
+    before_ids = {
+        n.durable_id
+        for idx in before.graph._graph.node_indices()
+        if is_entity_durable_id((n := before.graph._graph[idx]).durable_id)
+    }
 
     # Simple set delta for now — Step 3 enriches with changed/moved/edges.
     from dataclasses import dataclass
@@ -92,8 +98,7 @@ def _code_layer_diff_detail(after: CodeLayerView, before: CodeLayerView) -> Any:
 
     # Compare content_hash for ids in both sets.
     changed = frozenset(
-        did for did in (after_ids & before_ids)
-        if _content_hash(after, did) != _content_hash(before, did)
+        did for did in (after_ids & before_ids) if _content_hash(after, did) != _content_hash(before, did)
     )
     moved = frozenset()  # Step 3 will compute moved ids
     added = after_ids - before_ids

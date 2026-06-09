@@ -98,12 +98,7 @@ class _ApplierMixin:
 
         # Revision-gate: a stale/duplicate *incremental* delta is a no-op. A
         # rescan/full delta is authoritative and is applied regardless.
-        if (
-            not rescan
-            and revision is not None
-            and self._revision is not None
-            and revision <= self._revision
-        ):
+        if not rescan and revision is not None and self._revision is not None and revision <= self._revision:
             return
 
         # A rescan/full delta is the complete set — clear the graph and apply it
@@ -215,12 +210,7 @@ class _ApplierMixin:
             if s2 != src_idx or t2 != tgt_idx:
                 continue
             data = self._graph.get_edge_data_by_index(ei)
-            if (
-                data.kind == kind
-                and data.file == e.get("file")
-                and data.range == want_range
-                and data.role == want_role
-            ):
+            if data.kind == kind and data.file == e.get("file") and data.range == want_range and data.role == want_role:
                 # Remove THIS specific (possibly parallel) edge by index —
                 # ``remove_edge(src, tgt)`` would drop an arbitrary parallel edge
                 # between the endpoints, corrupting multi-import/multi-ref pairs.
@@ -237,4 +227,3 @@ class _ApplierMixin:
                 ):
                     self._file_importers.get(tgt_node.file, set()).discard(src_node.file)
                 return
-

@@ -16,14 +16,12 @@ import importlib
 import json
 import os
 import subprocess
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from tyo3.config import GeneratorConfig
 from tyo3.exceptions import GeneratorFailed
-
 
 # ── GenInput ─────────────────────────────────────────────────────────────
 
@@ -77,9 +75,7 @@ class PythonGenerator:
             raise ValueError("python generator requires 'callable'")
         module_name, _, func_name = cfg.callable.partition(":")
         if not module_name or not func_name:
-            raise ValueError(
-                f"python generator callable must be 'module:function', got '{cfg.callable}'"
-            )
+            raise ValueError(f"python generator callable must be 'module:function', got '{cfg.callable}'")
         mod = importlib.import_module(module_name)
         self._func = getattr(mod, func_name)
         self._batch_size = cfg.batch_size or 64
@@ -98,8 +94,7 @@ class PythonGenerator:
                 ) from exc
             if len(batch_results) != len(batch):
                 raise GeneratorFailed(
-                    f"generator '{self._name}' returned {len(batch_results)} results "
-                    f"for {len(batch)} inputs",
+                    f"generator '{self._name}' returned {len(batch_results)} results for {len(batch)} inputs",
                     layer=self._name,
                     input_ids=[inp.durable_id for inp in batch],
                 )
@@ -129,10 +124,7 @@ class CommandGenerator:
         self._batch_size = max(1, cfg.batch_size or 1)
 
     def generate(self, inputs: list[GenInput]) -> list[bytes]:
-        batches = [
-            inputs[i : i + self._batch_size]
-            for i in range(0, len(inputs), self._batch_size)
-        ]
+        batches = [inputs[i : i + self._batch_size] for i in range(0, len(inputs), self._batch_size)]
         if len(batches) == 1 or self._concurrency == 1:
             results: list[bytes] = []
             for batch in batches:
@@ -142,10 +134,7 @@ class CommandGenerator:
         # Concurrent batching.
         results_map: dict[int, list[bytes]] = {}
         with ThreadPoolExecutor(max_workers=self._concurrency) as pool:
-            futures = {
-                pool.submit(self._run_batch, batch): idx
-                for idx, batch in enumerate(batches)
-            }
+            futures = {pool.submit(self._run_batch, batch): idx for idx, batch in enumerate(batches)}
             for fut in as_completed(futures):
                 idx = futures[fut]
                 results_map[idx] = fut.result()
@@ -156,10 +145,7 @@ class CommandGenerator:
         return merged
 
     def _run_batch(self, batch: list[GenInput]) -> list[bytes]:
-        payload_lines = [
-            json.dumps({"id": inp.durable_id, "source": inp.source, "kind": inp.kind})
-            for inp in batch
-        ]
+        payload_lines = [json.dumps({"id": inp.durable_id, "source": inp.source, "kind": inp.kind}) for inp in batch]
         payload = "\n".join(payload_lines).encode("utf-8")
         try:
             proc = subprocess.run(
@@ -193,8 +179,7 @@ class CommandGenerator:
         out_lines = proc.stdout.decode("utf-8").strip().split("\n")
         if len(out_lines) != len(batch):
             raise GeneratorFailed(
-                f"generator '{self._name}' returned {len(out_lines)} lines "
-                f"for {len(batch)} inputs",
+                f"generator '{self._name}' returned {len(out_lines)} lines for {len(batch)} inputs",
                 layer=self._name,
                 input_ids=[inp.durable_id for inp in batch],
             )
@@ -226,10 +211,12 @@ class HttpGenerator:
         for i in range(0, len(inputs), self._batch_size):
             batch = inputs[i : i + self._batch_size]
             texts = [inp.source for inp in batch]
-            body = json.dumps({
-                "model": self._model,
-                "input": texts,
-            }).encode("utf-8")
+            body = json.dumps(
+                {
+                    "model": self._model,
+                    "input": texts,
+                }
+            ).encode("utf-8")
 
             req = urllib.request.Request(
                 self._endpoint,

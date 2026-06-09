@@ -8,11 +8,14 @@ code.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from tyo3.config import LayerConfig
 from tyo3.derive.cache import ArtifactCache, CacheKey
 from tyo3.stores.base import Store
+
+if TYPE_CHECKING:
+    from tyo3.derive.generators import Generator
 
 
 @dataclass
@@ -26,7 +29,7 @@ class DerivedLayer:
 
     name: str
     depends_on: tuple[str, ...]  # e.g. ("code",) or ("descriptions",)
-    generator: "Generator"  # from generators.py — protocol
+    generator: Generator  # from generators.py — protocol
     generator_version: str
     hash_profile: str
     serving: Literal["stale", "block"]
@@ -48,8 +51,8 @@ class DerivedLayer:
         cls,
         layer_cfg: LayerConfig,
         store: Store,
-        generator: "Generator",
-    ) -> "DerivedLayer":
+        generator: Generator,
+    ) -> DerivedLayer:
         """Construct from a validated LayerConfig (Gate 4)."""
         cache = ArtifactCache(store)
         entity_kinds: frozenset[str] | None

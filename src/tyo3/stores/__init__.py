@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
 import importlib
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +11,6 @@ from tyo3.exceptions import StoreBackendUnavailable
 from tyo3.sidecar import Sidecar
 from tyo3.stores.base import Store, VectorStore
 from tyo3.stores.fs import FsStore
-
 
 _OPTIONAL_BACKENDS = {
     "lancedb": "lancedb",
@@ -30,25 +29,20 @@ def open_store(store_cfg: Any, sidecar: Sidecar, layer: str | None = None) -> St
         try:
             importlib.import_module("lancedb")
         except ImportError as exc:
-            raise StoreBackendUnavailable(
-                "Store backend 'lancedb' requires optional package 'lancedb'"
-            ) from exc
+            raise StoreBackendUnavailable("Store backend 'lancedb' requires optional package 'lancedb'") from exc
         root = _store_root(cfg, sidecar, layer)
         dim = cfg.get("dim", 1536)
         metric = cfg.get("metric", "cosine")
         from tyo3.stores.lancedb_store import LanceDbStore
+
         return LanceDbStore(str(root), dim=dim, metric=metric)
     if backend in _OPTIONAL_BACKENDS:
         module = _OPTIONAL_BACKENDS[backend]
         try:
             importlib.import_module(module)
         except ImportError as exc:
-            raise StoreBackendUnavailable(
-                f"Store backend '{backend}' requires optional package '{module}'"
-            ) from exc
-        raise StoreBackendUnavailable(
-            f"Store backend '{backend}' adapter is not implemented in Gate 4"
-        )
+            raise StoreBackendUnavailable(f"Store backend '{backend}' requires optional package '{module}'") from exc
+        raise StoreBackendUnavailable(f"Store backend '{backend}' adapter is not implemented in Gate 4")
     raise ValueError(f"Unknown store backend: {backend}")
 
 

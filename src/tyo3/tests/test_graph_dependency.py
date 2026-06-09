@@ -225,9 +225,7 @@ class TestResolveExternal:
                 qualified_name="Bar",
                 kind=SymbolKind.CLASS,
                 file="<external>",
-                range=Range.model_validate(
-                    {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-                ),
+                range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
                 external=True,
                 package="unknown",
             )
@@ -268,9 +266,7 @@ class TestResolveExternal:
                 qualified_name="pathlib.Path",
                 kind=SymbolKind.CLASS,
                 file="<external>",
-                range=Range.model_validate(
-                    {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}
-                ),
+                range=Range.model_validate({"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 1}}),
                 external=True,
                 package="stdlib",
             )

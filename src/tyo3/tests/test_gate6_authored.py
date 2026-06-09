@@ -14,7 +14,6 @@ import json
 
 import pytest
 
-
 # ── Step 0: Failing acceptance tests (API does not exist yet) ────────────
 
 
@@ -29,7 +28,7 @@ def test_durable_write_and_read(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -72,7 +71,7 @@ def test_snapshot_isolation_and_time_travel(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -135,7 +134,7 @@ def test_needs_review_on_change_not_dropped(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -182,7 +181,7 @@ def test_orphaned_on_delete_not_dropped(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -224,7 +223,7 @@ def test_no_loss_round_trip(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
     (proj / "b.py").write_text("def bar():\n    return 2\n")
 
@@ -283,7 +282,7 @@ def test_history_round_trip_survives_reopen(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -345,7 +344,7 @@ def test_authored_history_empty_for_unknown(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -377,7 +376,7 @@ def test_moved_entity_keeps_note(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -420,7 +419,7 @@ def test_rename_with_change_flags_review(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -460,7 +459,7 @@ def test_delete_orphans_re_add_returns_to_present(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -503,7 +502,7 @@ def test_newer_format_rejected(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -527,7 +526,6 @@ review_on_change = true
         session.author("intent", foo_id, {"note": "v1"})
 
     # Hand-write a record with format_version=2.
-    import json
     record_path = proj / ".tyo3" / "authored" / "intent" / f"{foo_id}.json"
     with open(record_path) as f:
         doc = json.load(f)
@@ -546,7 +544,7 @@ def test_cache_independence(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -572,6 +570,7 @@ review_on_change = true
     cache_dir = proj / ".tyo3" / "cache"
     if cache_dir.exists():
         import shutil
+
         shutil.rmtree(cache_dir)
 
     # Reopen — authored records intact.
@@ -592,7 +591,7 @@ def test_snapshot_pinned_consistency(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -623,8 +622,10 @@ review_on_change = true
         # Code edit AFTER pinning.
         session.edit("a.py", "def foo():\n    return 99\n")
 
-        # Pinned snapshot still sees the old state.
+        # Pinned snapshot still sees the old state, and its revision is frozen
+        # at the pin point despite the later author + edit.
         assert snap.authored("intent", foo_id).status == "absent"
+        assert snap.revision == snap_rev
         snap.close()
 
         # Fresh snapshot sees the new value.
@@ -640,7 +641,7 @@ def test_authored_time_travel_diff(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -685,7 +686,7 @@ def test_no_write_lock_for_reads(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"

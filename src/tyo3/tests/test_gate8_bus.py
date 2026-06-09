@@ -12,8 +12,10 @@ into the write path.  They exist to fix the contract.
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from tyo3.bus.delta import Delta
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Step 1 — Interest unit tests (standalone, no session needed)
@@ -135,13 +137,15 @@ class TestDelta:
         ``affected`` set.  It becomes the full transitive closure — with no bus
         change — once the native producer lands.
         """
+        import tempfile
+
         from tyo3 import TyO3Session
         from tyo3.bus.delta import Delta
 
-        import tempfile
         proj = tempfile.mkdtemp()
         try:
             import os
+
             os.makedirs(os.path.join(proj, ".tyo3"))
             with open(os.path.join(proj, "pyproject.toml"), "w") as f:
                 f.write('[project]\nname = "test"\n')
@@ -160,9 +164,7 @@ class TestDelta:
 
                 # Edit models.py::User — its id is a changed seed, so it is in
                 # the native affected set the bus projects.
-                result = session.edit(
-                    "models.py", "class User:\n    name: str = ''\n    age: int = 0\n"
-                )
+                result = session.edit("models.py", "class User:\n    name: str = ''\n    age: int = 0\n")
                 delta = Delta.from_commit_delta(result)
 
                 assert user_id in delta.affected
@@ -170,6 +172,7 @@ class TestDelta:
                 assert len(delta.changed) >= 1
         finally:
             import shutil
+
             shutil.rmtree(proj, ignore_errors=True)
 
     def test_rescan_delta(self):
@@ -208,9 +211,7 @@ class TestDelta:
         empty = Delta.from_commit_delta(CommitDelta(revision=0))
         assert empty.is_empty()
 
-        nonempty = Delta.from_commit_delta(
-            CommitDelta(revision=1, changed_ids=["01A"])
-        )
+        nonempty = Delta.from_commit_delta(CommitDelta(revision=1, changed_ids=["01A"]))
         assert not nonempty.is_empty()
 
 
@@ -223,8 +224,9 @@ class TestSubscription:
     """Unit tests for Subscription queue + overflow + teardown."""
 
     @staticmethod
-    def _make_delta(revision: int, changed: set[str] | None = None) -> "Delta":
+    def _make_delta(revision: int, changed: set[str] | None = None) -> Delta:
         from tyo3.bus.delta import Delta
+
         return Delta(
             revision=revision,
             created=frozenset(),
@@ -350,8 +352,16 @@ class TestBus:
     """Unit tests for Bus register + scoped fan-out (§12.2.1)."""
 
     @staticmethod
-    def _make_delta(revision: int, changed: set[str] | None = None, *, files: set[str] | None = None, layers: set[str] | None = None, rescan: bool = False) -> "Delta":
+    def _make_delta(
+        revision: int,
+        changed: set[str] | None = None,
+        *,
+        files: set[str] | None = None,
+        layers: set[str] | None = None,
+        rescan: bool = False,
+    ) -> Delta:
         from tyo3.bus.delta import Delta
+
         c = frozenset(changed or set())
         return Delta(
             revision=revision,
@@ -535,15 +545,15 @@ overflow = "coalesce"
 
             assert oldest_rev is not None
 
-            # Try to snapshot at the oldest revision — should raise.
-            evicted = False
+            # Try to snapshot at the oldest revision. It may or may not be
+            # evicted (depends on whether retain_cap was exceeded); either outcome
+            # is acceptable — the point is that rescan_from handles eviction
+            # gracefully below. Swallow only the typed eviction error.
             try:
                 with session.snapshot(at=oldest_rev):
                     pass
             except RevisionEvictedError:
-                evicted = True
-            # May not be evicted if retain_cap hasn't been exceeded enough.
-            # The key point is that rescan_from handles eviction gracefully.
+                pass
 
             # rescan_from should return a SnapshotDiff even if last_seen is evicted.
             diff = sub.rescan_from(session, oldest_rev)
@@ -599,7 +609,7 @@ overflow = "coalesce"
             sub = session.subscribe(Interest.ALL)
 
             # sync_all produces a rescan result.
-            result = session.sync_all()
+            session.sync_all()
             # Consume any queued deltas (sync_all may or may not produce one).
             while True:
                 d = sub.poll(timeout=0)
@@ -757,7 +767,7 @@ overflow = "coalesce"
             # Now inject a watcher change for the overlaid path.
             # poll_changes should return None (overlay wins).
             session._inject_changes([("changed", "a.py")])
-            result = session.poll_changes()
+            session.poll_changes()
             # Overlay wins — poll_changes may return None or the overlay's
             # content may be preserved.
             # The key invariant: no spurious delta for the overlaid path.
@@ -837,6 +847,7 @@ overflow = "coalesce"
     def test_slow_subscriber_does_not_stall_writer(self, tmp_path):
         """A slow/dead subscriber never blocks the writer (§12.2.4)."""
         import time
+
         from tyo3 import TyO3Session
         from tyo3.bus.interest import Interest
 
@@ -1061,7 +1072,7 @@ def test_scoped_reverse_dep_delivery(tmp_path):
         # Reverse-dep: subscriber interested in app.py is notified
         # when models.py changes, because app.py imports models.py.
         sub2 = session.subscribe(Interest.files_of({"app.py"}))
-        result2 = session.edit("models.py", "class User:\n    name: str\n    age: int\n    active: bool\n")
+        session.edit("models.py", "class User:\n    name: str\n    age: int\n    active: bool\n")
         delta3 = sub2.poll(timeout=2.0)
         assert delta3 is not None, "subscriber should be notified via reverse-dep (app.py depends on models.py)"
         # The affected set should include the changed entity's transitive dependents

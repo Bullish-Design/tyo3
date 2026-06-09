@@ -95,23 +95,17 @@ def assert_graphs_equal(left: CodeGraph, right: CodeGraph, *, label: str = "") -
     only_a = a_ids - b_ids
     only_b = b_ids - a_ids
     assert a_ids == b_ids, (
-        f"{prefix}node id mismatch\n"
-        f"    only in delta: {sorted(only_a)}\n"
-        f"    only in rebuild: {sorted(only_b)}"
+        f"{prefix}node id mismatch\n    only in delta: {sorted(only_a)}\n    only in rebuild: {sorted(only_b)}"
     )
 
     for did in a_ids:
         a_node = left.symbol(did)
         b_node = right.symbol(did)
-        assert a_node is not None and b_node is not None, (
-            f"{prefix}missing symbol {did}"
-        )
+        assert a_node is not None and b_node is not None, f"{prefix}missing symbol {did}"
         a_payload = _node_payload(a_node)
         b_payload = _node_payload(b_node)
         assert a_payload == b_payload, (
-            f"{prefix}payload mismatch for {did}:\n"
-            f"    delta:   {a_payload}\n"
-            f"    rebuild: {b_payload}"
+            f"{prefix}payload mismatch for {did}:\n    delta:   {a_payload}\n    rebuild: {b_payload}"
         )
 
     a_edges = {_edge_tuple(left.graph, ei) for ei in left.graph.edge_indices()}
@@ -119,9 +113,7 @@ def assert_graphs_equal(left: CodeGraph, right: CodeGraph, *, label: str = "") -
     only_a_e = a_edges - b_edges
     only_b_e = b_edges - a_edges
     assert a_edges == b_edges, (
-        f"{prefix}edge mismatch\n"
-        f"    only in delta:   {sorted(only_a_e)}\n"
-        f"    only in rebuild: {sorted(only_b_e)}"
+        f"{prefix}edge mismatch\n    only in delta:   {sorted(only_a_e)}\n    only in rebuild: {sorted(only_b_e)}"
     )
 
 
@@ -158,12 +150,7 @@ def _edge_exists(
         src_idx, dst_idx = graph.graph.get_edge_endpoints_by_index(ei)
         src = graph.graph[src_idx]
         dst = graph.graph[dst_idx]
-        if (
-            src.name == src_name
-            and src.file == src_file
-            and dst.name == dst_name
-            and dst.file == dst_file
-        ):
+        if src.name == src_name and src.file == src_file and dst.name == dst_name and dst.file == dst_file:
             return True
     return False
 
@@ -174,10 +161,8 @@ def _entity_edge_set(graph: CodeGraph, entity_ids: set[str]) -> set[tuple]:
         _edge_tuple(graph.graph, ei)
         for ei in graph.graph.edge_indices()
         if (
-            graph.graph[graph.graph.get_edge_endpoints_by_index(ei)[0]].durable_id
-            in entity_ids
-            and graph.graph[graph.graph.get_edge_endpoints_by_index(ei)[1]].durable_id
-            in entity_ids
+            graph.graph[graph.graph.get_edge_endpoints_by_index(ei)[0]].durable_id in entity_ids
+            and graph.graph[graph.graph.get_edge_endpoints_by_index(ei)[1]].durable_id in entity_ids
         )
     }
 
@@ -192,7 +177,7 @@ def test_single_file_content_change(tmp_path: StdPath) -> None:
     (tmp_path / "app.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as s:
         g = _build(s)
-        sync = s.edit("app.py", "x = 42\ny = 'hello'\n")
+        s.edit("app.py", "x = 42\ny = 'hello'\n")
         _apply_and_assert(s, g, "single-file content change")
 
 
@@ -241,14 +226,14 @@ def test_cross_file_reference_added_then_removed(tmp_path: StdPath) -> None:
         g = _build(s)
 
         # Add a reference: import User and use it.
-        sync = s.edit(
+        s.edit(
             "app.py",
             "from models import User\n\nu = User()\n",
         )
         _apply_and_assert(s, g, "cross-file ref added")
 
         # Remove the reference: go back to import-free content.
-        sync = s.edit("app.py", "# back to no refs\nx = 1\n")
+        s.edit("app.py", "# back to no refs\nx = 1\n")
         _apply_and_assert(s, g, "cross-file ref removed")
 
 
@@ -273,7 +258,7 @@ def test_cross_file_inheritance_added(tmp_path: StdPath) -> None:
         )
 
         # Add inheritance via an incremental edit.
-        sync = s.edit(
+        s.edit(
             "derived.py",
             "from base import Base\n\nclass Derived(Base):\n    pass\n",
         )
@@ -288,7 +273,7 @@ def test_cross_file_inheritance_added(tmp_path: StdPath) -> None:
         _apply_and_assert(s, g, "cross-file inheritance added")
 
         # Change the base class — should revalidate.
-        sync = s.edit(
+        s.edit(
             "base.py",
             "class Base:\n    def method(self): ...\n    def extra(self): ...\n",
         )
@@ -333,9 +318,7 @@ def _descending(files: list[str]) -> list[str]:
 
 
 @pytest.mark.parametrize("sort_order", [_ascending, _descending], ids=["asc", "desc"])
-def test_multi_level_inheritance_chain_parity(
-    tmp_path: StdPath, sort_order
-) -> None:
+def test_multi_level_inheritance_chain_parity(tmp_path: StdPath, sort_order) -> None:
     """§6.4 chain: three-file dirty batch, parity in both processing orders."""
     (tmp_path / "c.py").write_text(C_PY)
     (tmp_path / "b.py").write_text(B_PY)
@@ -389,14 +372,8 @@ def test_moved_entity_preserves_id_and_updates_location(tmp_path: StdPath) -> No
         g = _build(s)
 
         # Capture the original DurableIds and entity-to-entity edges.
-        moved_nodes = [
-            n for n in g.symbols_of_kind(SymbolKind.CLASS)
-            if n.file == "app.py" and n.name == "User"
-        ]
-        moved_nodes.extend(
-            n for n in g.symbols_of_kind(SymbolKind.METHOD)
-            if n.file == "app.py" and n.name == "save"
-        )
+        moved_nodes = [n for n in g.symbols_of_kind(SymbolKind.CLASS) if n.file == "app.py" and n.name == "User"]
+        moved_nodes.extend(n for n in g.symbols_of_kind(SymbolKind.METHOD) if n.file == "app.py" and n.name == "save")
         assert len(moved_nodes) == 2, f"expected User + save nodes, got {moved_nodes}"
         original_ids = {n.durable_id for n in moved_nodes}
         original_user = next(n for n in moved_nodes if n.name == "User")
@@ -415,15 +392,10 @@ def test_moved_entity_preserves_id_and_updates_location(tmp_path: StdPath) -> No
         assert sync.moved, "expected identity reconciliation to report a moved entity"
         assert any(m.new_qualified_path == "new_app.py::User" for m in sync.moved)
 
-
         # The User entity should have the same DurableId at the new location.
         user_after = g.symbol(original_did)
-        assert user_after is not None, (
-            f"DurableId {original_did} should survive the move"
-        )
-        assert user_after.file == "new_app.py", (
-            f"Expected file=new_app.py after move, got {user_after.file}"
-        )
+        assert user_after is not None, f"DurableId {original_did} should survive the move"
+        assert user_after.file == "new_app.py", f"Expected file=new_app.py after move, got {user_after.file}"
         assert user_after.name == "User"
         assert user_after.kind == SymbolKind.CLASS
         after_entity_edges = _entity_edge_set(g, original_ids)
@@ -437,9 +409,7 @@ def test_moved_entity_preserves_id_and_updates_location(tmp_path: StdPath) -> No
 
         # Verify the rebuild also uses the same id (identity preserved).
         rebuilt_user = rebuilt.symbol(original_did)
-        assert rebuilt_user is not None, (
-            "Rebuild should also bind the entity to the same DurableId"
-        )
+        assert rebuilt_user is not None, "Rebuild should also bind the entity to the same DurableId"
         assert rebuilt_user.file == "new_app.py"
 
 
@@ -500,9 +470,7 @@ _EDIT_POOL = [
     # Append a comment line (structural no-op, content change).
     lambda _idx, _prev, _rng: f"{_prev}\n# edit {_rng.randint(0, 9999)}\n",
     # Append a new top-level assignment.
-    lambda _idx, _prev, _rng: (
-        f"{_prev}\nvar_{_rng.randint(0, 99)} = {_rng.randint(0, 100)}\n"
-    ),
+    lambda _idx, _prev, _rng: f"{_prev}\nvar_{_rng.randint(0, 99)} = {_rng.randint(0, 100)}\n",
     # Strip the last line.
     lambda _idx, _prev, _rng: "\n".join(_prev.splitlines()[:-1]) + "\n",
     # Replace a number in the text.
@@ -537,7 +505,7 @@ def test_randomised_sequence_parity(tmp_path: StdPath) -> None:
             new_content = op(fname, overlay[fname], rng)
             overlay[fname] = new_content
 
-            sync = s.edit(fname, new_content)
+            s.edit(fname, new_content)
 
             # Verify parity after every edit (catches regressions early).
             _apply_and_assert(s, g, f"random edit {i + 1}/{num_edits}")
@@ -561,5 +529,5 @@ def test_sequence_of_edits_matches_rebuild(tmp_path: StdPath) -> None:
             "class User:\n    b: int\n",
         ]
         for i, text in enumerate(edits):
-            sync = s.edit("models.py", text)
+            s.edit("models.py", text)
             _apply_and_assert(s, g, f"sequence step {i + 1}")

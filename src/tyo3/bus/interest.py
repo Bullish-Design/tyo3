@@ -24,10 +24,10 @@ class Interest:
     Immutable and hashable so the bus can key subscribers cheaply.
     """
 
-    files: frozenset[str] = frozenset()    # project-relative paths
-    ids: frozenset[str] = frozenset()      # DurableIds
-    layers: frozenset[str] = frozenset()   # layer names (e.g. "embeddings", "intent")
-    all: bool = False                       # ALL: every committed revision
+    files: frozenset[str] = frozenset()  # project-relative paths
+    ids: frozenset[str] = frozenset()  # DurableIds
+    layers: frozenset[str] = frozenset()  # layer names (e.g. "embeddings", "intent")
+    all: bool = False  # ALL: every committed revision
 
     ALL: ClassVar[Interest]
 

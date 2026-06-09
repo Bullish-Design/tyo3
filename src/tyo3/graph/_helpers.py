@@ -34,6 +34,7 @@ def _normalize_result_path(root: Path, path: str, project_files: set[str]) -> st
         return candidate
     return path
 
+
 def _ranges_overlap(a: Range, b: Range) -> bool:
     """Check if two ranges overlap."""
     a_start = (a.start.line, a.start.column)

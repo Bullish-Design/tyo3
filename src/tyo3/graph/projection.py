@@ -194,4 +194,3 @@ class CodeGraph(_ApplierMixin, _QueriesMixin, _DiffMixin, _DiagnosticsMixin):
     @property
     def edge_count(self) -> int:
         return self._graph.num_edges()
-

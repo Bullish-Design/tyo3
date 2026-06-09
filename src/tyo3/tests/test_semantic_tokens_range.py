@@ -28,9 +28,7 @@ def test_semantic_tokens_with_range_returns_subset():
     all_tokens = session.semantic_tokens("main.py")
 
     # Get tokens for just line 3 (col 1 to end of line, which is col 30)
-    range_tokens = session.semantic_tokens(
-        "main.py", start_line=3, start_col=1, end_line=3, end_col=30
-    )
+    range_tokens = session.semantic_tokens("main.py", start_line=3, start_col=1, end_line=3, end_col=30)
 
     assert isinstance(range_tokens, list)
     # Range tokens should be a subset of all tokens
@@ -42,12 +40,8 @@ def test_semantic_tokens_range_snapshot_parity():
     """Snapshot and session return equivalent range tokens."""
     session = shared_session("simple_package")
 
-    tokens = session.semantic_tokens(
-        "main.py", start_line=1, start_col=1, end_line=5, end_col=1
-    )
+    tokens = session.semantic_tokens("main.py", start_line=1, start_col=1, end_line=5, end_col=1)
     with session.snapshot() as snap:
-        snap_tokens = snap.semantic_tokens(
-            "main.py", start_line=1, start_col=1, end_line=5, end_col=1
-        )
+        snap_tokens = snap.semantic_tokens("main.py", start_line=1, start_col=1, end_line=5, end_col=1)
 
     assert len(tokens) == len(snap_tokens)

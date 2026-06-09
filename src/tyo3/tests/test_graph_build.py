@@ -6,8 +6,6 @@ import re
 from pathlib import Path as StdPath
 from unittest.mock import MagicMock
 
-import pytest
-
 from tyo3 import TyO3Session
 from tyo3.graph import (
     CodeGraph,
@@ -84,18 +82,12 @@ class TestGraphConstruction:
             assert graph.graph[idx].content_hash is not None
 
     def test_entity_node_content_hash_matches_symbol_dto(self, tmp_path: StdPath) -> None:
-        (tmp_path / "models.py").write_text(
-            "class User:\n"
-            "    def save(self):\n"
-            "        return 1\n"
-        )
+        (tmp_path / "models.py").write_text("class User:\n    def save(self):\n        return 1\n")
         with TyO3Session(str(tmp_path)) as session:
             session.sync_all()
             graph = CodeGraph.build(session)
             symbols = {
-                sym.durable_id: sym
-                for sym in session.document_symbols("models.py")
-                if sym.durable_id is not None
+                sym.durable_id: sym for sym in session.document_symbols("models.py") if sym.durable_id is not None
             }
 
         entity_nodes = [
@@ -110,23 +102,9 @@ class TestGraphConstruction:
             assert node.content_hash == symbols[node.durable_id].content_hash
 
     def test_content_hash_updates_incrementally_by_semantic_body(self, tmp_path: StdPath) -> None:
-        original = (
-            "class User:\n"
-            "    def save(self):\n"
-            "        return 1\n"
-        )
-        cosmetic = (
-            "class User:\n"
-            "\n"
-            "    def save(self):\n"
-            "        return 1\n"
-        )
-        body_change = (
-            "class User:\n"
-            "\n"
-            "    def save(self):\n"
-            "        return 2\n"
-        )
+        original = "class User:\n    def save(self):\n        return 1\n"
+        cosmetic = "class User:\n\n    def save(self):\n        return 1\n"
+        body_change = "class User:\n\n    def save(self):\n        return 2\n"
 
         # Write before open so the file is ingested at open (Phase 1), then drive
         # the live HEAD graph (a native projection) with edits — the native

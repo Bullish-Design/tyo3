@@ -29,14 +29,7 @@ class CodeDiff:
 
     @property
     def is_empty(self) -> bool:
-        return not (
-            self.added
-            or self.removed
-            or self.changed
-            or self.moved
-            or self.edges_added
-            or self.edges_removed
-        )
+        return not (self.added or self.removed or self.changed or self.moved or self.edges_added or self.edges_removed)
 
 
 @dataclass(frozen=True)
@@ -98,9 +91,7 @@ class SnapshotDiff:
         ``ValueError`` if they are incompatible.
         """
         if before.revision > after.revision:
-            raise ValueError(
-                f"before.revision ({before.revision}) > after.revision ({after.revision})"
-            )
+            raise ValueError(f"before.revision ({before.revision}) > after.revision ({after.revision})")
 
         # Code diff
         code_diff = _compute_code_diff(after, before)
@@ -115,9 +106,11 @@ class SnapshotDiff:
                 try:
                     after_view = after.layer(lname)
                     before_view = before.layer(lname)
-                    from tyo3.layers.base import LayerDiff
                     derived[lname] = after_view.diff(before_view)
                 except Exception:
+                    # A derived layer that can't be diffed (e.g. its store is
+                    # unavailable) is omitted from the diff rather than failing
+                    # the whole SnapshotDiff.
                     continue
 
         # Authored diffs
@@ -131,6 +124,8 @@ class SnapshotDiff:
                     if not ad.is_empty:
                         authored[lname] = ad
                 except Exception:
+                    # An authored layer that can't be diffed is omitted rather
+                    # than failing the whole SnapshotDiff.
                     continue
 
         return cls(
@@ -231,6 +226,8 @@ def _compute_authored_diff(after: Snapshot, before: Snapshot, layer: str) -> Aut
             if a_val.status != b_val.status:
                 review_changed.add(did)
         except Exception:
+            # Skip an id whose authored value can't be read on one side; it
+            # simply doesn't contribute to the authored diff.
             continue
 
     return AuthoredDiff(

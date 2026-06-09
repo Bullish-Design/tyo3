@@ -7,7 +7,7 @@ frozen object. Every member describes the same revision R; no head access.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from tyo3.graph.models import SymbolNode
@@ -50,7 +50,9 @@ class EntityView:
         try:
             location = snap.locate(durable_id)
         except Exception:
-            pass
+            # Best-effort enrichment: an unresolvable location leaves it None
+            # rather than sinking the whole entity view.
+            location = None
 
         # Status from the captured registry anchor status.
         # Derive from authored layers' status or from the registry.
@@ -69,6 +71,8 @@ class EntityView:
                 else:
                     status = "active"
             except Exception:
+                # If the captured registry can't classify the anchor, default to
+                # "active" rather than failing the view.
                 status = "active"
 
         # Derived layers
@@ -95,6 +99,8 @@ class EntityView:
                     if av.status != "absent":
                         authored[lname] = av
                 except Exception:
+                    # Skip an authored layer that can't be read for this id;
+                    # absence is the correct projection for the view.
                     continue
 
         return cls(

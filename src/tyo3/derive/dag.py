@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, Any
 
-from tyo3.derive.cache import CacheKey
 from tyo3.derive.layer import DerivedLayer
 from tyo3.stores import open_store
 
@@ -28,19 +27,17 @@ class DerivationDAG:
 
     def __init__(self, layers: list[DerivedLayer], topo_order: list[str]) -> None:
         self._layers = layers
-        self._layer_map: dict[str, DerivedLayer] = {l.name: l for l in layers}
+        self._layer_map: dict[str, DerivedLayer] = {layer.name: layer for layer in layers}
         self._topo_order = topo_order  # includes "code" at position 0
 
         # Defensive acyclicity check (Gate 4 already validated).
         for layer in layers:
             for dep in layer.depends_on:
                 if dep != "code" and dep not in self._layer_map:
-                    raise AssertionError(
-                        f"Layer '{layer.name}' depends on unknown layer '{dep}'"
-                    )
+                    raise AssertionError(f"Layer '{layer.name}' depends on unknown layer '{dep}'")
 
     @classmethod
-    def from_session(cls, session: "TyO3Session") -> "DerivationDAG":
+    def from_session(cls, session: TyO3Session) -> DerivationDAG:
         """Build the DAG from a session's validated config."""
         from tyo3.derive.generators import make_generator
 
@@ -49,6 +46,7 @@ class DerivationDAG:
         # Snapshot doesn't have _sidecar; use root-based sidecar.
         if sidecar is None:
             from tyo3.sidecar import Sidecar
+
             root = getattr(session, "root", getattr(session, "_root", None))
             sidecar = Sidecar(str(root)) if root else None
 
@@ -76,6 +74,7 @@ class DerivationDAG:
                 if sidecar is None:
                     raise ValueError(f"Cannot resolve store for layer '{name}'")
                 from tyo3.stores.fs import FsStore
+
                 store = FsStore(sidecar.cache_dir(name))
 
             # Build the generator.
@@ -99,6 +98,7 @@ class DerivationDAG:
         """Lazily build the recompute scheduler."""
         if not hasattr(self, "_scheduler"):
             from tyo3.derive.scheduler import RecomputeScheduler
+
             object.__setattr__(self, "_scheduler", RecomputeScheduler())
         return self._scheduler
 
@@ -143,9 +143,7 @@ class DerivationDAG:
                     if not layer.applies_to(_kind_for_id(snap, durable_id)):
                         continue
                     try:
-                        gen_input, input_hash = self.resolve_input(
-                            layer, snap, durable_id
-                        )
+                        gen_input, input_hash = self.resolve_input(layer, snap, durable_id)
                     except (KeyError, AttributeError):
                         continue
 
@@ -203,17 +201,13 @@ class DerivationDAG:
                     continue
 
                 # Build reachable store keys for this layer.
-                reachable_keys: set[str] = {
-                    f"{h}:{layer.generator_version}" for h in reachable_hashes
-                }
+                reachable_keys: set[str] = {f"{h}:{layer.generator_version}" for h in reachable_hashes}
                 # GC through the ArtifactCache (walks FsStore directory).
                 _gc_store(layer, reachable_keys)
         finally:
             snap.close()
 
-    def resolve_input(
-        self, layer: DerivedLayer, snapshot: "Snapshot", durable_id: str
-    ) -> tuple[Any, str]:
+    def resolve_input(self, layer: DerivedLayer, snapshot: Snapshot, durable_id: str) -> tuple[Any, str]:
         """Resolve the input and input_hash for *durable_id* under *layer*.
 
         Returns (GenInput, input_hash_hex).
@@ -241,12 +235,8 @@ class DerivationDAG:
             # dependency-closure fingerprint, so it recomputes when a dependency
             # changes even though its own body did not.
             if layer.key_locality == "semantic":
-                fingerprint = self._dependency_fingerprint(
-                    snapshot, durable_id, layer.hash_profile
-                )
-                input_hash = _hash_bytes(
-                    f"{content_hash}\x00{fingerprint}".encode("utf-8")
-                )
+                fingerprint = self._dependency_fingerprint(snapshot, durable_id, layer.hash_profile)
+                input_hash = _hash_bytes(f"{content_hash}\x00{fingerprint}".encode())
             else:
                 input_hash = content_hash
             source = _entity_source(snapshot, durable_id)
@@ -260,21 +250,13 @@ class DerivationDAG:
             upstream = self.layer(upstream_name)
             # Read upstream artifact for this entity.
             # We need the upstream's input_hash to resolve the artifact.
-            up_input_hash = self._resolve_upstream_hash(
-                upstream, snapshot, durable_id
-            )
+            up_input_hash = self._resolve_upstream_hash(upstream, snapshot, durable_id)
             if up_input_hash is None:
-                raise KeyError(
-                    f"Cannot resolve upstream hash for '{durable_id}' in layer "
-                    f"'{upstream_name}'"
-                )
+                raise KeyError(f"Cannot resolve upstream hash for '{durable_id}' in layer '{upstream_name}'")
             up_key = upstream.keys_for(up_input_hash)
             up_artifact = upstream.cache.get(up_key)
             if up_artifact is None:
-                raise KeyError(
-                    f"No upstream artifact for '{durable_id}' in layer "
-                    f"'{upstream_name}'"
-                )
+                raise KeyError(f"No upstream artifact for '{durable_id}' in layer '{upstream_name}'")
             # Decode artifact as source for the downstream generator.
             up_source = up_artifact.decode("utf-8", errors="replace")
             # The input hash for a layer-derived layer is the hash of the
@@ -285,9 +267,7 @@ class DerivationDAG:
                 input_hash,
             )
 
-    def _resolve_upstream_hash(
-        self, upstream: DerivedLayer, snapshot: "Snapshot", durable_id: str
-    ) -> str | None:
+    def _resolve_upstream_hash(self, upstream: DerivedLayer, snapshot: Snapshot, durable_id: str) -> str | None:
         """Resolve the input_hash for *durable_id* under the upstream layer."""
         if upstream.is_code_derived:
             node = snapshot.graph().symbol(durable_id)
@@ -305,9 +285,7 @@ class DerivationDAG:
                 return None
             return _hash_bytes(up_up_artifact)
 
-    def _dependency_fingerprint(
-        self, snapshot: "Snapshot", durable_id: str, hash_profile: str
-    ) -> str:
+    def _dependency_fingerprint(self, snapshot: Snapshot, durable_id: str, hash_profile: str) -> str:
         """Stable fingerprint of *durable_id*'s dependency closure at *snapshot*.
 
         Walks the transitive forward-dependency closure over the pinned
@@ -341,18 +319,19 @@ def _hash_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:32]
 
 
-def _kind_for_id(snapshot: "Snapshot", durable_id: str) -> str:
+def _kind_for_id(snapshot: Snapshot, durable_id: str) -> str:
     """Return the entity kind for a durable_id from the graph."""
     try:
         node = snapshot.graph().symbol(durable_id)
         if node is not None:
             return node.kind.value
     except Exception:
+        # Best-effort kind lookup; an unresolvable id yields "" (no kind filter).
         pass
     return ""
 
 
-def _gc_store(layer: "DerivedLayer", reachable_keys: set[str]) -> None:
+def _gc_store(layer: DerivedLayer, reachable_keys: set[str]) -> None:
     """Delete unreachable artifacts from a layer's backing store.
 
     Walks the store's key space and deletes keys not in *reachable_keys*.
@@ -362,6 +341,7 @@ def _gc_store(layer: "DerivedLayer", reachable_keys: set[str]) -> None:
     store = layer.cache._store
     # For FsStore, walk the directory tree to find all keys.
     from pathlib import Path
+
     if hasattr(store, "root"):
         root = Path(store.root)
         if root.exists():
@@ -373,13 +353,13 @@ def _gc_store(layer: "DerivedLayer", reachable_keys: set[str]) -> None:
                 rel = path.relative_to(root)
                 parts = rel.parts
                 if len(parts) == 3 and len(parts[0]) == 2 and len(parts[1]) == 2:
-                    digest = parts[2]
-                    # We need to reverse-lookup which key maps to this digest.
-                    # For now, skip GC for filesystem stores (deferred to full impl).
+                    # `parts[2]` is the content digest. Reverse-lookup from digest
+                    # to store key is not implemented yet, so GC for filesystem
+                    # stores is deferred to the full implementation.
                     pass
 
 
-def _entity_source(snapshot: "Snapshot", durable_id: str) -> str:
+def _entity_source(snapshot: Snapshot, durable_id: str) -> str:
     """Extract the source text of an entity by DurableId."""
     # The snapshot can locate + read entity source.
     graph = snapshot.graph()
@@ -387,18 +367,17 @@ def _entity_source(snapshot: "Snapshot", durable_id: str) -> str:
 
     # Read source from the file at the entity's range.
     try:
-        from tyo3.models.analysis import Position
         path = node.file
         start = node.range.start
         end = node.range.end
         # Use document_symbols to get the full source, or read the file directly.
         # Simple approach: read the whole file and slice.
-        import io
         # We need to read the file from the snapshot's project root.
         # For now, use a simple approach: the snapshot has a _root.
         root = getattr(snapshot, "_root", None)
         if root:
             import os
+
             full_path = os.path.join(str(root), path)
             if os.path.exists(full_path):
                 with open(full_path) as f:
@@ -410,9 +389,9 @@ def _entity_source(snapshot: "Snapshot", durable_id: str) -> str:
                         # Single-line entity.
                         result_lines.append(line[start.column - 1 : end.column - 1])
                     elif i == start.line - 1:
-                        result_lines.append(line[start.column - 1:])
+                        result_lines.append(line[start.column - 1 :])
                     elif i == end.line - 1:
-                        result_lines.append(line[:end.column - 1])
+                        result_lines.append(line[: end.column - 1])
                     else:
                         result_lines.append(line)
                 return "\n".join(result_lines)

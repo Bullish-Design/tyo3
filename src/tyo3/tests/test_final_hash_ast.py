@@ -82,9 +82,7 @@ def test_meaningful_changes_hash_differently(tmp_path):
         base = _hash(s, "m.py", "foo")
         literal = _hash_after_edit(s, "m.py", "foo", "def foo():\n    x = 2\n    return x\n")
         ident = _hash_after_edit(s, "m.py", "foo", "def foo():\n    y = 2\n    return y\n")
-        control = _hash_after_edit(
-            s, "m.py", "foo", "def foo():\n    x = 2\n    while x:\n        return y\n"
-        )
+        control = _hash_after_edit(s, "m.py", "foo", "def foo():\n    x = 2\n    while x:\n        return y\n")
         assert base != literal, "a literal change must change the hash"
         assert literal != ident, "an identifier change must change the hash"
         assert ident != control, "a control-flow change must change the hash"

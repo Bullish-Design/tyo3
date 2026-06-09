@@ -866,7 +866,10 @@ class TestMultiSnapshotIsolation:
             snap_b = session.snapshot()  # revision 1: sym1 only
             snaps.append(snap_b)
 
-            session.edit("main.py", base_text + f"\n\ndef {sym1}() -> int:\n    return 1\n\ndef {sym2}() -> int:\n    return 2\n")
+            session.edit(
+                "main.py",
+                base_text + f"\n\ndef {sym1}() -> int:\n    return 1\n\ndef {sym2}() -> int:\n    return 2\n",
+            )
             snap_c = session.snapshot()  # revision 2: sym1 + sym2
             snaps.append(snap_c)
 

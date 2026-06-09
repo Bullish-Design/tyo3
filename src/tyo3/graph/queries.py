@@ -64,7 +64,9 @@ class _QueriesMixin:
 
     def references_from(self, durable_id: str) -> list[tuple[SymbolNode, EdgeData]]:
         """All outgoing REFERENCES edges from a symbol."""
-        return [(self._graph[tgt_idx], data) for tgt_idx, data in self._edges_of_kind(durable_id, {EdgeKind.REFERENCES})]
+        return [
+            (self._graph[tgt_idx], data) for tgt_idx, data in self._edges_of_kind(durable_id, {EdgeKind.REFERENCES})
+        ]
 
     # ── Structural queries ────────────────────────────────────
 
@@ -286,6 +288,8 @@ class _QueriesMixin:
             # mapping node_index -> float
             centrality = rx.betweenness_centrality(self._graph)
         except Exception:
+            # Centrality is best-effort analytics; an empty graph or rustworkx
+            # failure yields no ranking rather than raising.
             return []
 
         scored = [(self._graph[i].durable_id, score) for i, score in centrality.items() if score > 0.0]
@@ -446,4 +450,3 @@ class _QueriesMixin:
 
         resolved = dep.lookup(durable_id)
         return resolved if resolved is not None else node
-

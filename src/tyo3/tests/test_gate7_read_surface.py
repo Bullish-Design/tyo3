@@ -9,8 +9,6 @@ Tests that define the key behaviours:
 
 from __future__ import annotations
 
-import pytest
-
 # These test functions use xfail because the API doesn't exist yet.
 # They will be un-xfail'd as each step is implemented.
 
@@ -26,7 +24,7 @@ def test_cross_layer_join_entity_view(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -103,7 +101,7 @@ def test_combined_snapshot_diff(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\ndef bar():\n    return 2\n")
 
     cfg_dir = proj / ".tyo3"
@@ -156,6 +154,7 @@ path = "cache/upper"
         # Re-author note on bar.
         session.author("intent", bar_id, {"note": "bar helper updated"})
         r1 = session.head
+        assert r1 > r0, "the edit + re-author advance head past R0"
 
         after = session.snapshot()
 
@@ -193,7 +192,7 @@ def test_latest_warm_snapshot_consistent(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -248,8 +247,8 @@ path = "cache/upper"
         assert snap_derived is not None
 
         # Session convenience sugar
-        session.code  # should be a CodeLayerView-like
-        session.layer("upper")  # should dispatch by config
+        assert session.code is not None  # CodeLayerView-like
+        assert session.layer("upper") is not None  # dispatched by config
 
         # Convenience diff sugar
         snap2 = session.snapshot()
@@ -274,7 +273,7 @@ def test_entity_view_all_layers_describe_same_revision(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -347,7 +346,7 @@ def test_entity_view_absent_entity(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -383,7 +382,7 @@ def test_code_diff_entity_body_changed(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     with TyO3Session(str(proj)) as session:
@@ -396,6 +395,7 @@ def test_code_diff_entity_body_changed(tmp_path):
         after = session.snapshot()
 
         from tyo3.models.diff import _compute_code_diff
+
         d = _compute_code_diff(after, before)
         assert foo_id in d.changed
         assert not d.added
@@ -412,7 +412,7 @@ def test_code_diff_add_file_removed(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     with TyO3Session(str(proj)) as session:
@@ -424,6 +424,7 @@ def test_code_diff_add_file_removed(tmp_path):
         after = session.snapshot()
 
         from tyo3.models.diff import _compute_code_diff
+
         d = _compute_code_diff(after, before)
         assert len(d.added) > 0
 
@@ -441,7 +442,7 @@ def test_derived_drift_on_body_edit(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\ndef bar():\n    return 2\n")
 
     cfg_dir = proj / ".tyo3"
@@ -502,7 +503,7 @@ def test_authored_diff_changed(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -530,6 +531,7 @@ review_on_change = true
 
         # Added
         from tyo3.models.diff import _compute_authored_diff
+
         d1 = _compute_authored_diff(mid, before, "intent")
         assert foo_id in d1.added
 
@@ -553,7 +555,7 @@ def test_combined_diff_entities_union(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\ndef bar():\n    return 2\n")
 
     cfg_dir = proj / ".tyo3"
@@ -614,7 +616,7 @@ def test_same_revision_diff_is_empty(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     with TyO3Session(str(proj)) as session:
@@ -636,7 +638,7 @@ def test_code_diff_move_entity_unchanged(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     with TyO3Session(str(proj)) as session:
@@ -652,6 +654,7 @@ def test_code_diff_move_entity_unchanged(tmp_path):
         after = session.snapshot()
 
         from tyo3.models.diff import _compute_code_diff
+
         d = _compute_code_diff(after, before)
         # The entity may appear as changed (hash might differ due to file change)
         # or moved. The key invariant is: not spuriously in added+removed.
@@ -670,7 +673,7 @@ def test_latest_has_no_entity_no_diff(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     with TyO3Session(str(proj)) as session:
@@ -688,7 +691,7 @@ def test_diff_parity_with_independent_rebuild(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\ndef bar():\n    return 2\n")
 
     with TyO3Session(str(proj)) as session:
@@ -718,7 +721,6 @@ def test_diff_parity_with_independent_rebuild(tmp_path):
         fresh_r1 = CodeGraph.build(snap_at_r1, root=proj)._pin_at(r1_snap.revision)
 
         # Diff via independent builds.
-        from tyo3.models.diff import _compute_code_diff
         # Create lightweight code views for the fresh graphs.
         r0_ids = {fresh_r0._graph[idx].durable_id for idx in fresh_r0._graph.node_indices()}
         r1_ids = {fresh_r1._graph[idx].durable_id for idx in fresh_r1._graph.node_indices()}
@@ -727,6 +729,15 @@ def test_diff_parity_with_independent_rebuild(tmp_path):
         # be consistent with the independent rebuild.
         # foo_id should be changed (body edit).
         assert foo_id in d1.code.changed
+
+        # The live-snapshot graphs must agree with graphs rebuilt from scratch at
+        # the same revisions (the read surface is a pure projection of the pinned
+        # snapshot). A body-only edit keeps the entity set stable across R0→R1.
+        r0_live_ids = {r0_graph._graph[idx].durable_id for idx in r0_graph._graph.node_indices()}
+        r1_live_ids = {r1_graph._graph[idx].durable_id for idx in r1_graph._graph.node_indices()}
+        assert r0_live_ids == r0_ids
+        assert r1_live_ids == r1_ids
+        assert r0_ids == r1_ids
 
         r0_snap.close()
         r1_snap.close()
@@ -744,7 +755,7 @@ def test_code_only_project_no_op(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     with TyO3Session(str(proj)) as session:

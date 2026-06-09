@@ -36,15 +36,15 @@ class Delta:
     """
 
     revision: int
-    created: frozenset[str]   # DurableIds created this revision
-    changed: frozenset[str]   # DurableIds changed (content hash differs)
-    deleted: frozenset[str]   # DurableIds deleted
-    moved: frozenset[str]     # DurableIds moved (same hash, new location)
+    created: frozenset[str]  # DurableIds created this revision
+    changed: frozenset[str]  # DurableIds changed (content hash differs)
+    deleted: frozenset[str]  # DurableIds deleted
+    moved: frozenset[str]  # DurableIds moved (same hash, new location)
     authored: frozenset[str]  # authored-record ids edited (Gate 6)
     affected: frozenset[str]  # transitive closure of changed∪deleted (§5.4)
     rescan: bool
-    files: frozenset[str]     # project-relative paths touched
-    layers: frozenset[str]    # layers touched ("code" + derived/authored layers)
+    files: frozenset[str]  # project-relative paths touched
+    layers: frozenset[str]  # layers touched ("code" + derived/authored layers)
 
     def scoped_to(self, interest: Interest) -> Delta:
         """Return a new ``Delta`` whose id/file/layer sets are all
@@ -94,14 +94,7 @@ class Delta:
 
     def is_empty(self) -> bool:
         """Return True if no ids were touched in any category."""
-        return not (
-            self.created
-            or self.changed
-            or self.deleted
-            or self.moved
-            or self.authored
-            or self.affected
-        )
+        return not (self.created or self.changed or self.deleted or self.moved or self.authored or self.affected)
 
     @classmethod
     def from_commit_delta(cls, delta: CommitDelta) -> Delta:
@@ -143,13 +136,7 @@ def _layers_touched(delta: CommitDelta) -> frozenset[str]:
     """
     layers: set[str] = set()
 
-    has_code_change = bool(
-        delta.created_ids
-        or delta.changed_ids
-        or delta.deleted_ids
-        or delta.moved
-        or delta.rescan
-    )
+    has_code_change = bool(delta.created_ids or delta.changed_ids or delta.deleted_ids or delta.moved or delta.rescan)
     if has_code_change:
         layers.add("code")
 

@@ -29,7 +29,7 @@ class CacheKey:
         return f"{self.input_hash}:{self.generator_version}"
 
     @classmethod
-    def from_store_key(cls, key: str) -> "CacheKey":
+    def from_store_key(cls, key: str) -> CacheKey:
         parts = key.split(":", 1)
         if len(parts) != 2:
             raise ValueError(f"Invalid store key: {key}")

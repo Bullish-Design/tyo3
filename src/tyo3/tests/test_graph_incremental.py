@@ -17,7 +17,6 @@ from tyo3 import TyO3Session
 from tyo3.graph import CodeGraph, EdgeKind
 from tyo3.tests.graph_helpers import edges_of_kind
 
-
 # ── Parity helpers ──────────────────────────────────────────────────────
 
 
@@ -37,8 +36,7 @@ def _edge_triples(g: CodeGraph) -> set[tuple[str, str, str]]:
 
 def _assert_structurally_equal(a: CodeGraph, b: CodeGraph) -> None:
     assert _node_ids(a) == _node_ids(b), (
-        f"node id mismatch\nonly in head: {_node_ids(a) - _node_ids(b)}\n"
-        f"only in rebuild: {_node_ids(b) - _node_ids(a)}"
+        f"node id mismatch\nonly in head: {_node_ids(a) - _node_ids(b)}\nonly in rebuild: {_node_ids(b) - _node_ids(a)}"
     )
     assert _edge_triples(a) == _edge_triples(b), (
         f"edge mismatch\nonly in head: {_edge_triples(a) - _edge_triples(b)}\n"
@@ -51,9 +49,7 @@ def _assert_structurally_equal(a: CodeGraph, b: CodeGraph) -> None:
 
 def test_changed_file_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User:\n    def save(self): ...\n")
-    (tmp_path / "app.py").write_text(
-        "from models import User\n\n\ndef run():\n    return User().save()\n"
-    )
+    (tmp_path / "app.py").write_text("from models import User\n\n\ndef run():\n    return User().save()\n")
     with TyO3Session(str(tmp_path)) as s:
         g = s.graph  # live HEAD graph (native projection)
         s.edit("models.py", "class User:\n    def save(self): ...\n    def load(self): ...\n")
@@ -86,9 +82,7 @@ def test_deleted_file_equals_rebuild(tmp_path: StdPath) -> None:
 def test_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> None:
     """Changing models.py must keep app.py's references INTO models.py correct."""
     (tmp_path / "models.py").write_text("class User:\n    def save(self): ...\n")
-    (tmp_path / "app.py").write_text(
-        "from models import User\n\n\ndef run():\n    return User().save()\n"
-    )
+    (tmp_path / "app.py").write_text("from models import User\n\n\ndef run():\n    return User().save()\n")
     with TyO3Session(str(tmp_path)) as s:
         g = s.graph
         s.edit("models.py", "class User:\n    def save(self): ...\n    def extra(self): ...\n")
@@ -98,9 +92,7 @@ def test_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> None:
         def _file(did: str) -> str:
             return did.removeprefix("<module>").split("::")[0]
 
-        assert ("app.py", "models.py") in {
-            (_file(a), _file(b)) for a, b in edges_of_kind(g, EdgeKind.IMPORTS)
-        }
+        assert ("app.py", "models.py") in {(_file(a), _file(b)) for a, b in edges_of_kind(g, EdgeKind.IMPORTS)}
 
 
 def test_rescan_equals_rebuild(tmp_path: StdPath) -> None:

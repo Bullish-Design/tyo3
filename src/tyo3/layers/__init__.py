@@ -7,10 +7,10 @@ join (Step 2) and combined diff (Step 6) iterate layers uniformly.
 
 from __future__ import annotations
 
-from tyo3.layers.base import LayerView, LayerDiff
+from tyo3.layers.authored import AuthoredLayerView
+from tyo3.layers.base import LayerDiff, LayerView
 from tyo3.layers.code import CodeLayerView
 from tyo3.layers.derived import DerivedLayerView
-from tyo3.layers.authored import AuthoredLayerView
 
 __all__ = [
     "LayerView",

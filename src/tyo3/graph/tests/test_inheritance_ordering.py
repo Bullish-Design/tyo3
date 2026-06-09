@@ -99,17 +99,13 @@ def _edit_all(suffix: str = "") -> dict[str, str]:
 def _check_override_a_greet_to_c(graph: CodeGraph) -> bool:
     """Return True iff an OVERRIDES edge from A.greet → C.greet exists."""
     for src_name, src_file, tgt_name, tgt_file in _overrides_pairs(graph):
-        if (
-            src_name == "greet"
-            and src_file == "a.py"
-            and tgt_name == "greet"
-            and tgt_file == "c.py"
-        ):
+        if src_name == "greet" and src_file == "a.py" and tgt_name == "greet" and tgt_file == "c.py":
             return True
     return False
 
 
 # ── Sort keys for parametrised processing order ─────────────────────────
+
 
 def _ascending(files: list[str]) -> list[str]:
     """Alphabetical: a.py, b.py, c.py (default)."""
@@ -122,6 +118,7 @@ def _descending(files: list[str]) -> list[str]:
 
 
 # ── Full build ──────────────────────────────────────────────────────────
+
 
 class TestInheritanceOrderingFullBuild:
     """Full build: build the graph from scratch with the three-file fixture."""
@@ -150,12 +147,12 @@ class TestInheritanceOrderingRebuildAfterEdit:
             g = CodeGraph.build(s)
             exists = _check_override_a_greet_to_c(g)
             assert exists, (
-                "STATUS=LIVE: OVERRIDES edge missing in rebuild after edits "
-                "on three-file cross-file fixture."
+                "STATUS=LIVE: OVERRIDES edge missing in rebuild after edits on three-file cross-file fixture."
             )
 
 
 # ── Incremental, parametrised over processing order ─────────────────────
+
 
 class TestInheritanceOrderingIncremental:
     """Incremental update: edit all three files, apply delta.
@@ -168,9 +165,7 @@ class TestInheritanceOrderingIncremental:
     """
 
     @pytest.mark.parametrize("sort_order", [_ascending, _descending], ids=["asc", "desc"])
-    def test_incremental_override_edge_exists(
-        self, tmp_path: StdPath, sort_order
-    ) -> None:
+    def test_incremental_override_edge_exists(self, tmp_path: StdPath, sort_order) -> None:
         """Edit all three files in one batch — OVERRIDES survives in both orders."""
         _write_fixture(tmp_path)
         with TyO3Session(str(tmp_path)) as s:
@@ -187,9 +182,7 @@ class TestInheritanceOrderingIncremental:
             )
 
     @pytest.mark.parametrize("sort_order", [_ascending, _descending], ids=["asc", "desc"])
-    def test_incremental_override_edge_stable_across_edits(
-        self, tmp_path: StdPath, sort_order
-    ) -> None:
+    def test_incremental_override_edge_stable_across_edits(self, tmp_path: StdPath, sort_order) -> None:
         """Multiple rounds of edits — the edge persists across all rounds,
         regardless of processing order."""
         _write_fixture(tmp_path)

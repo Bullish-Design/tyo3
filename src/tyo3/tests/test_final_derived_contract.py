@@ -257,9 +257,7 @@ def test_semantic_layer_recomputes_on_dependency_change(tmp_path):
         with s.snapshot() as snap:
             snap.derived("upper", caller_id)
         recomputed = {did for call in _CALLS for did in call}
-        assert caller_id in recomputed, (
-            "a semantic layer must recompute on a dependency-only change"
-        )
+        assert caller_id in recomputed, "a semantic layer must recompute on a dependency-only change"
     finally:
         s.close()
 
@@ -284,9 +282,7 @@ def test_local_layer_skips_dependency_only_change(tmp_path):
         with s.snapshot() as snap:
             val = snap.derived("upper", caller_id)
         recomputed = {did for call in _CALLS for did in call}
-        assert caller_id not in recomputed, (
-            "a local layer must not recompute on a dependency-only change"
-        )
+        assert caller_id not in recomputed, "a local layer must not recompute on a dependency-only change"
         assert val.artifact == art0, "local artifact must be reused unchanged"
     finally:
         s.close()

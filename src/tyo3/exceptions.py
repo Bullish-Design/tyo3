@@ -21,6 +21,7 @@ try:
         TyO3Error,
     )
 except ImportError:
+
     class TyO3Error(Exception):
         """Base exception for all TyO3 errors."""
 

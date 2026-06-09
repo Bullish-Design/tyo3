@@ -26,7 +26,7 @@ pytestmark = needs_native
 # consumers, one using draw, one using serialize. The nominal chain
 # (consume_* → make_widget → Widget) makes both consumers land in the coarse
 # affected set; only the draw user truly depends on draw's body.
-WIDGET_SRC = '''\
+WIDGET_SRC = """\
 class Widget:
     def draw(self) -> str:
         return "draw"
@@ -47,7 +47,7 @@ def consume_a() -> str:
 def consume_b() -> str:
     w = make_widget()
     return w.serialize()
-'''
+"""
 
 
 def _make_project(tmp_path, *, precision: str = "method", refinement: str = "async"):

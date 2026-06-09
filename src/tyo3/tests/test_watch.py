@@ -92,7 +92,6 @@ def _poll_until_change(session, *, timeout=5.0, interval=0.05):
 
 @pytest.mark.watcher
 def test_real_watcher_observes_disk_change(tmp_path):
-    import pytest
     (tmp_path / "a.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as s:
         s.watch()
@@ -100,11 +99,7 @@ def test_real_watcher_observes_disk_change(tmp_path):
             time.sleep(0.2)  # let the watcher register paths
             (tmp_path / "a.py").write_text("x = 2\ny = 3\n")
             result = _poll_until_change(s)
-            assert result is not None, (
-                "watcher did not observe the disk change within the timeout"
-            )
-            assert (
-                any(p.endswith("a.py") for p in result.changed) or result.rescan
-            )
+            assert result is not None, "watcher did not observe the disk change within the timeout"
+            assert any(p.endswith("a.py") for p in result.changed) or result.rescan
         finally:
             s.unwatch()

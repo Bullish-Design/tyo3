@@ -34,9 +34,7 @@ def _open(root: Path, files: dict[str, str], *, retain_cap: int | None = None) -
     if retain_cap is not None:
         cfg = root / ".tyo3"
         cfg.mkdir(exist_ok=True)
-        (cfg / "config.toml").write_text(
-            f"schema_version = 1\n\n[spine]\nretain_cap = {retain_cap}\n"
-        )
+        (cfg / "config.toml").write_text(f"schema_version = 1\n\n[spine]\nretain_cap = {retain_cap}\n")
     s = TyO3Session(str(root))
     s.sync_all()
     return s
@@ -56,9 +54,7 @@ def test_snapshot_does_not_observe_file_created_after_pin(tmp_path):
             # Create a new relevant file on disk *after* the snapshot is pinned.
             (tmp_path / "b.py").write_text("y = 2\n")
             files = {str(f) for f in snap.files()}
-            assert not any(f.endswith("b.py") for f in files), (
-                "snapshot pinned before b.py existed must not observe it"
-            )
+            assert not any(f.endswith("b.py") for f in files), "snapshot pinned before b.py existed must not observe it"
     finally:
         s.close()
 
@@ -133,8 +129,7 @@ def test_snapshot_construction_reads_no_disk(tmp_path):
         after = _disk_read_counter(s)
         snap.close()
         assert after == before, (
-            f"snapshot construction must read no project content from disk "
-            f"(counter went {before} -> {after})"
+            f"snapshot construction must read no project content from disk (counter went {before} -> {after})"
         )
     finally:
         s.close()

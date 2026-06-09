@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pytest
 
 import tyo3.exceptions as exc
-from tyo3 import _native_impl
-from tyo3 import TyO3Session
+from tyo3 import TyO3Session, _native_impl
 from tyo3.exceptions import (
     ConfigError,
     FormatVersionError,
@@ -260,9 +259,7 @@ endpoint = "sk-livesecret1234567890"
         ),
     ],
 )
-def test_invalid_configs_rejected_with_config_error(
-    tmp_path: Path, config_text: str, pattern: str
-) -> None:
+def test_invalid_configs_rejected_with_config_error(tmp_path: Path, config_text: str, pattern: str) -> None:
     _project(tmp_path)
     _write_config(tmp_path, config_text)
 
@@ -345,9 +342,7 @@ refinement = "eventually"
         ),
     ],
 )
-def test_invalid_coordination_config_fails_loudly_at_open(
-    tmp_path: Path, config_text: str, pattern: str
-) -> None:
+def test_invalid_coordination_config_fails_loudly_at_open(tmp_path: Path, config_text: str, pattern: str) -> None:
     """Phase 12: an invalid coordination/precision knob raises ConfigError at open.
 
     The deleted silent ``try/except → defaults`` re-read used to hide these; the
@@ -486,11 +481,7 @@ def test_open_without_sidecar_touches_no_source_files(tmp_path: Path) -> None:
     # must hold is that no *source* file is created, deleted, or modified — so we
     # compare the source tree, excluding the sidecar.
     def source_files(root: Path) -> dict[Path, str]:
-        return {
-            p: p.read_text()
-            for p in root.rglob("*")
-            if p.is_file() and ".tyo3" not in p.relative_to(root).parts
-        }
+        return {p: p.read_text() for p in root.rglob("*") if p.is_file() and ".tyo3" not in p.relative_to(root).parts}
 
     _project(tmp_path)
     before = source_files(tmp_path)

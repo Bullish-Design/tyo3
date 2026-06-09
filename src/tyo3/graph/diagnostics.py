@@ -34,14 +34,11 @@ class _DiagnosticsMixin:
         try:
             native_paths = [str(p) for p in source.files()]
         except Exception:
+            # No enumerable project files (e.g. a bare snapshot) ⇒ empty set.
             native_paths = []
-        project_files = (
-            {_to_relative(resolved_root, p) for p in native_paths} if resolved_root is not None else set()
-        )
+        project_files = {_to_relative(resolved_root, p) for p in native_paths} if resolved_root is not None else set()
         self._diagnostics.clear()
-        self._collect_all_diagnostics(
-            source, root=resolved_root, project_files=project_files
-        )
+        self._collect_all_diagnostics(source, root=resolved_root, project_files=project_files)
 
     def _collect_all_diagnostics(
         self,
@@ -97,4 +94,3 @@ class _DiagnosticsMixin:
     def all_diagnostics(self) -> list[Diagnostic]:
         """All diagnostics across all files."""
         return [d for diags in self._diagnostics.values() for d in diags]
-

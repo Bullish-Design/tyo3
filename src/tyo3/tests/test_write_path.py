@@ -8,7 +8,6 @@ reports the right delta.
 
 from __future__ import annotations
 
-import pytest
 from tyo3._native_impl import TyProject
 
 try:

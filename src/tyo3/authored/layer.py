@@ -45,9 +45,7 @@ class AuthoredLayer:
         """
         layer_cfg = config.layers[name]  # type: ignore[attr-defined]
         if layer_cfg.origin != "authored":  # type: ignore[attr-defined]
-            raise ValueError(
-                f"Layer '{name}' has origin '{layer_cfg.origin}', not 'authored'"
-            )
+            raise ValueError(f"Layer '{name}' has origin '{layer_cfg.origin}', not 'authored'")
         return cls(
             name=name,
             history=layer_cfg.history,

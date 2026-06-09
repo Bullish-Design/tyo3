@@ -58,19 +58,11 @@ _PROJECT_A = {
         "    def save(self):\n"
         "        return 2\n"
     ),
-    "main.py": (
-        "from models import User\n"
-        "\n"
-        "def run():\n"
-        "    return User().save()\n"
-    ),
+    "main.py": ("from models import User\n\ndef run():\n    return User().save()\n"),
 }
 
 _PROJECT_B = {
-    "lib.py": (
-        "def helper(x):\n"
-        "    return x + 1\n"
-    ),
+    "lib.py": ("def helper(x):\n    return x + 1\n"),
 }
 
 

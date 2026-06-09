@@ -87,7 +87,7 @@ def file_from_durable_id(durable_id: str) -> str:
     This is a fast syntactic fallback for module nodes and external stubs.
     """
     if durable_id.startswith("<module>"):
-        return durable_id[len("<module>"):]
+        return durable_id[len("<module>") :]
     if durable_id.startswith("<external>"):
         return "<external>"
     # For ULID-based ids: locate() is authoritative — callers should use

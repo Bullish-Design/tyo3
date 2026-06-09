@@ -22,8 +22,16 @@ def _rng(sl: int, sc: int, el: int, ec: int) -> dict:
     return {"start": {"line": sl, "column": sc}, "end": {"line": el, "column": ec}}
 
 
-def _node(did: str, name: str, file: str, *, kind: str = "function", qn: str | None = None,
-          rng: dict | None = None, content_hash: str | None = "abc") -> dict:
+def _node(
+    did: str,
+    name: str,
+    file: str,
+    *,
+    kind: str = "function",
+    qn: str | None = None,
+    rng: dict | None = None,
+    content_hash: str | None = "abc",
+) -> dict:
     return {
         "durable_id": did,
         "name": name,
@@ -39,8 +47,9 @@ def _node(did: str, name: str, file: str, *, kind: str = "function", qn: str | N
     }
 
 
-def _edge(src: str, dst: str, kind: str, *, file: str | None = None,
-          rng: dict | None = None, role: str | None = None) -> dict:
+def _edge(
+    src: str, dst: str, kind: str, *, file: str | None = None, rng: dict | None = None, role: str | None = None
+) -> dict:
     return {
         "source_id": src,
         "destination_id": dst,
@@ -103,23 +112,23 @@ def test_full_delta_builds_expected_graph():
 
 def test_incremental_upsert_leaves_rest_identical():
     g = _seed_graph()
-    before = {n.durable_id: n.model_dump(mode="json") for n in
-              [g._graph[i] for i in g._graph.node_indices()]}
+    before = {n.durable_id: n.model_dump(mode="json") for n in [g._graph[i] for i in g._graph.node_indices()]}
 
     # Re-emit only `save` with a new content hash (a body edit).
     changed = _node(_SAVE, "save", "models.py", kind="method", qn="User.save", content_hash="deadbeef")
-    g.apply_code_delta({
-        "revision": 2,
-        "rescan": False,
-        "nodes_upserted": [changed],
-        "nodes_removed": [],
-        "nodes_moved": [],
-        "edges_added": [],
-        "edges_removed": [],
-    })
+    g.apply_code_delta(
+        {
+            "revision": 2,
+            "rescan": False,
+            "nodes_upserted": [changed],
+            "nodes_removed": [],
+            "nodes_moved": [],
+            "edges_added": [],
+            "edges_removed": [],
+        }
+    )
 
-    after = {n.durable_id: n.model_dump(mode="json") for n in
-             [g._graph[i] for i in g._graph.node_indices()]}
+    after = {n.durable_id: n.model_dump(mode="json") for n in [g._graph[i] for i in g._graph.node_indices()]}
 
     assert after[_SAVE]["content_hash"] == "deadbeef"
     # Every other node is byte-identical.
@@ -135,15 +144,17 @@ def test_stale_incremental_delta_is_noop():
     g = _seed_graph()  # revision 1
     changed = _node(_SAVE, "save", "models.py", kind="method", qn="User.save", content_hash="STALE")
     # revision 1 <= current 1 → stale, must be ignored.
-    g.apply_code_delta({
-        "revision": 1,
-        "rescan": False,
-        "nodes_upserted": [changed],
-        "nodes_removed": [],
-        "nodes_moved": [],
-        "edges_added": [],
-        "edges_removed": [],
-    })
+    g.apply_code_delta(
+        {
+            "revision": 1,
+            "rescan": False,
+            "nodes_upserted": [changed],
+            "nodes_removed": [],
+            "nodes_moved": [],
+            "edges_added": [],
+            "edges_removed": [],
+        }
+    )
     assert g.symbol(_SAVE).content_hash == "abc"
     assert g.revision == 1
 
@@ -154,20 +165,24 @@ def test_moved_node_updates_location_only_and_keeps_edges():
     assert any(n.durable_id == _SAVE for n in save_edges_before)
 
     # Move `run` to a new file/range (same id, unchanged body).
-    g.apply_code_delta({
-        "revision": 2,
-        "rescan": False,
-        "nodes_upserted": [],
-        "nodes_removed": [],
-        "nodes_moved": [{
-            "durable_id": _RUN,
-            "file": "app.py",
-            "range": _rng(10, 1, 12, 1),
-            "name_range": _rng(10, 5, 10, 8),
-        }],
-        "edges_added": [],
-        "edges_removed": [],
-    })
+    g.apply_code_delta(
+        {
+            "revision": 2,
+            "rescan": False,
+            "nodes_upserted": [],
+            "nodes_removed": [],
+            "nodes_moved": [
+                {
+                    "durable_id": _RUN,
+                    "file": "app.py",
+                    "range": _rng(10, 1, 12, 1),
+                    "name_range": _rng(10, 5, 10, 8),
+                }
+            ],
+            "edges_added": [],
+            "edges_removed": [],
+        }
+    )
 
     run = g.symbol(_RUN)
     assert run.file == "app.py"
@@ -184,15 +199,17 @@ def test_edges_removed_prunes_file_importers():
     g = _seed_graph()
     assert g._file_importers["models.py"] == {"main.py"}
 
-    g.apply_code_delta({
-        "revision": 2,
-        "rescan": False,
-        "nodes_upserted": [],
-        "nodes_removed": [],
-        "nodes_moved": [],
-        "edges_added": [],
-        "edges_removed": [_edge(_MOD_MAIN, _MOD_MODELS, "imports", file="main.py")],
-    })
+    g.apply_code_delta(
+        {
+            "revision": 2,
+            "rescan": False,
+            "nodes_upserted": [],
+            "nodes_removed": [],
+            "nodes_moved": [],
+            "edges_added": [],
+            "edges_removed": [_edge(_MOD_MAIN, _MOD_MODELS, "imports", file="main.py")],
+        }
+    )
 
     assert "main.py" not in g._file_importers.get("models.py", set())
     assert g._importers_of({"models.py"}) == set()

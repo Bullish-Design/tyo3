@@ -73,8 +73,6 @@ class _OwnedView:
             pass
 
 
-
-
 class Snapshot(_ReadOps):
     """Immutable, revision-pinned, thread-shareable read view of a project.
 
@@ -118,6 +116,7 @@ class Snapshot(_ReadOps):
         """A ``CodeLayerView`` pinned at this snapshot's revision."""
         if self._code_view is None:
             from tyo3.layers.code import CodeLayerView
+
             self._code_view = CodeLayerView(self)
         return self._code_view
 
@@ -137,9 +136,11 @@ class Snapshot(_ReadOps):
             raise KeyError(f"Layer '{name}' is not declared in config")
         if layer_cfg.origin == "derived":
             from tyo3.layers.derived import DerivedLayerView
+
             view = DerivedLayerView(self, name, layer_cfg)
         elif layer_cfg.origin == "authored":
             from tyo3.layers.authored import AuthoredLayerView
+
             view = AuthoredLayerView(self, name, layer_cfg)
         else:
             raise KeyError(f"Layer '{name}' has unknown origin '{layer_cfg.origin}'")
@@ -153,6 +154,7 @@ class Snapshot(_ReadOps):
         ``derived``, ``authored`` — all describing the pinned revision.
         """
         from tyo3.models.view import EntityView
+
         return EntityView.from_snapshot(self, durable_id)
 
     def embedding_drift(self, before: Snapshot) -> Any:
@@ -170,6 +172,7 @@ class Snapshot(_ReadOps):
         Raises ``ValueError`` when snapshots are from incompatible sessions.
         """
         from tyo3.models.diff import SnapshotDiff
+
         return SnapshotDiff.compute(self, before)
 
     def graph(self):
@@ -214,23 +217,17 @@ class Snapshot(_ReadOps):
         """
         self._check_open()
         if self._derivation_getter is None:
-            return DerivedValue(
-                artifact=None, status="absent", revision=self.revision, layer=layer
-            )
+            return DerivedValue(artifact=None, status="absent", revision=self.revision, layer=layer)
         dag = self._derivation_getter()
         if dag.is_empty:
-            return DerivedValue(
-                artifact=None, status="absent", revision=self.revision, layer=layer
-            )
+            return DerivedValue(artifact=None, status="absent", revision=self.revision, layer=layer)
         L = dag.layer(layer)
         try:
             gen_input, input_hash = dag.resolve_input(L, self, durable_id)
         except (KeyError, AttributeError):
             # The entity does not resolve at this revision (deleted, or never
             # reconciled to this snapshot) → nothing to serve.
-            return DerivedValue(
-                artifact=None, status="absent", revision=self.revision, layer=layer
-            )
+            return DerivedValue(artifact=None, status="absent", revision=self.revision, layer=layer)
         key = L.keys_for(input_hash)
         art = L.cache.get(key)
         if art is not None:
@@ -263,9 +260,7 @@ class Snapshot(_ReadOps):
             return DerivedValue(artifact=None, status="failed", revision=self.revision, layer=layer)
         return DerivedValue(artifact=None, status="absent", revision=self.revision, layer=layer)
 
-    def nearest(
-        self, query_vector: list[float], k: int = 10, *, layer: str | None = None
-    ) -> list[tuple[str, float]]:
+    def nearest(self, query_vector: list[float], k: int = 10, *, layer: str | None = None) -> list[tuple[str, float]]:
         """Nearest-neighbour search against a vector-backed derived layer.
 
         Returns list of ``(durable_id, score)`` for entities with the nearest
@@ -304,7 +299,7 @@ class Snapshot(_ReadOps):
         hash_to_ids: dict[str, list[str]] = {}
         for node_idx in g._graph.node_indices():
             node = g._graph[node_idx]
-            for profile, h in node.content_hashes.items():
+            for _profile, h in node.content_hashes.items():
                 hash_to_ids.setdefault(h, []).append(node.durable_id)
 
         mapped: list[tuple[str, float]] = []

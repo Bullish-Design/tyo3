@@ -93,4 +93,3 @@ class _DiffMixin:
                 if data.kind in kinds:
                     result.append((tgt, data))
         return result
-

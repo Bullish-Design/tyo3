@@ -28,8 +28,7 @@ from tyo3.graph import CodeGraph, EdgeKind
 def _name_to_hash(graph: CodeGraph) -> dict[str, str]:
     """Map ``file::name`` -> content_hash for every node."""
     return {
-        f"{graph.graph[i].file}::{graph.graph[i].name}": graph.graph[i].content_hash
-        for i in graph.graph.node_indices()
+        f"{graph.graph[i].file}::{graph.graph[i].name}": graph.graph[i].content_hash for i in graph.graph.node_indices()
     }
 
 
@@ -62,24 +61,16 @@ def test_container_hash_subsumes_member_bodies(tmp_path: StdPath) -> None:
     inference-flow dependencies silently breaks — a §5.4 no-miss regression
     that no other test would catch.
     """
-    (tmp_path / "m.py").write_text(
-        "class C:\n"
-        "    def foo(self):\n"
-        "        return 1\n"
-    )
+    (tmp_path / "m.py").write_text("class C:\n    def foo(self):\n        return 1\n")
     with TyO3Session(str(tmp_path)) as s:
         before = _name_to_hash(s.graph)
         s.edit(
             "m.py",
-            "class C:\n"
-            "    def foo(self):\n"
-            "        return 2\n",  # body-only change
+            "class C:\n    def foo(self):\n        return 2\n",  # body-only change
         )
         after = _name_to_hash(s.graph)
 
-        assert before["m.py::foo"] != after["m.py::foo"], (
-            "method body change must move the method's content_hash"
-        )
+        assert before["m.py::foo"] != after["m.py::foo"], "method body change must move the method's content_hash"
         assert before["m.py::C"] != after["m.py::C"], (
             "INVARIANT BROKEN: the enclosing class's content_hash must move when "
             "a member body changes — affected-set coverage of inference-flow "
@@ -96,29 +87,28 @@ def test_nominal_chain_carries_coverage(tmp_path: StdPath) -> None:
     ``render`` even though no ``render -> draw`` edge exists.
     """
     (tmp_path / "widget.py").write_text(
-        "class Widget:\n"
-        "    def draw(self):\n"
-        "        return 'drawing'\n"
-        "\n"
-        "def make_widget():\n"
-        "    return Widget()\n"
+        "class Widget:\n    def draw(self):\n        return 'drawing'\n\ndef make_widget():\n    return Widget()\n"
     )
     (tmp_path / "app.py").write_text(
-        "from widget import make_widget\n"
-        "\n"
-        "def render():\n"
-        "    w = make_widget()\n"
-        "    return w.draw()\n"
+        "from widget import make_widget\n\ndef render():\n    w = make_widget()\n    return w.draw()\n"
     )
     with TyO3Session(str(tmp_path)) as s:
         g = s.graph
         assert _edge_exists(
-            g, src_name="render", src_file="app.py",
-            dst_name="make_widget", dst_file="widget.py", kind=EdgeKind.REFERENCES,
+            g,
+            src_name="render",
+            src_file="app.py",
+            dst_name="make_widget",
+            dst_file="widget.py",
+            kind=EdgeKind.REFERENCES,
         ), "named reference render -> make_widget must exist"
         assert _edge_exists(
-            g, src_name="make_widget", src_file="widget.py",
-            dst_name="Widget", dst_file="widget.py", kind=EdgeKind.REFERENCES,
+            g,
+            src_name="make_widget",
+            src_file="widget.py",
+            dst_name="Widget",
+            dst_file="widget.py",
+            kind=EdgeKind.REFERENCES,
         ), "named reference make_widget -> Widget must exist"
 
 
@@ -133,27 +123,22 @@ def test_inference_flow_edge_absent_canary(tmp_path: StdPath) -> None:
     precision potentially enabled). Do not "fix" by relaxing — investigate.
     """
     (tmp_path / "widget.py").write_text(
-        "class Widget:\n"
-        "    def draw(self):\n"
-        "        return 'drawing'\n"
-        "\n"
-        "def make_widget():\n"
-        "    return Widget()\n"
+        "class Widget:\n    def draw(self):\n        return 'drawing'\n\ndef make_widget():\n    return Widget()\n"
     )
     (tmp_path / "app.py").write_text(
-        "from widget import make_widget\n"
-        "\n"
-        "def render():\n"
-        "    w = make_widget()\n"
-        "    return w.draw()\n"
+        "from widget import make_widget\n\ndef render():\n    w = make_widget()\n    return w.draw()\n"
     )
     with TyO3Session(str(tmp_path)) as s:
         g = s.graph
         # No direct edge of ANY dependency kind from render to the method draw.
         for kind in (EdgeKind.REFERENCES, EdgeKind.INSTANTIATES, EdgeKind.TYPE_OF, EdgeKind.RETURNS):
             assert not _edge_exists(
-                g, src_name="render", src_file="app.py",
-                dst_name="draw", dst_file="widget.py", kind=kind,
+                g,
+                src_name="render",
+                src_file="app.py",
+                dst_name="draw",
+                dst_file="widget.py",
+                kind=kind,
             ), (
                 f"inference-flow edge render -> draw ({kind}) is now emitted — "
                 "ty behavior changed; revisit container-granular coverage and "

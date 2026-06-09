@@ -50,8 +50,7 @@ def test_graph_ids_are_path_independent(tmp_path: StdPath) -> None:
     # of nodes per file, same qualified names, same edge relationships.
     # Assert that both graphs have the same number of non-external nodes.
     assert len(original_ids) == len(temp_ids), (
-        f"Both graphs should have same number of first-party nodes, "
-        f"got {len(original_ids)} vs {len(temp_ids)}"
+        f"Both graphs should have same number of first-party nodes, got {len(original_ids)} vs {len(temp_ids)}"
     )
 
 

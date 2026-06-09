@@ -29,7 +29,7 @@ def test_self_healing_derived_layer_cache_hit_recompute_reuse(tmp_path):
     proj = tmp_path / "proj"
     proj.mkdir()
 
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
 
     (proj / "a.py").write_text("def foo():\n    return 1\n")
     (proj / "b.py").write_text("def bar():\n    return 2\n")
@@ -100,8 +100,7 @@ path = "cache/upper"
         assert val2.status == "fresh"
         assert val2.artifact != val0.artifact, "foo body changed → artifact should differ"
         assert _UPPERCASE_CALL_COUNT == call_count_before + 1, (
-            f"Expected exactly 1 recompute for foo, "
-            f"but calls went from {call_count_before} to {_UPPERCASE_CALL_COUNT}"
+            f"Expected exactly 1 recompute for foo, but calls went from {call_count_before} to {_UPPERCASE_CALL_COUNT}"
         )
         snap2.close()
 
@@ -169,12 +168,8 @@ def test_content_hashes_on_symbols(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
-    (proj / "a.py").write_text(
-        "def foo():\n"
-        "    \"\"\"A docstring.\"\"\"\n"
-        "    return 1\n"
-    )
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
+    (proj / "a.py").write_text('def foo():\n    """A docstring."""\n    return 1\n')
 
     # Config with two profiles: structure (no docstrings) and semantic (with docstrings)
     cfg_dir = proj / ".tyo3"
@@ -220,7 +215,7 @@ def test_no_config_noop_content_hashes(tmp_path):
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     with TyO3Session(str(proj)) as session:
@@ -351,6 +346,7 @@ _UPPERCASE_CALL_COUNT = 0
 
 def _make_python_cfg(callable_ref: str, batch_size: int = 64):
     from tyo3.config import GeneratorConfig
+
     return GeneratorConfig(
         type="python",
         callable=callable_ref,
@@ -366,7 +362,7 @@ def _make_python_cfg(callable_ref: str, batch_size: int = 64):
 
 def test_python_generator_deterministic():
     """A python generator returns deterministic bytes for a batch."""
-    from tyo3.derive.generators import GenInput, PythonGenerator, make_generator
+    from tyo3.derive.generators import GenInput, make_generator
 
     cfg = _make_python_cfg("tyo3.tests.test_gate5_derived:echo_generator")
     gen = make_generator(cfg, name="test")
@@ -413,7 +409,7 @@ def test_python_generator_failure():
 def test_command_generator_success():
     """A command generator round-trips stdin→stdout."""
     from tyo3.config import GeneratorConfig
-    from tyo3.derive.generators import GenInput, CommandGenerator
+    from tyo3.derive.generators import CommandGenerator, GenInput
 
     cfg = GeneratorConfig(
         type="command",
@@ -440,7 +436,7 @@ def test_command_generator_success():
 def test_command_generator_timeout():
     """A command exceeding timeout raises GeneratorFailed."""
     from tyo3.config import GeneratorConfig
-    from tyo3.derive.generators import GenInput, CommandGenerator
+    from tyo3.derive.generators import CommandGenerator, GenInput
     from tyo3.exceptions import GeneratorFailed
 
     cfg = GeneratorConfig(
@@ -463,7 +459,7 @@ def test_command_generator_timeout():
 def test_command_generator_nonzero_exit():
     """A command with non-zero exit raises GeneratorFailed."""
     from tyo3.config import GeneratorConfig
-    from tyo3.derive.generators import GenInput, CommandGenerator
+    from tyo3.derive.generators import CommandGenerator, GenInput
     from tyo3.exceptions import GeneratorFailed
 
     cfg = GeneratorConfig(
@@ -536,7 +532,7 @@ class TestDerivationDAG:
 
         proj = tmp_path / "proj"
         proj.mkdir()
-        (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
         (proj / "a.py").write_text("def foo():\n    return 1\n")
 
         with TyO3Session(str(proj)) as session:
@@ -550,7 +546,7 @@ class TestDerivationDAG:
 
         proj = tmp_path / "proj"
         proj.mkdir()
-        (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
         (proj / "a.py").write_text("def foo():\n    return 1\n")
 
         cfg_dir = proj / ".tyo3"
@@ -592,7 +588,7 @@ path = "cache/upper"
 
         proj = tmp_path / "proj"
         proj.mkdir()
-        (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
         (proj / "a.py").write_text("def foo():\n    return 1\n")
 
         cfg_dir = proj / ".tyo3"
@@ -626,9 +622,7 @@ path = "cache/upper"
             foo_id = session.id_for("a.py", 1, 5)
             # If identity is available, test resolve_input.
             if foo_id:
-                gen_input, input_hash = dag.resolve_input(
-                    dag.layer("upper"), snap, foo_id
-                )
+                gen_input, input_hash = dag.resolve_input(dag.layer("upper"), snap, foo_id)
                 assert gen_input.durable_id == foo_id
                 assert len(input_hash) > 0
             snap.close()
@@ -662,6 +656,7 @@ class TestVectorStore:
     def test_fs_store_no_nearest(self):
         """FsStore does not support nearest search — snapshot.nearest returns []."""
         from tyo3.stores.fs import FsStore
+
         store = FsStore("/tmp/test")
         assert not hasattr(store, "nearest")
 
@@ -671,9 +666,10 @@ class TestVectorStore:
 
 def test_generator_version_bump_new_key_space():
     """Bumping generator_version creates a new key space; old keys are retained."""
+    import tempfile
+
     from tyo3.derive.cache import ArtifactCache, CacheKey
     from tyo3.stores.fs import FsStore
-    import tempfile
 
     d = tempfile.mkdtemp()
     store = FsStore(d)
@@ -698,17 +694,17 @@ def test_generator_version_bump_new_key_space():
     assert cache.get(key_v1) == b"data_v1"  # v1 still retained
 
     import shutil
+
     shutil.rmtree(d, ignore_errors=True)
 
 
 def test_gc_never_is_noop(tmp_path):
     """Default gc='never' keeps all artifacts."""
     from tyo3 import TyO3Session
-    from tyo3.derive.dag import DerivationDAG
 
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
     (proj / "a.py").write_text("def foo():\n    return 1\n")
 
     cfg_dir = proj / ".tyo3"
@@ -747,9 +743,11 @@ def test_gc_preserves_active_and_prior_versions():
     Active-version artifacts and prior-version artifacts (rollback targets)
     are preserved.
     """
+    import shutil
+    import tempfile
+
     from tyo3.derive.cache import ArtifactCache, CacheKey
     from tyo3.stores.fs import FsStore
-    import tempfile, shutil
 
     d = tempfile.mkdtemp()
     store = FsStore(d)

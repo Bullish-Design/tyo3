@@ -11,7 +11,8 @@ from __future__ import annotations
 import threading
 import time as _time
 from collections import deque
-from typing import TYPE_CHECKING, Iterator, Literal
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from tyo3.bus.delta import Delta
@@ -27,6 +28,7 @@ def _get_delta_class() -> type:
     global _Delta
     if _Delta is None:
         from tyo3.bus.delta import Delta as _DeltaCls
+
         _Delta = _DeltaCls
     return _Delta
 
@@ -177,9 +179,7 @@ class Subscription:
 
         return None
 
-    def poll_refinement(
-        self, timeout: float | None = 0.0
-    ) -> AffectedRefinement | None:
+    def poll_refinement(self, timeout: float | None = 0.0) -> AffectedRefinement | None:
         """Non-blocking poll of the **refinement** channel (or block up to
         *timeout* seconds).
 
@@ -264,9 +264,7 @@ class Subscription:
         with self._lock:
             return self._lagged
 
-    def rescan_from(
-        self, session: object, last_seen_revision: int | None
-    ) -> object:
+    def rescan_from(self, session: object, last_seen_revision: int | None) -> object:
         """Catch up after eviction/lag: diff the last revision the
         subscriber successfully read against the current head, returning
         the full affected ``SnapshotDiff`` (Gate 7).

@@ -26,9 +26,7 @@ from tyo3 import TyO3Session
 def _affected_names(session: TyO3Session, ids) -> set[str]:
     """Map ``affected_ids`` to the leaf names of the head graph's nodes."""
     g = session.graph
-    by_id = {
-        g.graph[i].durable_id: g.graph[i].name for i in g.graph.node_indices()
-    }
+    by_id = {g.graph[i].durable_id: g.graph[i].name for i in g.graph.node_indices()}
     return {by_id[i] for i in ids if i in by_id}
 
 
@@ -104,9 +102,7 @@ def test_base_class_edit_reports_subclass(tmp_path: StdPath) -> None:
         )
         names = _affected_names(s, delta.affected_ids)
         assert "Base" in names, names
-        assert "Derived" in names, (
-            f"base-class edit must report its subclass via reverse_deps, got {sorted(names)}"
-        )
+        assert "Derived" in names, f"base-class edit must report its subclass via reverse_deps, got {sorted(names)}"
 
 
 def test_normal_edit_is_scoped_not_full_rescan(tmp_path: StdPath) -> None:
@@ -131,14 +127,9 @@ def test_normal_edit_is_scoped_not_full_rescan(tmp_path: StdPath) -> None:
         assert cd is not None, "code_delta must be present (None is retired in Phase 6)"
         assert not cd.get("rescan"), "a normal edit must be incremental, not a full rescan"
 
-        touched = (
-            list(cd.get("nodes_upserted") or [])
-            + list(cd.get("nodes_moved") or [])
-        )
+        touched = list(cd.get("nodes_upserted") or []) + list(cd.get("nodes_moved") or [])
         files = {n["file"] for n in touched}
-        assert files <= {"a.py"}, (
-            f"scoped edit touched files outside the dirty scope: {sorted(files)}"
-        )
+        assert files <= {"a.py"}, f"scoped edit touched files outside the dirty scope: {sorted(files)}"
         assert any(n.get("name") == "helper" for n in (cd.get("nodes_upserted") or [])), (
             "the new helper() node should be in the incremental delta"
         )

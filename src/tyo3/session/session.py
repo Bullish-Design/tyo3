@@ -83,6 +83,7 @@ class TyO3Session(_ReadOps):
         self._precision_mode: str = cg.precision
         self._refinement_mode: str = cg.refinement
         from tyo3.sidecar import Sidecar
+
         self._sidecar = Sidecar(str(root_str))
         # Coordination settings come from the one validated native config
         # (single source; no second TOML parser, no silent default fallback).
@@ -166,6 +167,7 @@ class TyO3Session(_ReadOps):
         """Lazily build the DerivationDAG from session config."""
         if self._derivation is None:
             from tyo3.derive.dag import DerivationDAG
+
             self._derivation = DerivationDAG.from_session(self)
         return self._derivation
 
@@ -182,11 +184,7 @@ class TyO3Session(_ReadOps):
         dag = self._get_derivation()
         if dag.is_empty:
             return
-        dirty = (
-            set(result.affected_ids)
-            | set(result.changed_ids)
-            | set(result.created_ids)
-        )
+        dirty = set(result.affected_ids) | set(result.changed_ids) | set(result.created_ids)
         dag.invalidate(self, dirty, set(result.deleted_ids), result.revision)
 
     # ── Watcher lifecycle (Gate 8 Step 7) ──────────────────────────
@@ -223,9 +221,7 @@ class TyO3Session(_ReadOps):
                 except Exception:
                     pass
 
-        self._watcher_thread = threading.Thread(
-            target=_poll_loop, daemon=True, name="tyo3-watcher"
-        )
+        self._watcher_thread = threading.Thread(target=_poll_loop, daemon=True, name="tyo3-watcher")
         self._watcher_thread.start()
 
     def _stop_watcher_loop(self) -> None:
@@ -255,6 +251,7 @@ class TyO3Session(_ReadOps):
         """Lazily build the Bus from coordination config."""
         if self._bus is None:
             from tyo3.bus.bus import Bus
+
             self._bus = Bus(
                 capacity=self._coord_cfg.bus_capacity,
                 overflow=self._coord_cfg.bus_overflow,
@@ -282,6 +279,7 @@ class TyO3Session(_ReadOps):
         if bus is None or not bus.has_subscribers():
             return
         from tyo3.bus.delta import Delta
+
         # The bus delta is a *pure projection* of the commit delta (§5.11): every
         # field — including the transitive ``affected`` closure and its
         # project-relative ``affected_files`` — is emitted natively by the
@@ -568,11 +566,7 @@ class TyO3Session(_ReadOps):
         code churn (no created/changed/deleted/moved ids and no rescan), so it
         must not mutate the code graph."""
         return bool(delta.authored_ids) and not (
-            delta.created_ids
-            or delta.changed_ids
-            or delta.deleted_ids
-            or delta.moved
-            or delta.rescan
+            delta.created_ids or delta.changed_ids or delta.deleted_ids or delta.moved or delta.rescan
         )
 
     def _schedule_derived(self, delta: CommitDelta) -> None:
@@ -608,6 +602,7 @@ class TyO3Session(_ReadOps):
         """Lazily build the PrecisionRefiner (Phase 9, precision=method)."""
         if self._refiner is None:
             from tyo3.precision import PrecisionRefiner
+
             self._refiner = PrecisionRefiner(self, mode=self._refinement_mode)
         return self._refiner
 
@@ -627,9 +622,7 @@ class TyO3Session(_ReadOps):
         if bus is None or not bus.has_subscribers():
             return
         try:
-            self._get_refiner().feed(
-                delta.revision, delta.changed_ids, delta.affected_ids
-            )
+            self._get_refiner().feed(delta.revision, delta.changed_ids, delta.affected_ids)
         except Exception:
             # Never let precision wiring surface as a write-path failure — the
             # coarse set was already published (graceful degradation).
@@ -651,7 +644,7 @@ class TyO3Session(_ReadOps):
 
     # ── Identity (Gate 2) ────────────────────────────────────────────
 
-    def id_for(self, path: str, line: int, col: int) -> Optional[str]:
+    def id_for(self, path: str, line: int, col: int) -> str | None:
         """Resolve the DurableId of the entity at (path, line, col).
 
         Returns None if no entity was found or no identity is registered.
@@ -664,7 +657,7 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in id_for(): {e}") from e
 
-    def locate(self, durable_id: str) -> Optional[str]:
+    def locate(self, durable_id: str) -> str | None:
         """Locate the current file::qualified_path for a DurableId.
 
         Returns None if the id is not in the registry.
@@ -724,9 +717,7 @@ class TyO3Session(_ReadOps):
         finally:
             snap.close()
 
-    def nearest(
-        self, query_vector: list[float], k: int = 10, *, layer: str | None = None
-    ) -> list[tuple[str, float]]:
+    def nearest(self, query_vector: list[float], k: int = 10, *, layer: str | None = None) -> list[tuple[str, float]]:
         """Nearest-neighbour search from the HEAD snapshot."""
         self._check_open()
         snap = self.snapshot()
@@ -805,6 +796,8 @@ class TyO3Session(_ReadOps):
                     if val.status == "needs_review":
                         ids.append(nrid)
                 except Exception:
+                    # An id without a readable authored record in this layer
+                    # simply doesn't contribute to the needs-review list.
                     pass
         return sorted(set(ids))
 
@@ -908,6 +901,8 @@ class TyO3Session(_ReadOps):
             try:
                 refiner.stop()
             except Exception:
+                # Best-effort shutdown: a refiner that fails to stop cleanly must
+                # not block session close.
                 pass
             self._refiner = None
         # Close the bus (closes all subscriptions).
@@ -944,5 +939,3 @@ class TyO3Session(_ReadOps):
 
 
 # ── Snapshot ────────────────────────────────────────────────────────────────
-
-

@@ -85,9 +85,7 @@ def test_every_write_kind_publishes_exactly_one_delta(tmp_path):
         results = {
             "edit": count(lambda: s.edit("a.py", "def foo():\n    return 11\n")),
             "edit_many": count(
-                lambda: s.edit_many(
-                    {"a.py": "def foo():\n    return 12\n", "b.py": "def bar():\n    return 22\n"}
-                )
+                lambda: s.edit_many({"a.py": "def foo():\n    return 12\n", "b.py": "def bar():\n    return 22\n"})
             ),
             "edit_virtual": count(lambda: s.edit_virtual("untitled:1", "z = 1\n")),
             "sync_path": count(lambda: s.sync_path("a.py")),
@@ -118,9 +116,7 @@ def test_bus_deltas_are_id_level_and_in_revision_order(tmp_path):
         assert revs == sorted(revs), f"deltas must arrive in revision order: {revs}"
         ids = set().union(*(d.changed | d.affected for d in deltas))
         assert ids, "delta must carry entity ids"
-        assert all(_ULID.match(i) for i in ids), (
-            f"bus delta ids must be durable ids, not file paths: {sorted(ids)[:5]}"
-        )
+        assert all(_ULID.match(i) for i in ids), f"bus delta ids must be durable ids, not file paths: {sorted(ids)[:5]}"
         sub.close()
     finally:
         s.close()
@@ -129,12 +125,7 @@ def test_bus_deltas_are_id_level_and_in_revision_order(tmp_path):
 def test_slow_subscriber_does_not_block_writer(tmp_path):
     # A capacity-1 coalescing queue with a subscriber that never consumes: the
     # writer must keep committing without blocking.
-    config = (
-        "schema_version = 1\n\n"
-        "[coordination.bus]\n"
-        "queue_capacity = 1\n"
-        'overflow = "coalesce"\n'
-    )
+    config = 'schema_version = 1\n\n[coordination.bus]\nqueue_capacity = 1\noverflow = "coalesce"\n'
     s = _open(tmp_path, {"a.py": "x = 0\n"}, config=config)
     try:
         sub = s.subscribe(Interest.ALL)  # never polled — the "slow" subscriber
@@ -207,12 +198,7 @@ def test_refinement_channel_delivers_after_primary_delta(tmp_path):
 
 
 def test_config_rejects_writer_blocking_overflow_policy(tmp_path):
-    config = (
-        "schema_version = 1\n\n"
-        "[coordination.bus]\n"
-        "queue_capacity = 8\n"
-        'overflow = "block"\n'
-    )
+    config = 'schema_version = 1\n\n[coordination.bus]\nqueue_capacity = 8\noverflow = "block"\n'
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'bus'\nversion = '0.1.0'\n")
     (tmp_path / "a.py").write_text("x = 1\n")
     cfg = tmp_path / ".tyo3"

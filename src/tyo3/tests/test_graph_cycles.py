@@ -286,12 +286,8 @@ class TestImportCyclesIntegration:
         # Verify the cycle contains both modules. Module nodes are keyed
         # `<module><file>` (see make_module_durable_id), so match on the file.
         all_sids_in_cycles = {sid for cycle in cycles for sid in cycle}
-        assert any(sid.endswith("module_a.py") for sid in all_sids_in_cycles), (
-            f"Cycle(s) missing module_a: {cycles}"
-        )
-        assert any(sid.endswith("module_b.py") for sid in all_sids_in_cycles), (
-            f"Cycle(s) missing module_b: {cycles}"
-        )
+        assert any(sid.endswith("module_a.py") for sid in all_sids_in_cycles), f"Cycle(s) missing module_a: {cycles}"
+        assert any(sid.endswith("module_b.py") for sid in all_sids_in_cycles), f"Cycle(s) missing module_b: {cycles}"
 
     def test_cycle_groups_no_false_positives(self) -> None:
         graph = get_graph("simple_package")
