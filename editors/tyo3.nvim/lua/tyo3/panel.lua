@@ -328,6 +328,14 @@ function M.set_context(card, src_buf)
   else
     M._entity = card
     M._source_buf = src_buf or M._source_buf
+    -- Discover authored layers once (QW3) so the ACTIONS author menu reflects
+    -- config instead of a hardcoded "intent" entry; re-render when it lands.
+    local actions = require("tyo3.actions")
+    if actions._authored_layers == nil and M._source_buf then
+      actions.refresh_layers(M._source_buf, function()
+        render()
+      end)
+    end
   end
   render()
   if require("tyo3.config").get().context == "cursor" and not M.is_open() then

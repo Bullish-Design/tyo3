@@ -37,6 +37,14 @@ cached as a layer): `references`, `document_highlights`, `hover`,
 is `{path: [{range, new_text}]}` (edit computation only — it does **not** rebind
 durable identity; that is AB8).
 
+**Layer discovery:** `layers` describes every declared layer (`name`, `origin`,
+`entity_kinds`, `history`, `review_on_change`, `serving`, `key_locality`,
+`display`) so the editor builds its "Author …" menu from config — one entry per
+`origin == "authored"` layer — instead of hardcoding `intent`. `layer_ids(layer,
+with_values?)` returns the ids that have a record in a layer (optionally with
+their values) in **one** snapshot/actor hop — the authored-notes picker uses it
+instead of an `authored` probe per entity.
+
 The headline read is **`entity_at(path, line, col)`** (1-based), which returns
 the full cross-layer *card*: identity, location, kind, range, content hash, every
 authored layer with a record, every derived layer's artifact, and

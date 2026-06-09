@@ -438,6 +438,58 @@ class Handlers:
 
         return self._actor.submit(work)
 
+    # ── Layer discovery (QW3 / QW7) ────────────────────────────────
+
+    def layers(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Describe every declared layer, so the editor can author/render any
+        layer without hardcoding ``intent``/``summary``/``docs``.
+
+        Authored layers (``origin == "authored"``) are the writable ones — the
+        editor offers an "Author …" entry only for those."""
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            out = [
+                {
+                    "name": name,
+                    "origin": c.origin,
+                    "entity_kinds": list(c.entity_kinds),
+                    "history": c.history,
+                    "review_on_change": c.review_on_change,
+                    "serving": c.serving,
+                    "key_locality": c.key_locality,
+                    # ``display`` lands in QW5/AB1; default to the panel until then.
+                    "display": getattr(c, "display", "panel"),
+                }
+                for name, c in s.config.layers.items()
+            ]
+            out.sort(key=lambda d: d["name"])
+            return {"layers": out}
+
+        return self._actor.submit(work)
+
+    def layer_ids(self, params: dict[str, Any]) -> dict[str, Any]:
+        """The ids that have a record in *layer* — one snapshot, one actor hop
+        (replaces the picker's per-id ``authored`` loop).
+
+        With ``with_values: true`` also returns ``{id: value}`` so a picker can
+        render labels without N follow-up reads. Uses **one shared snapshot**
+        (golden rule #2)."""
+        layer = _require(params, "layer", str)
+        with_values = params.get("with_values", False)
+        if not isinstance(with_values, bool):
+            raise ProtocolError("'with_values' must be a boolean", code=INVALID_PARAMS)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            with s.snapshot() as snap:
+                view = snap.layer(layer)
+                ids = sorted(view.ids())
+                result: dict[str, Any] = {"layer": layer, "ids": ids}
+                if with_values:
+                    result["values"] = {did: _layer_value(view, did) for did in ids}
+                return result
+
+        return self._actor.submit(work)
+
     # ── Internal joins ─────────────────────────────────────────────
 
     def _entity_dict(self, s: TyO3Session, did: str) -> dict[str, Any]:
@@ -570,6 +622,19 @@ def _commit_delta_dict(delta: Any) -> dict[str, Any]:
     }
 
 
+def _layer_value(view: Any, durable_id: str) -> Any:
+    """A JSON-able render of a layer view's per-id record (authored value or
+    derived artifact), or ``None`` when absent."""
+    v = view.value(durable_id)
+    if v is None:
+        return None
+    if hasattr(v, "value"):  # AuthoredValue
+        return v.value
+    if hasattr(v, "artifact"):  # DerivedValue
+        return _artifact_str(v.artifact)
+    return v
+
+
 def _node_by_id(graph: Any, durable_id: str) -> Any:
     idx = graph._id_to_index.get(durable_id)
     return graph._graph[idx] if idx is not None else None
@@ -621,4 +686,6 @@ _METHODS = {
     "can_rename": Handlers.can_rename,
     "rename": Handlers.rename,
     "diagnostics_at": Handlers.diagnostics_at,
+    "layers": Handlers.layers,
+    "layer_ids": Handlers.layer_ids,
 }
