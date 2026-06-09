@@ -5,25 +5,27 @@
 
 local M = {}
 
-local function author(bufnr, durable_id, text)
+local function author(bufnr, durable_id, text, layer)
+  layer = layer or "intent"
   require("tyo3").rpc(
     bufnr,
     "author",
-    { layer = "intent", durable_id = durable_id, value = { note = text } },
+    { layer = layer, durable_id = durable_id, value = { note = text } },
     function(err)
       if err then
-        vim.notify("[tyo3] note failed: " .. (err.message or "error"), vim.log.levels.ERROR)
+        vim.notify("[tyo3] " .. layer .. " note failed: " .. (err.message or "error"), vim.log.levels.ERROR)
         return
       end
-      vim.notify("[tyo3] note authored", vim.log.levels.INFO)
+      vim.notify("[tyo3] " .. layer .. " note authored", vim.log.levels.INFO)
       require("tyo3.decorate").apply(bufnr)
     end
   )
 end
 
---- :TyO3Note [text] — author an intent note on the entity under the cursor.
---- With no text, prompts via vim.ui.input.
-function M.note(text)
+--- :TyO3Note [text] — author a note on the entity under the cursor, in *layer*
+--- (default ``intent``). With no text, prompts via vim.ui.input.
+function M.note(text, layer)
+  layer = layer or "intent"
   local bufnr = vim.api.nvim_get_current_buf()
   local path = vim.api.nvim_buf_get_name(bufnr)
   if path == "" then
@@ -42,11 +44,11 @@ function M.note(text)
       return
     end
     if text and #text > 0 then
-      author(bufnr, card.durable_id, text)
+      author(bufnr, card.durable_id, text, layer)
     else
-      vim.ui.input({ prompt = "TyO3 note for " .. (card.qualified_name or card.name) .. ": " }, function(input)
+      vim.ui.input({ prompt = "TyO3 " .. layer .. " note for " .. (card.qualified_name or card.name) .. ": " }, function(input)
         if input and #input > 0 then
-          author(bufnr, card.durable_id, input)
+          author(bufnr, card.durable_id, input, layer)
         end
       end)
     end

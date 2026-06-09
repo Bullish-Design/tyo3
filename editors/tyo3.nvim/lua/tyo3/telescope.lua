@@ -127,37 +127,41 @@ function M.affected()
   run_picker("TyO3 Affected (last edit)", entries)
 end
 
---- Entities that carry an authored note (scanned from the name cache).
-function M.authored()
+--- Entities that carry a note in *layer* (default ``intent``).
+---
+--- One `layer_ids` call returns exactly the ids with a record plus their values
+--- (QW7) — O(1) actor hops, versus the old per-id `authored` probe over every
+--- decorated entity.
+function M.authored(layer)
+  layer = layer or "intent"
   local bufnr = vim.api.nvim_get_current_buf()
   local decorate = require("tyo3.decorate")
-  local ids = {}
-  for id in pairs(decorate.name_cache) do
-    table.insert(ids, id)
-  end
-  if #ids == 0 then
-    vim.notify("[tyo3] no entities seen yet — open some files first", vim.log.levels.INFO)
-    return
-  end
-  -- Probe each id's intent layer; collect those with a present note.
-  local entries = {}
-  local pending = #ids
-  for _, id in ipairs(ids) do
-    require("tyo3").rpc(bufnr, "authored", { layer = "intent", durable_id = id }, function(err, av)
-      if not err and av and av.status ~= "absent" and av.value ~= nil and av.value ~= vim.NIL then
-        local note = type(av.value) == "table" and av.value.note or av.value
-        local rec = decorate.name_cache[id]
-        table.insert(entries, {
-          durable_id = id,
-          label = ("%s — %s"):format(rec and (rec.qualified_name or rec.name) or id:sub(-8), tostring(note)),
-        })
+  require("tyo3").rpc(bufnr, "layer_ids", { layer = layer, with_values = true }, function(err, res)
+    if err or not res then
+      vim.notify("[tyo3] could not list " .. layer .. " notes: " .. (err and err.message or "error"), vim.log.levels.WARN)
+      return
+    end
+    local recs = res.ids or {}
+    local values = res.values or {}
+    if #recs == 0 then
+      vim.notify("[tyo3] no " .. layer .. " notes yet", vim.log.levels.INFO)
+      return
+    end
+    local entries = {}
+    for _, id in ipairs(recs) do
+      local v = values[id]
+      if v == vim.NIL then
+        v = nil
       end
-      pending = pending - 1
-      if pending == 0 then
-        run_picker("TyO3 Authored notes", entries)
-      end
-    end)
-  end
+      local note = type(v) == "table" and v.note or v
+      local rec = decorate.name_cache[id]
+      table.insert(entries, {
+        durable_id = id,
+        label = ("%s — %s"):format(rec and (rec.qualified_name or rec.name) or id:sub(-8), tostring(note)),
+      })
+    end
+    run_picker("TyO3 " .. layer .. " notes", entries)
+  end)
 end
 
 return M

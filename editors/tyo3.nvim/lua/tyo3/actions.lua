@@ -26,26 +26,73 @@ local function code_win()
   return nil
 end
 
-local function author_note(card, src_buf)
-  vim.ui.input({ prompt = "intent note: " }, function(text)
-    if not text or text == "" then
-      return
-    end
-    require("tyo3").rpc(
-      src_buf,
-      "author",
-      { layer = "intent", durable_id = card.durable_id, value = { note = text } },
-      function(err)
-        if err then
-          notify("note failed: " .. (err.message or "error"), vim.log.levels.ERROR)
-          return
+-- Authored layers that already have a dedicated, richer entry in the menu, so
+-- we don't *also* offer a plain note-author entry for them.
+local SPECIAL_AUTHORED = { docs = true }
+
+-- Discovered authored layer names (via the `layers` RPC). `nil` until the first
+-- fetch resolves; we fall back to {"intent"} so the menu is never empty.
+M._authored_layers = nil
+
+--- Fetch + cache the authored layer names for *src_buf*'s project. Idempotent
+--- to call repeatedly (cheap; keeps the menu current as config evolves).
+function M.refresh_layers(src_buf, cb)
+  require("tyo3").rpc(src_buf, "layers", {}, function(err, res)
+    if not err and res and res.layers then
+      local authored = {}
+      for _, lyr in ipairs(res.layers) do
+        if lyr.origin == "authored" then
+          table.insert(authored, lyr.name)
         end
-        notify("note authored")
-        require("tyo3.decorate").apply(src_buf)
-        require("tyo3.panel").reload()
       end
-    )
+      M._authored_layers = authored
+    end
+    if cb then
+      cb()
+    end
   end)
+end
+
+-- The authored layers to offer a generic note-author entry for: discovered
+-- layers minus the special-cased ones, defaulting to {"intent"} pre-discovery.
+local function note_author_layers()
+  local discovered = M._authored_layers
+  if not discovered or #discovered == 0 then
+    return { "intent" }
+  end
+  local out = {}
+  for _, name in ipairs(discovered) do
+    if not SPECIAL_AUTHORED[name] then
+      table.insert(out, name)
+    end
+  end
+  return out
+end
+
+-- Build a note-author action bound to a specific authored *layer* (no hardcoded
+-- layer name — works for any registered authored layer).
+local function author_layer(layer)
+  return function(card, src_buf)
+    vim.ui.input({ prompt = layer .. " note: " }, function(text)
+      if not text or text == "" then
+        return
+      end
+      require("tyo3").rpc(
+        src_buf,
+        "author",
+        { layer = layer, durable_id = card.durable_id, value = { note = text } },
+        function(err)
+          if err then
+            notify(layer .. " author failed: " .. (err.message or "error"), vim.log.levels.ERROR)
+            return
+          end
+          notify(layer .. " authored")
+          require("tyo3.decorate").apply(src_buf)
+          require("tyo3.panel").reload()
+        end
+      )
+    end)
+  end
 end
 
 local function goto_def(card, src_buf)
@@ -80,7 +127,9 @@ function M.list(card)
   local items = {}
   if has then
     table.insert(items, { label = "🔍 Inspect entity card", run = function(c, _) require("tyo3.inspect").show_card(c) end })
-    table.insert(items, { label = "📝 Author intent note", run = author_note })
+    for _, layer in ipairs(note_author_layers()) do
+      table.insert(items, { label = "📝 Author " .. layer, run = author_layer(layer) })
+    end
     table.insert(items, { label = "📄 Write / edit doc", run = function(c, sb) require("tyo3.entitydoc").edit_card(c, sb) end })
     table.insert(items, { label = "↪ Go to definition", run = goto_def })
   end

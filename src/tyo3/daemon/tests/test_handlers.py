@@ -216,6 +216,51 @@ def test_check_returns_diagnostics_shape(handlers):
     assert "count" in res
 
 
+# ── layers / layer_ids (QW3 / QW7) ───────────────────────────────────────────
+
+
+def test_layers_describes_each_declared_layer(handlers):
+    """``layers`` reports every config layer with its origin, so the editor can
+    discover authored (writable) vs derived layers without hardcoding names."""
+    res = handlers.layers({})
+    by_name = {lyr["name"]: lyr for lyr in res["layers"]}
+    assert {"intent", "docs", "summary", "embed"} <= set(by_name)
+    assert by_name["intent"]["origin"] == "authored"
+    assert by_name["docs"]["origin"] == "authored"
+    assert by_name["summary"]["origin"] == "derived"
+    # Each entry carries the discovery fields the author menu / renderer use.
+    intent = by_name["intent"]
+    for key in ("entity_kinds", "history", "review_on_change", "display"):
+        assert key in intent
+    # summary applies to functions only.
+    assert by_name["summary"]["entity_kinds"] == ["function"]
+
+
+def test_layer_ids_returns_exactly_authored_records(handlers, ids):
+    """``layer_ids('intent')`` returns precisely the ids with a record — replaces
+    the per-entity ``authored`` loop with one snapshot, one actor hop."""
+    assert handlers.layer_ids({"layer": "intent"})["ids"] == [], "no notes authored yet"
+    checkout_id, label_id = ids["checkout"], ids["show_label"]
+    handlers.author({"layer": "intent", "durable_id": checkout_id, "value": {"note": "hot"}})
+    handlers.author({"layer": "intent", "durable_id": label_id, "value": {"note": "cold"}})
+    res = handlers.layer_ids({"layer": "intent"})
+    assert set(res["ids"]) == {checkout_id, label_id}
+    assert res["layer"] == "intent"
+
+
+def test_layer_ids_with_values_includes_records(handlers, ids):
+    checkout_id = ids["checkout"]
+    handlers.author({"layer": "intent", "durable_id": checkout_id, "value": {"note": "hot"}})
+    res = handlers.layer_ids({"layer": "intent", "with_values": True})
+    assert res["values"][checkout_id] == {"note": "hot"}
+
+
+def test_layer_ids_rejects_bad_with_values(handlers):
+    with pytest.raises(ProtocolError) as e:
+        handlers.layer_ids({"layer": "intent", "with_values": "yes"})
+    assert e.value.code == INVALID_PARAMS
+
+
 # ── dispatch / protocol faults ───────────────────────────────────────────────
 
 
@@ -233,4 +278,9 @@ def test_dispatch_missing_param(handlers):
 
 def test_dispatch_known_methods_present(handlers):
     for m in ("open", "sync_buffer", "entity_at", "decorate", "author", "locate", "diff", "derived"):
+        assert m in handlers.methods
+
+
+def test_layer_discovery_verbs_registered(handlers):
+    for m in ("layers", "layer_ids"):
         assert m in handlers.methods
