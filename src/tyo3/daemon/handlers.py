@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from tyo3 import TyO3Session
     from tyo3.daemon.session_actor import SessionActor
     from tyo3.daemon.tracking import AffectedTracker
+    from tyo3.session import Snapshot
 
 
 class Handlers:
@@ -135,10 +136,15 @@ class Handlers:
         rel = self._relpath(path)
 
         def work(s: TyO3Session) -> dict[str, Any] | None:
+            # Identity resolution is a live-registry op (id_for/locate hit the
+            # native handle, not a snapshot). The *layer* reads then share one
+            # snapshot (QW4) instead of `session.derived` opening a fresh one
+            # per layer — one pin/unpin per cursor move, not one per layer.
             did = s.id_for(rel, line, col)
             if did is None:
                 return None
-            return self._entity_dict(s, did)
+            with s.snapshot() as snap:
+                return self._entity_dict(s, snap, did, s.config)
 
         return self._actor.submit(work)
 
@@ -154,28 +160,31 @@ class Handlers:
             note_layer = self._note_layer(s)
             summary_layer = self._summary_layer(s)
             out: list[dict[str, Any]] = []
-            g = s.graph
-            for idx in g._graph.node_indices():
-                node = g._graph[idx]
-                if node.file != rel or node.external or not is_entity_durable_id(node.durable_id):
-                    continue
-                did = node.durable_id
-                item: dict[str, Any] = {
-                    "durable_id": did,
-                    "name": node.name,
-                    "qualified_name": node.qualified_name,
-                    "kind": node.kind.value,
-                    "range": _range_dict(node.range),
-                }
-                if note_layer is not None:
-                    note = self._read_note(s, note_layer, did)
-                    if note is not None:
-                        item["note"] = note
-                if summary_layer is not None:
-                    summary = self._read_summary(s, summary_layer, did)
-                    if summary is not None:
-                        item["summary"] = summary
-                out.append(item)
+            # One snapshot for the whole file walk (QW4): the graph and every
+            # note/summary read resolve against the same pinned revision.
+            with s.snapshot() as snap:
+                g = snap.graph()
+                for idx in g._graph.node_indices():
+                    node = g._graph[idx]
+                    if node.file != rel or node.external or not is_entity_durable_id(node.durable_id):
+                        continue
+                    did = node.durable_id
+                    item: dict[str, Any] = {
+                        "durable_id": did,
+                        "name": node.name,
+                        "qualified_name": node.qualified_name,
+                        "kind": node.kind.value,
+                        "range": _range_dict(node.range),
+                    }
+                    if note_layer is not None:
+                        note = self._read_note(snap, note_layer, did)
+                        if note is not None:
+                            item["note"] = note
+                    if summary_layer is not None:
+                        summary = self._read_summary(snap, summary_layer, did)
+                        if summary is not None:
+                            item["summary"] = summary
+                    out.append(item)
             # Stable order: by start line then column — matches buffer order.
             out.sort(key=lambda d: (d["range"]["start"]["line"], d["range"]["start"]["column"]))
             return out
@@ -301,9 +310,14 @@ class Handlers:
 
     # ── Internal joins ─────────────────────────────────────────────
 
-    def _entity_dict(self, s: TyO3Session, did: str) -> dict[str, Any]:
-        """The full per-entity card used by ``entity_at`` (and the inspector)."""
-        node = _node_by_id(s.graph, did)
+    def _entity_dict(self, s: TyO3Session, snap: Snapshot, did: str, config: Any) -> dict[str, Any]:
+        """The full per-entity card used by ``entity_at`` (and the inspector).
+
+        Reads every *layer* off the one *snap* (a pinned :class:`Snapshot`) so
+        the cross-layer join reflects a single revision (QW4). Identity
+        (``locate``) is a live-registry read on the session, not the snapshot.
+        ``config`` carries the open-fixed layer table (not snapshot-versioned)."""
+        node = _node_by_id(snap.graph(), did)
         card: dict[str, Any] = {
             "durable_id": did,
             "location": s.locate(did),
@@ -321,21 +335,21 @@ class Handlers:
             )
         # Authored records (every authored layer that has a record).
         authored: dict[str, Any] = {}
-        for lname, lcfg in s.config.layers.items():
+        for lname, lcfg in config.layers.items():
             if lcfg.origin != "authored":
                 continue
-            av = s.authored(lname, did)
+            av = snap.authored(lname, did)
             if av.status != "absent":
                 authored[lname] = {"value": av.value, "status": av.status, "revision": av.revision}
         card["authored"] = authored
         # Derived artifacts (every derived layer that applies to this kind).
         derived: dict[str, Any] = {}
-        for lname, lcfg in s.config.layers.items():
+        for lname, lcfg in config.layers.items():
             if lcfg.origin != "derived":
                 continue
             if node is not None and lcfg.entity_kinds and node.kind.value not in lcfg.entity_kinds:
                 continue
-            dv = s.derived(lname, did)
+            dv = snap.derived(lname, did)
             if dv.status != "absent":
                 derived[lname] = {"artifact": _artifact_str(dv.artifact), "status": dv.status}
         card["derived"] = derived
@@ -358,14 +372,14 @@ class Handlers:
             return None
         return "summary" if "summary" in derived else derived[0]
 
-    def _read_note(self, s: TyO3Session, layer: str, did: str) -> str | None:
-        av = s.authored(layer, did)
+    def _read_note(self, snap: Snapshot, layer: str, did: str) -> str | None:
+        av = snap.authored(layer, did)
         if av.status == "absent" or av.value is None:
             return None
         return _note_text(av.value)
 
-    def _read_summary(self, s: TyO3Session, layer: str, did: str) -> str | None:
-        dv = s.derived(layer, did)
+    def _read_summary(self, snap: Snapshot, layer: str, did: str) -> str | None:
+        dv = snap.derived(layer, did)
         if dv.status in ("absent", "failed") or dv.artifact is None:
             return None
         return _artifact_str(dv.artifact)

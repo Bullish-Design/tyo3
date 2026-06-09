@@ -57,6 +57,57 @@ def test_entity_at_off_entity_returns_null(handlers):
     assert card is None
 
 
+# ── QW4: one shared snapshot per card ─────────────────────────────────────────
+
+
+def _count_snapshots(actor, monkeypatch):
+    """Spy on the session's ``snapshot()`` and return a mutable call counter.
+
+    Patches the live session instance (shared with the actor thread) so any
+    explicit ``s.snapshot()`` in a handler is counted. Does not affect the
+    cached head snapshot (``_native()`` uses the native handle directly)."""
+    session = actor.submit(lambda s: s)
+    real = session.snapshot
+    calls = {"n": 0}
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(session, "snapshot", counting)
+    return calls
+
+
+def test_entity_at_card_is_multilayer_and_consistent(handlers, ids):
+    """The card joins authored + derived layers — all read off one snapshot."""
+    checkout_id = ids["checkout"]
+    handlers.author({"layer": "intent", "durable_id": checkout_id, "value": {"note": "one snap"}})
+    path, line, col = _checkout_position(handlers)
+    card = handlers.entity_at({"path": path, "line": line, "col": col})
+    assert card is not None
+    assert card["authored"]["intent"]["value"] == {"note": "one snap"}
+    assert card["derived"]["summary"]["status"] == "fresh"
+
+
+def test_entity_at_opens_one_snapshot_per_card(handlers, ids, actor, monkeypatch):
+    """A K-layer card opens exactly **one** snapshot, not one per layer (QW4)."""
+    handlers.author({"layer": "intent", "durable_id": ids["checkout"], "value": {"note": "x"}})
+    # Resolve the position *before* spying (decorate now opens a snapshot too).
+    path, line, col = _checkout_position(handlers)
+    calls = _count_snapshots(actor, monkeypatch)
+    card = handlers.entity_at({"path": path, "line": line, "col": col})
+    assert card is not None
+    assert calls["n"] == 1, "the whole card reads off a single snapshot"
+
+
+def test_decorate_opens_one_snapshot_for_the_file(handlers, actor, monkeypatch):
+    """``decorate`` walks the file off one snapshot, not one per entity (QW4)."""
+    calls = _count_snapshots(actor, monkeypatch)
+    deco = handlers.decorate({"path": "store.py"})
+    assert deco, "entities decorated"
+    assert calls["n"] == 1, "one snapshot for the whole file walk"
+
+
 # ── decorate ─────────────────────────────────────────────────────────────────
 
 
