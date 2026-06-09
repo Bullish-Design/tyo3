@@ -28,6 +28,15 @@ state), not the in-flight buffer.
 `ping`, `open`, `sync_buffer`, `sync_buffers`, `entity_at`, `decorate`,
 `author`, `authored`, `locate`, `diff`, `derived`, `reindex`, `gc`, `check`.
 
+**Navigation / analysis** (the `convert/` read surface — reads only, served live
+over the frozen snapshot; cheap-reverse data like references/diagnostics is never
+cached as a layer): `references`, `document_highlights`, `hover`,
+`type_hierarchy`, `can_rename`, `rename`, `diagnostics_at`. All take 1-based
+`(path, line, col)`. `references` powers the sidebar's "Find callers" action
+(results → quickfix list); `rename` returns `{new_name, changes}` where `changes`
+is `{path: [{range, new_text}]}` (edit computation only — it does **not** rebind
+durable identity; that is AB8).
+
 The headline read is **`entity_at(path, line, col)`** (1-based), which returns
 the full cross-layer *card*: identity, location, kind, range, content hash, every
 authored layer with a record, every derived layer's artifact, and

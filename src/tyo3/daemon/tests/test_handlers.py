@@ -234,3 +234,91 @@ def test_dispatch_missing_param(handlers):
 def test_dispatch_known_methods_present(handlers):
     for m in ("open", "sync_buffer", "entity_at", "decorate", "author", "locate", "diff", "derived"):
         assert m in handlers.methods
+
+
+# ── convert/ read surface (QW1): references / hover / rename / hierarchy ──────
+
+
+def test_new_convert_verbs_registered(handlers):
+    """The QW1 verbs are reachable (ping's method list grows)."""
+    for m in (
+        "references",
+        "document_highlights",
+        "hover",
+        "type_hierarchy",
+        "can_rename",
+        "rename",
+        "diagnostics_at",
+    ):
+        assert m in handlers.methods
+
+
+def test_references_finds_cross_file_caller(handlers):
+    """``references`` on the ``usd`` definition in money.py returns the call site
+    in store.py — the find-callers surface (mirrors Spike E)."""
+    res = handlers.references({"path": "money.py", "line": 1, "col": 5})
+    refs = res["references"]
+    paths = [r["path"] for r in refs]
+    assert any(p.endswith("store.py") for p in paths), f"call site in store.py expected, got {paths}"
+    # Every reference carries a 1-based range and a kind.
+    for r in refs:
+        assert "range" in r and "start" in r["range"]
+        assert r["range"]["start"]["line"] >= 1
+        assert isinstance(r["kind"], str)
+
+
+def test_references_requires_position(handlers):
+    with pytest.raises(ProtocolError) as e:
+        handlers.references({"path": "money.py", "line": 1})
+    assert e.value.code == INVALID_PARAMS
+
+
+def test_document_highlights_in_file(handlers):
+    res = handlers.document_highlights({"path": "money.py", "line": 1, "col": 5})
+    highlights = res["highlights"]
+    assert highlights, "the definition itself is highlighted"
+    assert all(h["path"].endswith("money.py") for h in highlights), "scoped to the file"
+
+
+def test_hover_returns_contents(handlers):
+    res = handlers.hover({"path": "money.py", "line": 1, "col": 5})
+    assert res is not None
+    assert "contents" in res and isinstance(res["contents"], list)
+    assert "location" in res
+
+
+def test_type_hierarchy_reports_supertype(handlers):
+    """``Book`` (book.py) subclasses ``Item`` — the hierarchy reports it."""
+    res = handlers.type_hierarchy({"path": "book.py", "line": 4, "col": 7})
+    assert res is not None
+    assert res["item"]["name"] == "Book"
+    supers = [s["name"] for s in res["supertypes"]]
+    assert "Item" in supers
+
+
+def test_can_rename_reports_range(handlers):
+    res = handlers.can_rename({"path": "money.py", "line": 1, "col": 5})
+    assert res["can_rename"] is True
+    assert res["range"]["start"]["line"] == 1
+
+
+def test_rename_serialises_changes_by_path(handlers):
+    """``rename`` returns ``{new_name, changes}`` with ``changes`` keyed by path
+    and each edit carrying the new text. (Pure edit computation — no rebind.)"""
+    res = handlers.rename({"path": "money.py", "line": 1, "col": 5, "new_name": "dollars"})
+    assert res is not None
+    assert res["new_name"] == "dollars"
+    changes = res["changes"]
+    assert any(p.endswith("money.py") for p in changes), f"definition file edited, got {list(changes)}"
+    for edits in changes.values():
+        for e in edits:
+            assert e["new_text"] == "dollars"
+            assert "range" in e
+
+
+def test_diagnostics_at_returns_filtered_shape(handlers):
+    """``diagnostics_at`` returns a position-filtered diagnostics list (live, not
+    cached). The clean fixture has none at this position → empty, well-shaped."""
+    res = handlers.diagnostics_at({"path": "money.py", "line": 1, "col": 5})
+    assert "diagnostics" in res and isinstance(res["diagnostics"], list)
+    assert res["count"] == len(res["diagnostics"])
