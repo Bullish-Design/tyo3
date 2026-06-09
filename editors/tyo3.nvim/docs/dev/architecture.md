@@ -26,7 +26,17 @@ state), not the in-flight buffer.
 ### RPC surface
 
 `ping`, `open`, `sync_buffer`, `sync_buffers`, `entity_at`, `decorate`,
-`author`, `authored`, `locate`, `diff`, `derived`, `reindex`, `gc`, `check`.
+`author`, `authored`, `locate`, `diff`, `derived`, `reindex`, `gc`, `check`,
+`subscribe`.
+
+**`subscribe`** sets *this connection's* delta-stream slice (AB7). It is handled
+at the server, not in the shared `Handlers` table (which has no per-connection
+identity), but is advertised in `ping`'s `methods` so it stays discoverable. Its
+params build an `Interest`: `{"files": [...], "ids": [...], "layers": [...],
+"all": bool}` — any combination, all optional. A connection defaults to
+`Interest.ALL` (every committed delta) until it subscribes; `subscribe {"all":
+true}` restores that, and an empty `subscribe {}` mutes the connection (matches
+nothing). It replies `{"ok": true}`.
 
 **Navigation / analysis** (the `convert/` read surface — reads only, served live
 over the frozen snapshot; cheap-reverse data like references/diagnostics is never
@@ -84,3 +94,19 @@ The daemon's bus pump pushes `delta` (an edit's affected set) and `refinement`
 (the async-narrowed set) as JSON-RPC notifications; `init.handle_notification`
 routes them to the AFFECTED pane. Decorations re-anchor on every commit —
 identity is the truth, never trust a drifted extmark across a structural edit.
+
+**Per-connection `delta` delivery (AB7).** The pump drains the session bus once
+(on `Interest.ALL`) and hands the server the *raw* `Delta`; the server then
+scopes and encodes it **per connection** against each client's `Interest` —
+mirroring `Bus.publish`'s match/scope semantics (ALL/rescan deliver
+unconditionally so a client can pin a snapshot at that revision; a scoped client
+gets only a non-empty intersection of its ids/files/layers). A client that never
+calls `subscribe` keeps receiving every delta. `delta.layers` carries the
+**specific** authored layer name (e.g. `intent`/`summary`) in addition to the
+generic `code`/`authored` strings — the name is threaded from `session.author`
+through the post-commit hook (the native `CommitDelta` does not encode it), so a
+`subscribe {"layers": ["intent"]}` client matches an authored intent write while
+a `summary` subscriber does not. Derived layers are lazy (nothing recomputes
+inside the commit), so layer-stamping at publish time is authored-only.
+`refinement` notifications stay broadcast-to-all (a client that didn't receive a
+revision's delta simply ignores its refinement); scoping them is a follow-up.

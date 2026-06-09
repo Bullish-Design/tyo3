@@ -42,11 +42,13 @@ class BusPump:
         self,
         actor: SessionActor,
         broadcast: Callable[[str], None],
+        broadcast_delta: Callable[[Delta], None],
         *,
         tracker: AffectedTracker | None = None,
     ) -> None:
         self._actor = actor
         self._broadcast = broadcast
+        self._broadcast_delta = broadcast_delta
         self._tracker = tracker
         self._sub = None
         self._thread: threading.Thread | None = None
@@ -110,24 +112,17 @@ class BusPump:
                 self._emit_refinement(ref)
 
     def _emit_delta(self, delta: Delta) -> None:
-        affected = sorted(delta.affected)
+        # Tracker recording is delta-level — it runs once per revision,
+        # independent of how many clients match. Keep it here, before the
+        # per-connection fan-out (AB7).
         if self._tracker is not None:
             self._tracker.record(
                 delta.revision,
                 set(delta.affected) | set(delta.changed) | set(delta.created) | set(delta.deleted) | set(delta.moved),
             )
-        params = {
-            "revision": delta.revision,
-            "created_ids": sorted(delta.created),
-            "changed_ids": sorted(delta.changed),
-            "deleted_ids": sorted(delta.deleted),
-            "moved_ids": sorted(delta.moved),
-            "authored_ids": sorted(delta.authored),
-            "affected_ids": affected,
-            "touched_files": sorted(delta.files),
-            "rescan": delta.rescan,
-        }
-        self._broadcast(encode_notification("delta", params))
+        # Hand the raw Delta to the server, which scopes + encodes it per
+        # connected client according to that client's Interest (AB7).
+        self._broadcast_delta(delta)
 
     def _emit_refinement(self, ref: AffectedRefinement) -> None:
         if self._tracker is not None:

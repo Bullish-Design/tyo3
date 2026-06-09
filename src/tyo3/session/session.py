@@ -346,12 +346,17 @@ class TyO3Session(_ReadOps):
         self._check_open()
         return self._get_bus().subscribe(interest)
 
-    def _publish_delta(self, result: CommitDelta) -> None:
+    def _publish_delta(self, result: CommitDelta, touched_layer_names: tuple[str, ...] = ()) -> None:
         """Publish a committed delta to the bus (the last step of the one
         post-commit hook, ``_after_commit``).
 
         Single-threaded writes serialised through the native commit guarantee
         revision order. Fast no-op when no subscribers are registered.
+
+        ``touched_layer_names`` carries the *specific* authored layer name (e.g.
+        ``"intent"``) from ``author()`` — ``CommitDelta`` does not encode which
+        layer an authored write targeted, so the name is threaded through here
+        and stamped onto ``Delta.layers`` additively (AB7).
         """
         bus = self._bus
         if bus is None or not bus.has_subscribers():
@@ -363,7 +368,7 @@ class TyO3Session(_ReadOps):
         # project-relative ``affected_files`` — is emitted natively by the
         # in-commit producer (Phase 6). The bus no longer depends on the
         # materialised head graph (Phase 7 deleted the Option-B bridge).
-        delta = Delta.from_commit_delta(result)
+        delta = Delta.from_commit_delta(result, extra_layers=touched_layer_names)
         bus.publish(delta)
 
     # ── Head snapshot caching ───────────────────────────────────────
@@ -658,7 +663,7 @@ class TyO3Session(_ReadOps):
         """
         self._invalidate_derived(delta)
 
-    def _after_commit(self, delta: CommitDelta) -> None:
+    def _after_commit(self, delta: CommitDelta, *, touched_layer_names: tuple[str, ...] = ()) -> None:
         """The single post-commit path every write funnels through (§6.1/§6.3).
 
         Invalidate the head snapshot (so the next read re-pins at the new
@@ -667,11 +672,16 @@ class TyO3Session(_ReadOps):
         every write method calls exactly this, no path can diverge and every
         committed revision publishes (closes defect #6: ``discard`` forgetting
         to publish).
+
+        ``touched_layer_names`` is the specific authored layer name(s) — passed
+        only by ``author()`` — threaded to ``_publish_delta`` so the published
+        ``Delta`` carries the real layer name (AB7). Default ``()`` keeps every
+        other writer unchanged.
         """
         self._invalidate_head_snap()
         self._apply_graph_delta(delta)
         self._schedule_derived(delta)
-        self._publish_delta(delta)
+        self._publish_delta(delta, touched_layer_names)
         # Async precision refinement (Phase 9) — strictly *after* primary
         # delivery, so the coarse set is always delivered first and the writer
         # never waits on precision. A no-op unless precision=method.
@@ -850,8 +860,9 @@ class TyO3Session(_ReadOps):
         result = CommitDelta.model_validate(native)
         # Routes through the one post-commit hook like every other write; its
         # graph apply is a no-op (authored-only delta), so the code graph is
-        # not mutated (§6.2).
-        self._after_commit(result)
+        # not mutated (§6.2). The specific layer name is threaded through so the
+        # published delta carries it (AB7) — CommitDelta itself does not.
+        self._after_commit(result, touched_layer_names=(layer,))
         return result
 
     def authored(self, layer: str, durable_id: str) -> AuthoredValue:

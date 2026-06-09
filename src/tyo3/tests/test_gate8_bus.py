@@ -214,6 +214,26 @@ class TestDelta:
         nonempty = Delta.from_commit_delta(CommitDelta(revision=1, changed_ids=["01A"]))
         assert not nonempty.is_empty()
 
+    def test_extra_layers_stamps_specific_authored_layer(self):
+        """AB7: ``extra_layers`` threads the *specific* authored layer name onto
+        ``Delta.layers`` additively, so a ``layer("intent")`` subscriber matches
+        an authored intent write (CommitDelta itself does not carry the name)."""
+        from tyo3.bus.delta import Delta
+        from tyo3.bus.interest import Interest
+        from tyo3.models.delta import CommitDelta
+
+        result = CommitDelta(revision=7, authored_ids=["01F"])
+        delta = Delta.from_commit_delta(result, extra_layers=("intent",))
+
+        # Additive: the generic "authored" stays, the specific "intent" is added.
+        assert {"intent", "authored"} <= delta.layers
+
+        # A layer("intent") subscriber matches; layer("summary") does not.
+        assert Interest.layer("intent").matches(delta.affected, delta.files, delta.layers)
+        assert not Interest.layer("summary").matches(delta.affected, delta.files, delta.layers)
+        # Back-compat: the generic "authored" interest still matches.
+        assert Interest.layer("authored").matches(delta.affected, delta.files, delta.layers)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Step 3 — Subscription unit tests (queue, overflow, iterator, teardown)

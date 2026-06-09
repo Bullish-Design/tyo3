@@ -20,18 +20,24 @@ import socket
 import tempfile
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from tyo3.bus.interest import Interest
 from tyo3.daemon.bus_pump import BusPump
 from tyo3.daemon.handlers import Handlers
 from tyo3.daemon.protocol import (
     ENGINE_ERROR,
     ProtocolError,
     encode_error,
+    encode_notification,
     encode_response,
     parse_request,
 )
 from tyo3.daemon.session_actor import SessionActor
 from tyo3.daemon.tracking import AffectedTracker
+
+if TYPE_CHECKING:
+    from tyo3.bus.delta import Delta
 
 log = logging.getLogger("tyo3.daemon")
 
@@ -59,6 +65,10 @@ class _Client:
         self.conn = conn
         self._send_lock = threading.Lock()
         self.alive = True
+        # Per-connection delta filter. Defaults to ALL so a client that never
+        # sends ``subscribe`` keeps receiving every committed delta (back-compat
+        # — the e2e harness and the Lua plugin rely on this) (AB7).
+        self.interest: Interest = Interest.ALL
 
     def send(self, line: str) -> bool:
         """Write one framed line; return False if the peer is gone."""
@@ -102,7 +112,7 @@ class DaemonServer:
         self._actor = SessionActor(self._root)
         self._tracker = AffectedTracker()
         self._handlers = Handlers(self._actor, tracker=self._tracker)
-        self._pump = BusPump(self._actor, self.broadcast, tracker=self._tracker)
+        self._pump = BusPump(self._actor, self.broadcast, self.broadcast_delta, tracker=self._tracker)
 
         self._server_sock: socket.socket | None = None
         self._clients: set[_Client] = set()
@@ -117,10 +127,48 @@ class DaemonServer:
     # ── Broadcast (called by the pump thread) ──────────────────────
 
     def broadcast(self, line: str) -> None:
-        """Send *line* to every connected client; reap dead ones."""
+        """Send *line* to every connected client; reap dead ones.
+
+        Used for **refinements** (broadcast-to-all, back-compat — a client that
+        didn't receive a revision's delta simply ignores its refinement).
+        """
         with self._clients_lock:
             clients = list(self._clients)
         dead = [c for c in clients if not c.send(line)]
+        if dead:
+            with self._clients_lock:
+                for c in dead:
+                    self._clients.discard(c)
+
+    def broadcast_delta(self, delta: Delta) -> None:
+        """Scope *delta* to each client's ``Interest`` and send its slice (AB7).
+
+        Mirrors ``Bus.publish``'s exact match/scope semantics per connection:
+        an ``ALL`` (or ``rescan``) client gets the delta unconditionally (even
+        an empty one — so it can pin a snapshot at this revision); a scoped
+        client gets a non-empty intersection only when its interest matches the
+        delta's affected ids / files / touched layers.
+        """
+        with self._clients_lock:
+            clients = list(self._clients)
+        dead = []
+        for c in clients:
+            interest = c.interest
+            if interest.all or delta.rescan:
+                scoped = delta.scoped_to(interest)
+            elif interest.matches(
+                affected_ids=delta.affected,
+                affected_files=delta.files,
+                touched_layers=delta.layers,
+            ):
+                scoped = delta.scoped_to(interest)
+                if scoped.is_empty():
+                    continue
+            else:
+                continue
+            line = encode_notification("delta", _delta_params(scoped))
+            if not c.send(line):
+                dead.append(c)
         if dead:
             with self._clients_lock:
                 for c in dead:
@@ -220,6 +268,22 @@ class DaemonServer:
         if req.is_notification:
             # Editor → daemon notifications are not part of this protocol; ignore.
             return
+        # ``subscribe`` is handled at the server, not in ``Handlers``: Handlers is
+        # a single shared instance dispatched for every connection and has no
+        # per-connection identity, but ``subscribe`` must set *this* client's
+        # interest (AB7). An empty ``subscribe {}`` ⇒ Interest() = matches
+        # nothing (a client mutes itself); ``subscribe {"all": true}`` restores
+        # ALL.
+        if req.method == "subscribe":
+            p = req.params or {}
+            client.interest = Interest(
+                files=frozenset(p.get("files", ())),
+                ids=frozenset(p.get("ids", ())),
+                layers=frozenset(p.get("layers", ())),
+                all=bool(p.get("all", False)),
+            )
+            client.send(encode_response(req.id, {"ok": True}))
+            return
         try:
             result = self._handlers.dispatch(req.method, req.params)
             client.send(encode_response(req.id, result))
@@ -264,6 +328,26 @@ class DaemonServer:
         except OSError:
             pass
         log.info("daemon stopped")
+
+
+def _delta_params(delta: Delta) -> dict:
+    """Encode a (scoped) ``Delta`` into the ``delta`` notification params.
+
+    Lives at the server because encoding is now per connection — each client's
+    interest produces a different scoped delta (AB7). Previously built once in
+    ``BusPump._emit_delta``.
+    """
+    return {
+        "revision": delta.revision,
+        "created_ids": sorted(delta.created),
+        "changed_ids": sorted(delta.changed),
+        "deleted_ids": sorted(delta.deleted),
+        "moved_ids": sorted(delta.moved),
+        "authored_ids": sorted(delta.authored),
+        "affected_ids": sorted(delta.affected),
+        "touched_files": sorted(delta.files),
+        "rescan": delta.rescan,
+    }
 
 
 __all__ = ["DaemonServer", "default_socket_path"]

@@ -220,6 +220,63 @@ def test_full_flow_over_socket(daemon: _SocketClient):
     assert entry["note"] == "money shot"
 
 
+def test_per_connection_subscription_filters_deltas(shop_project: Path, tmp_path: Path):
+    """AB7: each connection has its own ``Interest``; a ``subscribe`` RPC sets it.
+
+    Two scoped clients and one default (ALL) client connect to the same daemon.
+    An authored *intent* write stamps ``{"authored", "intent"}`` onto the delta's
+    layers, so the ``layer("intent")`` subscriber receives it, the
+    ``layer("summary")`` subscriber does not, and the un-subscribed client still
+    receives everything (back-compat).
+    """
+    socket_path = tmp_path / "fanout.sock"
+    proc = _spawn_daemon(shop_project, socket_path)
+    clients: list[_SocketClient] = []
+    try:
+        # Three connections to the *same* daemon.
+        a = _SocketClient(_connect(socket_path))
+        b = _SocketClient(_connect(socket_path))
+        c = _SocketClient(_connect(socket_path))  # never subscribes → ALL
+        clients = [a, b, c]
+
+        a.request("open", {"root": "."})
+
+        # ``subscribe`` is advertised via ping's method table.
+        assert "subscribe" in a.request("ping")["methods"]
+
+        # Resolve a real id to author against.
+        deco = a.request("decorate", {"path": "store.py"})
+        checkout_id = next(d["durable_id"] for d in deco if d["name"] == "checkout")
+
+        # Per-connection interest: A wants intent, B wants summary.
+        assert a.request("subscribe", {"layers": ["intent"]})["ok"] is True
+        assert b.request("subscribe", {"layers": ["summary"]})["ok"] is True
+
+        # Author an intent value → an authored-only commit.
+        res = a.request("author", {"layer": "intent", "durable_id": checkout_id, "value": {"note": "x"}})
+        author_rev = res["revision"]
+
+        # A (intent) receives the delta with the id in authored_ids.
+        note = a.wait_notification("delta", lambda p: p["revision"] == author_rev, timeout=10.0)
+        assert checkout_id in set(note["params"]["authored_ids"])
+
+        # C (default ALL) also receives it — back-compat for un-subscribed clients.
+        cnote = c.wait_notification("delta", lambda p: p["revision"] == author_rev, timeout=10.0)
+        assert checkout_id in set(cnote["params"]["authored_ids"])
+
+        # B (summary) does NOT receive a delta for that revision.
+        with pytest.raises(TimeoutError):
+            b.wait_notification("delta", lambda p: p["revision"] == author_rev, timeout=3.0)
+    finally:
+        for cl in clients:
+            cl.close()
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def test_autostop_exits_when_last_client_leaves(shop_project: Path, tmp_path: Path):
     socket_path = tmp_path / "auto.sock"
     env = dict(os.environ)

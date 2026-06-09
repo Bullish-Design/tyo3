@@ -56,7 +56,10 @@ class Handlers:
 
     @property
     def methods(self) -> list[str]:
-        return sorted(_METHODS)
+        # ``subscribe`` is dispatched at the server (it needs per-connection
+        # identity, which this shared Handlers lacks), but it is a real verb —
+        # advertise it so ``ping`` reports it (AB7).
+        return sorted(set(_METHODS) | _SERVER_METHODS)
 
     # ── Methods ────────────────────────────────────────────────────
 
@@ -726,3 +729,8 @@ _METHODS = {
     "layers": Handlers.layers,
     "layer_ids": Handlers.layer_ids,
 }
+
+# Verbs handled at the server (DaemonServer._handle_line), not through the shared
+# Handlers dispatch — they need per-connection identity. Advertised in
+# ``Handlers.methods`` so they stay discoverable via ``ping`` (AB7).
+_SERVER_METHODS = frozenset({"subscribe"})

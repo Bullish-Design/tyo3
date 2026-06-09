@@ -97,7 +97,7 @@ class Delta:
         return not (self.created or self.changed or self.deleted or self.moved or self.authored or self.affected)
 
     @classmethod
-    def from_commit_delta(cls, delta: CommitDelta) -> Delta:
+    def from_commit_delta(cls, delta: CommitDelta, extra_layers: tuple[str, ...] = ()) -> Delta:
         """Project an id-level ``CommitDelta`` for bus delivery (§5.11).
 
         A pure projection: every field is read straight off the delta.  The id
@@ -108,6 +108,14 @@ class Delta:
         the directly-edited ``touched_files`` with the closure's
         ``affected_files`` (both native, both project-relative) so a
         file-interested reverse-dependent matches by its own file — no graph.
+
+        ``layers`` carries the generic ``"code"`` / ``"authored"`` strings
+        derived from the delta's id fields (``_layers_touched``) **plus** any
+        ``extra_layers`` the caller threads in — the *specific* authored layer
+        name (e.g. ``"intent"``), which ``CommitDelta`` itself does not carry
+        (AB7).  The union is additive and back-compatible: an authored intent
+        write touches ``{"authored", "intent"}``, so both a ``layer("authored")``
+        and a ``layer("intent")`` subscriber match.
         """
         return cls(
             revision=delta.revision,
@@ -119,7 +127,7 @@ class Delta:
             affected=frozenset(delta.affected_ids),
             rescan=delta.rescan,
             files=frozenset(delta.touched_files) | frozenset(delta.affected_files),
-            layers=_layers_touched(delta),
+            layers=_layers_touched(delta) | frozenset(extra_layers),
         )
 
 
