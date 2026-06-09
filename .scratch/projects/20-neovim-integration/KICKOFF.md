@@ -200,6 +200,11 @@ true })`), not a hard dependency.
   passes against a running daemon.
 - The README documents install (lazy.nvim spec), config, commands, and the manual
   checklist; the "move the function, the note follows" flow works.
+- A **scripted, recorded demo** is checked in: `editors/tyo3.nvim/demo/tour.tape`
+  → `tour.gif` + asciinema `tour.cast` (via `vhs`), regenerable headlessly and
+  embedded in the README. This is the canonical proof the plugin works — see
+  `DEMO_RECORDING.md` (terminal nvim is the real visual UI; vhs drives scripted
+  keystrokes; `Sleep` past every async beat for determinism).
 - No core Rust/Python engine changes (daemon-only); `v0.2.0` gate still green.
 - Branch `nvim-plugin` pushed; PR opened to `main` describing the plugin, with the
   manual checklist in the body. (Open the PR; do not merge — leave for human review.)
@@ -218,6 +223,9 @@ true })`), not a hard dependency.
 4. Lua: rpc + daemon spawn + `:TyO3Inspect` (read-only) — first thing visible in nvim.
 5. Lua: buffer sync (debounced) + `delta` panel — the reactive core.
 6. Lua: notes (virtual text) + derived summaries + Telescope pickers — the payoff.
+6.5. Demo: `demo/setup.sh` + minimal `demo/init.lua` + `demo/tour.tape`; package
+   `vhs` in devenv; record `tour.gif` + `tour.cast`; embed in the README
+   (see `DEMO_RECORDING.md`).
 7. overseer templates + README + PROGRESS + PR.
 
 ---
@@ -225,6 +233,8 @@ true })`), not a hard dependency.
 ## 9. References (all in-repo)
 - `.scratch/projects/20-neovim-integration/OVERVIEW.md` — design rationale,
   protocol table, surface mapping, overseer stance, risks.
+- `.scratch/projects/20-neovim-integration/DEMO_RECORDING.md` — the scripted
+  vhs/asciinema demo spec, the graphical-vs-terminal nuance, and a sample tape.
 - `.scratch/projects/19-post-0.2.0-backlog/OVERVIEW.md` — `gc`/`reindex` task
   semantics (overseer templates).
 - `src/tyo3/demo/tour.py`, `src/tyo3/tests/test_final_acceptance.py` — the exact,

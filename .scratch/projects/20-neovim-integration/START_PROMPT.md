@@ -41,10 +41,13 @@ Constraints (from KICKOFF sections 1 and 7):
 - Automated pytest for the daemon is the verifiable core (handlers + socket
   end-to-end); the Lua side gets headless specs where practical plus a manual
   checklist in the README.
-- Follow the 7-step committable sequence in KICKOFF section 8. When done: ruff
-  clean, daemon pytest green, the v0.2.0 gate still green, write a PROGRESS.md in
-  the project-20 directory, push the branch, and open a PR to `main` (do NOT
-  merge) with the manual verification checklist in the body.
+- Follow the 7-step committable sequence in KICKOFF section 8. Ship the canonical
+  demo: a scripted, recorded real-Neovim session (terminal nvim driven by vhs →
+  tour.gif + asciinema tour.cast, regenerable headlessly), per
+  .scratch/projects/20-neovim-integration/DEMO_RECORDING.md, embedded in the
+  plugin README. When done: ruff clean, daemon pytest green, the v0.2.0 gate still
+  green, write a PROGRESS.md in the project-20 directory, push the branch, and open
+  a PR to `main` (do NOT merge) with the manual verification checklist in the body.
 
 Work autonomously through the whole sequence; only stop to ask if you hit a
 genuine design fork the docs don't resolve.
