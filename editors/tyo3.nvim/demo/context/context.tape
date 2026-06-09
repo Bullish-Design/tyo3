@@ -2,13 +2,12 @@
 #   devenv shell -- demo-record-context
 #   (or: vhs editors/tyo3.nvim/demo/context/context.tape)
 #
-# A guided tour of TyO3's real, user-facing capabilities with the cursor-driven
-# CONTEXT panel on throughout as the narrative spine. The right dock shows two
-# live sections: CONTEXT (the durable entity under the cursor — its id, location,
-# notes, and last-affecting revision) and AFFECTED (the id-level blast radius of
-# each edit, then its async refinement). Sleeps wait past every async beat
-# (daemon open, debounced commit, precision refinement) so the recording is
-# deterministic.
+# A guided tour of TyO3's real, user-facing capabilities with the data-type-
+# separated sidebar on throughout. The right dock hosts collapsible panes, each a
+# different kind of data hanging off the entity under the cursor — IDENTITY,
+# NOTES, DOCS, SUMMARY, ACTIONS — plus an AFFECTED log. The headline: notes AND a
+# markdown doc you author in-editor stay glued to the entity across an edit and an
+# atomic move. Sleeps wait past every async beat so the recording is deterministic.
 
 Output editors/tyo3.nvim/demo/context/context.gif
 Output editors/tyo3.nvim/demo/context/context.txt
@@ -17,93 +16,108 @@ Require nvim
 Require python
 
 Set Shell "bash"
-Set FontSize 16
-Set Width 1360
-Set Height 840
+Set FontSize 15
+Set Width 1440
+Set Height 900
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 45ms
+Set TypingSpeed 40ms
 
 # Build the synthetic shop project and resolve a pristine nvim ($TYO3_NVIM).
 Type "source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR" Enter
 Sleep 2s
-
-# Open store.py with the CONTEXT feature on, panel docked on the right.
 Type "$TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/context/init.lua store.py" Enter
 Sleep 6s
 
-# ── Scene 1: ambient identity — CONTEXT tracks the entity under the cursor ──
-# Land in `checkout`: CONTEXT shows  name · kind / durable id / location.
+# ── Scene 1: the sidebar separates the data types on the code spine ──
+# Land in `checkout`: IDENTITY / NOTES / DOCS / SUMMARY / ACTIONS panes fill in.
 Type "/def checkout" Enter
-Sleep 3s
-# Move to a different definition → CONTEXT switches (fires only on node change).
-Type "/def show_label" Enter
-Sleep 3s
-# Back to checkout.
-Type "/def checkout" Enter
-Sleep 2500ms
-
-# ── Scene 2: the full cross-layer card (on-demand inspector) ──
-Type ":TyO3Inspect" Enter
 Sleep 3500ms
-Escape
-Sleep 600ms
 
-# ── Scene 3: author durable intent (note glued to the entity, not the line) ──
+# ── Scene 2: author durable intent (NOTES pane) ──
 Type ":TyO3Note load-bearing checkout path" Enter
-Sleep 2500ms
-# Nudge off and back so CONTEXT re-resolves and shows the 🏷 note in the card.
+Sleep 1500ms
 Type "/def show_label" Enter
 Sleep 1200ms
 Type "/def checkout" Enter
-Sleep 3s
+Sleep 2500ms
 
-# ── Scene 4: identity survives ordinary editing (same id, note stays) ──
-# Add a line inside checkout's body, then commit.
-Type "o"
-Sleep 300ms
-Type "# audited: see note above"
+# ── Scene 3: write a markdown doc *while navigating* (DOCS pane) ──
+# :TyO3Doc opens a markdown editor for the entity under the cursor; :w authors it
+# into the `docs` layer, keyed by the entity's durable id.
+Type ":TyO3Doc" Enter
+Sleep 1500ms
+Type "ggcc# Checkout — the load-bearing path"
 Escape
-Sleep 400ms
+Type "Go"
+Type "Converts a Book price to USD. This doc is glued to the function's"
+Enter
+Type "durable identity — it survives edits and moves, not line numbers."
+Escape
+Sleep 600ms
 Type ":w" Enter
-Sleep 3s
-# Re-resolve: same durable id, the 🏷 note is still attached; AFFECTED logs the commit.
+Sleep 1500ms
+Type ":q" Enter
+Sleep 2500ms
+
+# ── Scene 4: identity survives an edit — note + doc stay attached ──
+Type "o"
+Sleep 200ms
+Type "# audited"
+Escape
+Type ":w" Enter
+Sleep 2500ms
 Type "/def checkout" Enter
 Sleep 3s
 
-# ── Scene 5: the headline — atomic MOVE; the id and the note ride along ──
+# ── Scene 5: the headline — atomic MOVE carries id + note + doc to a new file ──
 Type ":TyO3Move checkout checkout.py" Enter
 Sleep 3s
 Type ":e checkout.py" Enter
-Sleep 2500ms
-# In a *different file* now: CONTEXT shows the SAME durable id, a new location
-# (checkout.py::checkout), and the 🏷 note still glued. Identity, made visible.
+Sleep 2s
 Type "/def checkout" Enter
 Sleep 3500ms
 
-# ── Scene 6: live blast radius + async precision refinement ──
-# Edit the top-level usd() formatter — everything that calls it is affected.
+# ── Scene 6: panes are collapsible — separation you control ──
+Ctrl+W
+Type "l"
+Sleep 800ms
+Type "/SUMMARY" Enter
+Sleep 600ms
+Tab
+Sleep 1500ms
+Type "/ACTIONS" Enter
+Sleep 400ms
+Tab
+Sleep 1500ms
+Tab
+Sleep 800ms
+Ctrl+W
+Type "h"
+Sleep 800ms
+
+# ── Scene 7: the docs link to BOTH user and developer guides ──
+Type ":TyO3Docs" Enter
+Sleep 1200ms
+Type "1" Enter
+Sleep 3500ms
+Type "q"
+Sleep 800ms
+Type ":TyO3Docs" Enter
+Sleep 1200ms
+Type "3" Enter
+Sleep 3500ms
+Type "q"
+Sleep 800ms
+
+# ── Scene 8: live blast radius + async precision refinement (AFFECTED pane) ──
 Type ":e money.py" Enter
 Sleep 1500ms
 Type "/100" Enter
 Sleep 600ms
 Type "ciw1000"
 Escape
-Sleep 500ms
 Type ":w" Enter
-# AFFECTED lights up with the id-level closure (usd + its callers, e.g. checkout),
-# then the async precision refinement narrows it — both visible in the dock.
 Sleep 5s
-# Land back on usd → its CONTEXT `affected@ rev N` advanced to this very edit.
-Type "/def usd" Enter
-Sleep 3500ms
-
-# ── Scene 7: entity-level diff across the session (structural, not textual) ──
-# rev 1 is the freshly-indexed baseline; head reflects every edit — so the diff
-# names `moved` (checkout → checkout.py) and `changed` (price) by identity.
-Type ":TyO3Diff 1" Enter
-Sleep 4s
-Type "q"
-Sleep 800ms
 
 Type ":qa!" Enter
 Sleep 1s

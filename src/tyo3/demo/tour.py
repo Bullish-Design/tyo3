@@ -119,6 +119,10 @@ origin = "authored"
 history = true
 review_on_change = true
 
+[layers.docs]
+origin = "authored"
+history = true
+
 [layers.summary]
 origin = "derived"
 depends_on = ["code"]

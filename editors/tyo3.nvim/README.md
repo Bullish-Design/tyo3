@@ -109,7 +109,9 @@ require("tyo3").setup({ daemon_cmd = { "python", "-m", "tyo3.daemon" } })
 | `debounce_ms` | `300` | Pause before a `TextChanged` commit fires. One commit per pause. |
 | `precision` | `"method"` | Hint surfaced in `:checkhealth` (the daemon owns the real setting via `.tyo3/config.toml`). |
 | `virtual_text` | `true` | Render notes + summaries inline as virtual text. |
-| `panel` | `"auto"` | Affected-set panel: `"auto"` (open on first delta), `"always"`, `"off"`. |
+| `panel` | `"auto"` | Side dock: `"auto"` (open on first delta), `"always"`, `"off"`. |
+| `context` | `"off"` | Cursor-driven CONTEXT tracking: `"cursor"` updates the dock from the entity under the cursor, or `"off"`. |
+| `context_debounce_ms` | `150` | Pause before a cursor-context lookup fires. |
 | `daemon_cmd` | `nil` | Launch command. `nil` ⇒ auto-detect `tyo3-daemon`, else `python -m tyo3.daemon`. |
 | `root_markers` | `{".tyo3","pyproject.toml",".git"}` | Upward search for the project root. |
 | `overseer` | `false` | Enable the optional overseer.nvim ops integration. |
@@ -119,8 +121,11 @@ require("tyo3").setup({ daemon_cmd = { "python", "-m", "tyo3.daemon" } })
 | Command | Does |
 |---|---|
 | `:TyO3Inspect` | Floating inspector for the entity under the cursor. |
+| `:TyO3Context` | Toggle cursor-driven CONTEXT tracking in the side dock. |
 | `:TyO3Note [text]` | Author an intent note on the entity under the cursor (prompts if no text). |
-| `:TyO3Move <name> <dest>` | Atomically move an entity to another file — id + note + hash preserved. |
+| `:TyO3Doc` | Write/edit a markdown doc for the entity under the cursor — glued to its identity. |
+| `:TyO3Docs` | Open the documentation (user guides + developer/architecture). |
+| `:TyO3Move <name> <dest>` | Atomically move an entity to another file — id + note + doc + hash preserved. |
 | `:TyO3Affected` | Picker over the last edit's affected set; jump by identity. |
 | `:TyO3Entities` | Picker over all known entities. |
 | `:TyO3Authored` | Picker over entities carrying an authored note. |
@@ -129,6 +134,21 @@ require("tyo3").setup({ daemon_cmd = { "python", "-m", "tyo3.daemon" } })
 | `:TyO3Start` / `:TyO3Stop` | Attach the daemon for this buffer / stop all session daemons. |
 | `:TyO3Reindex` / `:TyO3Gc` / `:TyO3Check` | One-shot daemon ops (rescan / gc orphans / type-check). |
 | `:TyO3DaemonLog` | Show the captured daemon stderr log. |
+
+## The sidebar
+
+With `context = "cursor"` the side dock separates the data hanging off the entity
+under your cursor into collapsible panes — `IDENTITY`, `NOTES`, `DOCS`, `SUMMARY`,
+`ACTIONS` — above the `AFFECTED` edit log. Inside the dock: `<Tab>` collapses /
+expands a pane, `<CR>` activates a line (run an action, open/write a doc), and
+`gd` opens the pane's reference doc. The `DOCS` pane shows the entity's authored
+markdown doc (durably linked by identity — it rides edits and moves) and links to
+the guides below. See the recorded tour: [`demo/context/context.gif`](demo/context/context.gif).
+
+## Documentation
+
+- User: [workflow](docs/user/workflow.md) · [command reference](docs/user/commands.md)
+- Developer: [architecture](docs/dev/architecture.md) · [durable identity](docs/dev/identity.md)
 
 ## Health
 

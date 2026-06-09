@@ -64,7 +64,7 @@ local function lookup(bufnr, key, line, col)
     if err then
       return
     end
-    require("tyo3.panel").set_context(card)
+    require("tyo3.panel").set_context(card, bufnr)
   end)
 end
 

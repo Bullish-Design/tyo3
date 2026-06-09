@@ -51,6 +51,15 @@ local function open_float(lines)
   return win
 end
 
+--- Open the inspector float for an already-resolved card.
+function M.show_card(card)
+  if card == nil or card == vim.NIL then
+    vim.notify("[tyo3] no entity to inspect", vim.log.levels.INFO)
+    return
+  end
+  open_float(card_fmt.build_lines(card))
+end
+
 --- :TyO3Inspect — inspect the entity under the cursor.
 function M.inspect()
   local bufnr = vim.api.nvim_get_current_buf()

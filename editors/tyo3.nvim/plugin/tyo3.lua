@@ -19,6 +19,14 @@ cmd("TyO3Note", function(a)
   require("tyo3.notes").note(a.args)
 end, { nargs = "*", desc = "Author an intent note on the entity under the cursor" })
 
+cmd("TyO3Doc", function()
+  require("tyo3.entitydoc").edit()
+end, { desc = "Write/edit the markdown doc for the entity under the cursor" })
+
+cmd("TyO3Docs", function()
+  require("tyo3.docs").index()
+end, { desc = "Open the TyO3 documentation (user + developer)" })
+
 cmd("TyO3Affected", function()
   require("tyo3.telescope").affected()
 end, { desc = "Telescope the last edit's affected set" })

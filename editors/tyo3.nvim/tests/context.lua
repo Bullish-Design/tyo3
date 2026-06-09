@@ -154,7 +154,20 @@ local got2 = vim.wait(30000, function()
   return t:find("checkout", 1, true) ~= nil and t:find("function", 1, true) ~= nil
 end, 50)
 check("entity resolves + renders (name · kind)", got2, panel_text())
-check("CONTEXT header present", panel_text():find("CONTEXT", 1, true) ~= nil)
+do
+  local t = panel_text()
+  check(
+    "collapsible panes render",
+    t:find("IDENTITY", 1, true) and t:find("NOTES", 1, true) and t:find("DOCS", 1, true)
+      and t:find("SUMMARY", 1, true) and t:find("ACTIONS", 1, true),
+    nil
+  )
+  check(
+    "DOCS pane links both user + dev guides",
+    t:find("User · workflow", 1, true) and t:find("Dev · durable identity", 1, true),
+    nil
+  )
+end
 
 -- ── Gate 3: notes (and docs/summary if present) surface ─────────────────────
 local authored_done, author_err
@@ -181,6 +194,41 @@ end, 50)
 check("note surfaces in CONTEXT", got3, panel_text())
 -- Summary is derived/optional; report presence without forcing it.
 check("summary surfaced (informational)", true, panel_text():find("⟢", 1, true) and "present" or "absent")
+
+-- ── Gate 3b: per-entity authored markdown doc surfaces in the DOCS pane ──
+local doc_done, doc_err
+require("tyo3").rpc(
+  bufnr,
+  "author",
+  { layer = "docs", durable_id = checkout_id, value = { markdown = "# Checkout doc\n\nThe load-bearing path." } },
+  function(e)
+    doc_err = e and e.message
+    doc_done = true
+  end
+)
+vim.wait(30000, function()
+  return doc_done
+end, 50)
+check("author docs layer ok", not doc_err, doc_err)
+
+context._last_key[bufnr] = nil
+vim.api.nvim_win_set_cursor(0, { checkout_line, 4 })
+context.on_cursor(bufnr)
+local got_doc = vim.wait(30000, function()
+  return panel_text():find("📄 Checkout doc", 1, true) ~= nil
+end, 50)
+check("authored doc surfaces in DOCS pane", got_doc, panel_text())
+
+-- ── Gate 3c: collapsing a pane hides its body and flips the marker ──
+panel._collapsed["NOTES"] = true
+panel.reload()
+local got_collapse = vim.wait(30000, function()
+  local t = panel_text()
+  return t:find("▸ NOTES", 1, true) ~= nil and t:find("load-bearing checkout path", 1, true) == nil
+end, 50)
+check("collapse hides pane body", got_collapse, panel_text())
+panel._collapsed["NOTES"] = false
+panel.reload()
 
 -- ── Gate 4: stale-drop — only the latest key's card is rendered ─────────────
 context._last_key[bufnr] = nil
