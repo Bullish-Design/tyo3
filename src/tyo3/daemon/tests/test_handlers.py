@@ -122,6 +122,38 @@ def test_sync_buffer_is_overlay_only(handlers, shop_project):
     assert before == after, "sync_buffer overlays in memory — never writes disk"
 
 
+# ── sync_buffers (atomic move — the money shot) ──────────────────────────────
+
+
+def test_sync_buffers_move_preserves_id_and_note(handlers, ids):
+    """A function moved to another file in one commit keeps its durable id, and
+    an authored note rides along — the demo's headline behaviour.
+
+    Uses the tour's designed move pair: ``legacy.py`` → the pre-existing empty
+    ``legacy_moved.py``. The destination must already be a project file and the
+    body byte-identical for a ``Moved`` (same-hash) bind."""
+    legacy_id = ids["legacy_helper"]
+    handlers.author({"layer": "intent", "durable_id": legacy_id, "value": {"note": "rides along"}})
+
+    body = "def legacy_helper(x: int) -> int:\n    return x + 1\n"
+    delta = handlers.sync_buffers({"edits": {"legacy.py": "", "legacy_moved.py": body}})
+    moved_ids = {m["id"] for m in delta["moved"]}
+    assert legacy_id in moved_ids, "legacy_helper bound as a Move (same id, new file)"
+
+    loc = handlers.locate({"durable_id": legacy_id})
+    assert "legacy_moved.py" in loc["location"]
+    # The note survives the move.
+    deco = handlers.decorate({"path": "legacy_moved.py"})
+    entry = next(d for d in deco if d["durable_id"] == legacy_id)
+    assert entry["note"] == "rides along"
+
+
+def test_sync_buffers_rejects_bad_edits(handlers):
+    with pytest.raises(ProtocolError) as e:
+        handlers.sync_buffers({"edits": {}})
+    assert e.value.code == INVALID_PARAMS
+
+
 # ── diff ─────────────────────────────────────────────────────────────────────
 
 

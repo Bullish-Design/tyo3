@@ -103,6 +103,29 @@ class Handlers:
 
         return self._actor.submit(work)
 
+    def sync_buffers(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Overlay many buffers **atomically** (one commit, one revision).
+
+        The identity-preserving move path: removing a function from one file and
+        adding its identical body to another in the *same* commit binds as a
+        ``Moved`` (durable id + authored note ride along). Two separate
+        ``sync_buffer`` calls would not guarantee that. Mirrors
+        ``session.edit_many`` (see test_final_acceptance.py's atomic move)."""
+        edits = params.get("edits")
+        if not isinstance(edits, dict) or not edits:
+            raise ProtocolError("'edits' must be a non-empty object", code=INVALID_PARAMS)
+        rel_edits: dict[str, str] = {}
+        for path, text in edits.items():
+            if not isinstance(text, str):
+                raise ProtocolError("each edit value must be a string", code=INVALID_PARAMS)
+            rel_edits[self._relpath(path)] = text
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            delta = s.edit_many(rel_edits)
+            return _commit_delta_dict(delta)
+
+        return self._actor.submit(work)
+
     def entity_at(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Resolve the entity under *(path, line, col)* (1-based) and return its
         cross-layer card, or ``null`` if nothing is there."""
@@ -434,6 +457,7 @@ _METHODS = {
     "ping": Handlers.ping,
     "open": Handlers.open,
     "sync_buffer": Handlers.sync_buffer,
+    "sync_buffers": Handlers.sync_buffers,
     "entity_at": Handlers.entity_at,
     "decorate": Handlers.decorate,
     "author": Handlers.author,

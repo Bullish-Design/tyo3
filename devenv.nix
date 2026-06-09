@@ -37,12 +37,13 @@ in
 {
   env.GREET = "devenv";
 
-  packages = [ 
-    pkgs.git 
+  packages = [
+    pkgs.git
     pkgs.uv
     pkgs.maturin         # Build Python extensions with PyO3
     pkgs.mold            # Fast linker (replaces GNU ld for Rust LTO builds)
     pkgs.sccache         # Compiler cache for Rust (survives cargo clean)
+    pkgs.vhs             # Scripted terminal recordings (tyo3.nvim demo: tour.tape → gif/cast)
   ];
 
   # ── Languages (Rust + Python) ──────────────────────────────
@@ -283,6 +284,23 @@ in
   scripts.pyrun.exec = ''
     cd "$DEVENV_ROOT"
     PYTHONPATH=src python "$@" 2>&1
+  '';
+
+  # ── Neovim plugin demo ───────────────────────────────────────
+  #
+  # Render the scripted tyo3.nvim demo to a GIF + asciinema cast via vhs. The
+  # tape (editors/tyo3.nvim/demo/tour.tape) drives a real terminal nvim through
+  # the plugin's verbs; setup.sh builds the synthetic shop project fresh. CI-
+  # runnable (no display). See .scratch/projects/20-neovim-integration/DEMO_RECORDING.md.
+  scripts.demo-record.exec = ''
+    echo "═══ Recording tyo3.nvim demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/tour.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/tour.gif + tour.cast ═══"
   '';
 
   # ── Utility scripts ──────────────────────────────────────────
