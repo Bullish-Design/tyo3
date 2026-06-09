@@ -228,6 +228,7 @@ in
       src/tyo3/tests/test_final_derived_contract.py \
       src/tyo3/tests/test_final_hash_ast.py \
       src/tyo3/tests/test_final_parity_oracle.py \
+      src/tyo3/tests/test_final_acceptance.py \
       "$@" 2>&1
   '';
 
