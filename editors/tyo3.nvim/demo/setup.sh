@@ -25,15 +25,33 @@ PY
 export TYO3_DEMO_DIR="${_base}/shop"
 export TYO3_PLUGIN_DIR="${_plugin}"
 
-# Fully isolate Neovim from any ambient user config. `--clean` alone is not
-# enough here (a user config under $XDG_CONFIG_HOME/nvim — often symlinked from
-# a dotfiles repo — can still load its after/ftplugin and break the recording),
-# so point all XDG bases at fresh, empty dirs. Combined with `nvim --clean -u
-# demo/init.lua`, nvim then loads *only* $VIMRUNTIME + tyo3.nvim.
-export XDG_CONFIG_HOME="${_base}/xdg/config"
-export XDG_DATA_HOME="${_base}/xdg/data"
-export XDG_STATE_HOME="${_base}/xdg/state"
-export XDG_CACHE_HOME="${_base}/xdg/cache"
-mkdir -p "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}" "${XDG_CACHE_HOME}"
+# Resolve a *pristine* nvim for the recording. The `nvim` on PATH here is a
+# Nix/home-manager wrapper that force-injects the user config dir (~/.dotfiles/
+# nvim and its after/ftplugin) onto the runtimepath EVEN under `--clean` and
+# regardless of XDG overrides — that after/ftplugin/python.lua requires
+# which-key (absent in this isolated env) and erupts at startup, overwriting
+# the recording with an E5113 traceback. The wrapper is a chain of bash scripts
+# that finally `exec` the real ELF `neovim-unwrapped` binary, which honours
+# `--clean` and loads only $VIMRUNTIME. Follow the exec chain to that ELF (no
+# hardcoded store hash) and drive the demo with it directly.
+_resolve_nvim() {
+  local bin next guard=0
+  bin="$(command -v nvim)" || return 1
+  bin="$(readlink -f "${bin}")"
+  while [ "${guard}" -lt 10 ]; do
+    guard=$((guard + 1))
+    if file -b "${bin}" 2>/dev/null | grep -q ELF; then
+      printf '%s\n' "${bin}"
+      return 0
+    fi
+    next="$(grep -oE 'exec (-a [^ ]+ )?"?/nix/store/[^ "]+/bin/nvim' "${bin}" 2>/dev/null \
+            | grep -oE '/nix/store/[^ "]+/bin/nvim' | head -1)"
+    [ -z "${next}" ] && break
+    bin="${next}"
+  done
+  printf '%s\n' "${bin}"
+}
+export TYO3_NVIM="$(_resolve_nvim)"
 
 echo "tyo3 demo project ready: ${TYO3_DEMO_DIR}"
+echo "tyo3 demo nvim:          ${TYO3_NVIM}"

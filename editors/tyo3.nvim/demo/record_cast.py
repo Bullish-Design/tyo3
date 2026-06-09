@@ -46,8 +46,8 @@ ACTIONS: list[tuple[float, str]] = [
     (2.5, ":TyO3Move checkout checkout.py\r"),        # Scene 4: the money shot
     (3.0, ":e checkout.py\r"),      # note rides along
     (3.0, ":e catalog.py\r"),       # Scene 5: edit a base method
-    (1.0, "/return 100\r"),
-    (0.5, "ciw250\x1b"),
+    (1.0, "/100\r"),                # land on the literal, not `return`
+    (0.5, "ciw250\x1b"),            # change the value → return 250
     (0.7, ":w\r"),                  # debounced commit fires
     (5.0, ":TyO3Affected\r"),       # Scene 6: navigate the affected set
     (2.0, "1\r"),
@@ -62,8 +62,10 @@ def main() -> int:
     demo_cmd = (
         "source editors/tyo3.nvim/demo/setup.sh && "
         'cd "$TYO3_DEMO_DIR" && '
-        # --clean isolates from any ambient user config (~/.config/nvim).
-        'exec nvim --clean -u "$TYO3_PLUGIN_DIR/demo/init.lua" store.py'
+        # $TYO3_NVIM is the pristine neovim-unwrapped binary setup.sh resolves
+        # (the home-manager wrapper injects a user after/ftplugin even under
+        # --clean); --clean + -u then loads only $VIMRUNTIME + the demo init.
+        'exec "$TYO3_NVIM" --clean -u "$TYO3_PLUGIN_DIR/demo/init.lua" store.py'
     )
 
     env = dict(os.environ)

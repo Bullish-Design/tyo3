@@ -24,9 +24,10 @@ Type "source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR" Enter
 Sleep 2s
 
 # Scene 1 — open & ambient intelligence (daemon: open + initial decorate; panel).
-# --clean isolates from any ambient user config (~/.config/nvim) so the
-# recording is identical everywhere; -u loads only the plugin-only demo init.
-Type "nvim --clean -u $TYO3_PLUGIN_DIR/demo/init.lua store.py" Enter
+# $TYO3_NVIM is the pristine neovim-unwrapped binary setup.sh resolved (the
+# home-manager wrapper would inject a user after/ftplugin even under --clean);
+# --clean + -u loads only $VIMRUNTIME + the plugin-only demo init.
+Type "$TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/init.lua store.py" Enter
 Sleep 6s
 
 # Scene 2 — inspect checkout.
@@ -50,7 +51,10 @@ Sleep 3s
 # Scene 5 — edit a base method; watch the affected panel light up, then narrow.
 Type ":e catalog.py" Enter
 Sleep 1s
-Type "/return 100" Enter
+# Land the cursor on the literal 100 (the price body), then change just that
+# number → 250. Searching "return 100" would put the cursor on `return`, so
+# ciw would clobber the keyword instead of the value.
+Type "/100" Enter
 Sleep 500ms
 Type "ciw250" Escape
 Sleep 700ms
