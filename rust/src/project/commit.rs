@@ -148,6 +148,9 @@ pub(crate) struct IdentityDelta {
 /// a full rescan-flagged delta on `rescan` / cold start. `None` is only carried
 /// by writes that don't reconcile (e.g. `author`). `touched_files` is the union
 /// of the path-level created/changed/deleted strings — metadata only.
+// Assembles the commit delta from distinct, independently-sourced components; a
+// params struct would duplicate `CommitDeltaDto`'s own shape.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_commit_delta(
     revision: u64,
     root: &SystemPathBuf,

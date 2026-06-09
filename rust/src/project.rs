@@ -25,7 +25,11 @@ pub(crate) use ty_project::Db;
 pub(crate) use ty_project::{ProjectDatabase, ProjectMetadata};
 
 pub(crate) use crate::authored::{AuthoredMap, AuthoredRecordDoc, AuthoredStore, AuthoredLoadError};
-pub(crate) use crate::content::{is_project_relevant, ContentStore, Document, Generation, Revision};
+pub(crate) use crate::content::{is_project_relevant, ContentStore, Generation, Revision};
+// `Document` is only referenced by the test module (via `use super::*`); gate the
+// re-export so non-test builds don't see it as an unused import.
+#[cfg(test)]
+pub(crate) use crate::content::Document;
 pub(crate) use crate::config::{self, RawConfig, ValidatedConfig};
 pub(crate) use crate::entity::{extract_entities, extract_entities_for};
 pub(crate) use crate::hash::HashPolicy;
@@ -522,8 +526,8 @@ mod phase4_tests {
     fn pre_populate(store: &mut ContentStore, path: SystemPathBuf, disk_text: &str) -> Generation {
         // Read disk into the store, then capture the generation that includes it.
         store.insert_text(path, disk_text);
-        let gen = store.capture();
-        gen
+        
+        store.capture()
     }
 
     fn read(state: &TyProjectState, path: &SystemPathBuf) -> String {
@@ -619,7 +623,7 @@ mod phase4_tests {
         let a = root.join("a.py");
 
         // Pre-populate r0's content.
-        let gen_r0 = pre_populate(&mut head.store, a.clone(), "X = 1\n");
+        let _gen_r0 = pre_populate(&mut head.store, a.clone(), "X = 1\n");
         let r0 = head.store.revision();
         // Create r1 with different content.
         head.store.insert_text(a.clone(), "X = 2\n");

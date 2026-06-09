@@ -5,21 +5,8 @@
 
 use super::*;
 
-// ── Head builder ─────────────────────────────────────────────────────────
+// ── Authored records ──────────────────────────────────────────────────────
 
-/// Build a live HEAD over an `OverlaySystem`, seeding the overlay from
-/// `initial_store` (an empty store on first open; the preserved store on reload).
-///
-/// Construction mirrors ty_server (`ty_server/src/session.rs:602`), but keeps
-/// the caller's root as a hard project boundary. `ProjectMetadata::discover`
-/// walks upward, which is correct for a CLI but wrong for TyO3 fixture/session
-/// roots: opening `fixtures/simple_package` must not analyze the whole repo.
-///
-///   1. discover project metadata from disk (`pyproject.toml` / `ty.toml`),
-///   2. discard discovered metadata if it came from an ancestor root,
-///   3. layer user-level configuration on top,
-///   4. build the db with `fallible` (surfaces config errors),
-///   5. on any failure, fall back to a default blank project (never panic).
 /// Load all authored records from disk for every layer declared with
 /// `origin = "authored"`.  Returns an `AuthoredStore` (rpds-backed map)
 /// containing every valid record on disk.  A missing `authored/` directory
@@ -52,7 +39,7 @@ pub(crate) fn load_authored_records(
             if !path.is_file() {
                 continue;
             }
-            let Some(file_name) = path.file_stem().and_then(|n| n.to_str()) else {
+            let Some(_file_name) = path.file_stem().and_then(|n| n.to_str()) else {
                 continue;
             };
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -88,11 +75,29 @@ pub(crate) fn load_authored_records(
     Ok(AuthoredStore::new(map))
 }
 
+// ── Head builder ──────────────────────────────────────────────────────────
+
+/// Build a live HEAD with the default config. Test-only convenience.
+#[cfg(test)]
 pub(crate) fn build_head(root: SystemPathBuf, initial_store: ContentStore, registry: IdentityRegistry) -> HeadState {
     let config = config::validate(RawConfig::defaults()).expect("default config is valid");
     build_head_with_config(root, initial_store, registry, config)
 }
 
+/// Build a live HEAD over an `OverlaySystem`, seeding the overlay from
+/// `initial_store` (an empty store on first open; the preserved store on reload).
+///
+/// Construction mirrors ty_server (`ty_server/src/session.rs:602`), but keeps
+/// the caller's root as a hard project boundary. `ProjectMetadata::discover`
+/// walks upward, which is correct for a CLI but wrong for TyO3 fixture/session
+/// roots: opening `fixtures/simple_package` must not analyze the whole repo.
+///
+/// Steps:
+///   1. discover project metadata from disk (`pyproject.toml` / `ty.toml`),
+///   2. discard discovered metadata if it came from an ancestor root,
+///   3. layer user-level configuration on top,
+///   4. build the db with `fallible` (surfaces config errors),
+///   5. on any failure, fall back to a default blank project (never panic).
 pub(crate) fn build_head_with_config(
     root: SystemPathBuf,
     initial_store: ContentStore,

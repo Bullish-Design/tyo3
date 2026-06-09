@@ -169,12 +169,7 @@ impl AuthoredMap {
             return Some(&rec.current);
         }
         // Walk history newest-first (history is newest-last).
-        for v in rec.history.iter().rev() {
-            if v.revision <= at {
-                return Some(v);
-            }
-        }
-        None
+        rec.history.iter().rev().find(|&v| v.revision <= at).map(|v| v as _)
     }
 
     /// Get the full record (current + history) for a (layer, id) pair.
@@ -184,17 +179,13 @@ impl AuthoredMap {
     }
 
     /// Iterate over durable ids in a layer.
-    pub fn ids_in_layer<'a>(&'a self, layer: &'a str) -> impl Iterator<Item = &str> + 'a {
+    pub fn ids_in_layer<'a>(&'a self, layer: &'a str) -> impl Iterator<Item = &'a str> + 'a {
         self.records
             .keys()
             .filter(move |(l, _)| l == layer)
             .map(|(_, id)| id.as_str())
     }
 
-    /// Number of records in the store.
-    pub fn len(&self) -> usize {
-        self.records.size()
-    }
 }
 
 #[cfg(test)]

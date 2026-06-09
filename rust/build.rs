@@ -10,11 +10,9 @@ fn main() {
         if output.status.success() {
             let flags = String::from_utf8_lossy(&output.stdout);
             for token in flags.split_whitespace() {
-                if token.starts_with("-l") {
-                    let lib = &token[2..];
+                if let Some(lib) = token.strip_prefix("-l") {
                     println!("cargo:rustc-link-lib={}", lib);
-                } else if token.starts_with("-L") {
-                    let path = &token[2..];
+                } else if let Some(path) = token.strip_prefix("-L") {
                     println!("cargo:rustc-link-search=native={}", path);
                 }
             }

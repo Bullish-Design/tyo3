@@ -28,6 +28,9 @@ fn symbol_kind_to_dto(kind: &ty_ide::SymbolKind) -> SymbolKindDto {
 /// The caller is responsible for providing the source text, a precomputed
 /// `LineIndex`, and file path so we can convert TextRange into 1-based
 /// line/column RangeDto.
+// Each argument is a distinct per-symbol field mapped 1:1 into `SymbolDto`;
+// bundling them would just mirror the output struct.
+#[allow(clippy::too_many_arguments)]
 pub fn convert_symbol(
     source: &str,
     line_index: &LineIndex,
@@ -64,6 +67,10 @@ pub fn convert_symbol(
 }
 
 /// Recursively collect document symbols from a hierarchical symbol tree.
+// Threads a fixed analysis context (source/index/registry/hash policies) plus
+// the current tree node through the recursion; folding the context into a struct
+// is a tracked follow-up (see PROGRESS §9.14).
+#[allow(clippy::too_many_arguments)]
 pub fn collect_symbols_recursive(
     hierarchical: &ty_ide::HierarchicalSymbols,
     id: ty_ide::SymbolId,
@@ -79,10 +86,7 @@ pub fn collect_symbols_recursive(
     default_profile_name: Option<&str>,
     symbols: &mut Vec<dto::SymbolDto>,
 ) {
-    let qualified = match parent_name {
-        Some(p) => Some(format!("{}.{}", p, info.name)),
-        None => None,
-    };
+    let qualified = parent_name.map(|p| format!("{}.{}", p, info.name));
     let identity_path = match parent_identity_path {
         Some(p) => format!("{}::{}", p, info.name),
         None => format!("{}::{}", file_path, info.name),

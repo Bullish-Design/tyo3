@@ -133,8 +133,8 @@ impl PyTyProject {
 
         let root = head.root.clone();
         // Preserve overlay content, identity registry, and validated config across the rebuild.
-        let store = std::mem::replace(&mut head.store, ContentStore::new());
-        let registry = std::mem::replace(&mut head.registry, IdentityRegistry::default());
+        let store = std::mem::take(&mut head.store);
+        let registry = std::mem::take(&mut head.registry);
         let config = head.config.clone();
 
         // Rebuild while still holding the lock, then swap atomically.
@@ -169,7 +169,7 @@ impl PyTyProject {
         drop(w);
 
         let mut guard = self.inner.lock().map_err(|_e| {
-            PyRuntimeError::new_err(format!("Lock poisoned"))
+            PyRuntimeError::new_err("Lock poisoned".to_string())
         })?;
 
         // Setting None on an already-None guard is harmless.

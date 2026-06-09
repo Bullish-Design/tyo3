@@ -32,12 +32,21 @@ pub enum Document {
     /// INVARIANT: `hash` is always `hash_text(&text)` at construction time.
     Text {
         text: Arc<str>,
+        // Maintained as part of the Document model invariant (always
+        // `hash_text(&text)`); read only by `hash()`/unit tests today.
+        #[allow(dead_code)]
         hash: ContentHash,
         version: u64,
     },
     /// The path is overlaid as deleted: reads must fail even if a file exists on
     /// disk. Needed so an agent can model "what if this file didn't exist".
-    Deleted { version: u64 },
+    // `version` mirrors the Text variant for model symmetry; only the Text
+    // version is consumed in prod (the overlay change-detector), so a tombstone's
+    // version is read only by `version()`/tests.
+    Deleted {
+        #[allow(dead_code)]
+        version: u64,
+    },
 }
 
 impl Document {
@@ -52,6 +61,9 @@ impl Document {
 
     /// The content hash, if this is a `Text` document.  Tombstones
     /// (`Deleted`) have no hash and return `None`.
+    // Accessor over the Document model exercised by unit tests; the prod read
+    // paths destructure the variant directly.
+    #[allow(dead_code)]
     pub fn hash(&self) -> Option<ContentHash> {
         match self {
             Document::Text { hash, .. } => Some(*hash),
@@ -59,6 +71,9 @@ impl Document {
         }
     }
 
+    // Accessor over the Document model exercised by unit tests; the prod read
+    // paths destructure the variant directly.
+    #[allow(dead_code)]
     pub fn version(&self) -> u64 {
         match self {
             Document::Text { version, .. } | Document::Deleted { version } => *version,
@@ -104,9 +119,10 @@ pub enum Change {
     Delete { path: SystemPathBuf },
     /// Insert or replace a virtual-path document.
     InsertVirtual { path: SystemVirtualPathBuf, text: Arc<str> },
-    /// Remove a virtual-path document.
-    ForgetVirtual { path: SystemVirtualPathBuf },
     /// Drop the overlay for a system path so reads fall through to disk.
+    // Constructed only via `ContentStore::forget`, which the unit tests exercise;
+    // no prod write path drops an overlay yet.
+    #[allow(dead_code)]
     Forget { path: SystemPathBuf },
 }
 
@@ -238,9 +254,6 @@ impl ContentStore {
                         let d = Document::text(text, next_version());
                         m.virtual_files = m.virtual_files.insert(path, d);
                     }
-                    Change::ForgetVirtual { path } => {
-                        m.virtual_files = m.virtual_files.remove(&path);
-                    }
                 }
             }
         })
@@ -248,10 +261,13 @@ impl ContentStore {
 
     // ── Thin single-change helpers ──────────────────────────────────────
     //
-    // Each is a convenience wrapper around `apply_batch(vec![…])` that
-    // advances the revision by exactly 1.
+    // Each is a convenience wrapper around `apply_batch(vec![…])` that advances
+    // the revision by exactly 1. Prod write paths build batches directly, so
+    // these single-change helpers are exercised only by the unit tests; kept as
+    // the documented single-change vocabulary.
 
     /// Overlay `path` with in-memory text. Returns the new revision.
+    #[allow(dead_code)]
     pub fn insert_text(&mut self, path: SystemPathBuf, text: impl Into<Arc<str>>) -> Revision {
         self.apply_batch(vec![Change::Insert {
             path,
@@ -260,12 +276,14 @@ impl ContentStore {
     }
 
     /// Overlay `path` as deleted. Returns the new revision.
+    #[allow(dead_code)]
     pub fn delete(&mut self, path: SystemPathBuf) -> Revision {
         self.apply_batch(vec![Change::Delete { path }])
     }
 
     /// Drop any overlay for `path` (revert to whatever disk says). Returns the
     /// new revision.
+    #[allow(dead_code)]
     pub fn forget(&mut self, path: &SystemPathBuf) -> Revision {
         self.apply_batch(vec![Change::Forget {
             path: path.clone(),
@@ -273,6 +291,7 @@ impl ContentStore {
     }
 
     /// Overlay a virtual path (e.g. "untitled:1") with in-memory text.
+    #[allow(dead_code)]
     pub fn insert_virtual(
         &mut self,
         path: SystemVirtualPathBuf,
@@ -284,37 +303,10 @@ impl ContentStore {
         }])
     }
 
-    /// Drop any overlay for a virtual path.
-    pub fn forget_virtual(&mut self, path: &SystemVirtualPathBuf) -> Revision {
-        self.apply_batch(vec![Change::ForgetVirtual {
-            path: path.clone(),
-        }])
-    }
-
-    /// Advance the application revision without changing content (used by
-    /// `sync_all` / rescan, where ty does the work but we want observability).
-    ///
-    /// Re-retains the *same* generation under the new revision: a rescan
-    /// changes no overlay content, so `snapshot(at=that_rev)` and
-    /// `snapshot(at=prev_rev)` pin identical content but build dbs that
-    /// re-walk disk independently.
-    pub fn bump_revision(&mut self) -> Revision {
-        self.revision = Revision(self.revision.0 + 1);
-        self.record_retained();
-        self.revision
-    }
-
     /// The number of project-content files read from disk by ingest helpers.
     /// Exposed to Python as the Phase 1 test seam.
     pub fn disk_read_count(&self) -> u64 {
         self.disk_reads.load(Ordering::Relaxed)
-    }
-
-    /// Return a clone of the `Arc<AtomicU64>` counter so callers outside
-    /// `ContentStore` (e.g. `PyTyProject`) can read it without holding the
-    /// write lock.
-    pub fn disk_read_counter(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.disk_reads)
     }
 
     // ── Disk ingest helpers (Phase 1) ────────────────────────────────────
@@ -428,9 +420,6 @@ impl ContentStore {
                     let d = Document::text(text, self.version_counter);
                     map.virtual_files = map.virtual_files.insert(path, d);
                 }
-                Change::ForgetVirtual { path } => {
-                    map.virtual_files = map.virtual_files.remove(&path);
-                }
             }
         }
         Arc::new(map)
@@ -463,7 +452,8 @@ impl ContentStore {
 
     /// Re-read a specific set of disk paths once and intern them as one
     /// batch (one revision). This is what `sync_path` and the watcher's
-    /// `poll_changes` will feed.
+    /// `poll_changes` will feed. Currently exercised only by the unit tests.
+    #[cfg(test)]
     pub fn apply_disk_batch(
         &mut self,
         native: &OsSystem,
@@ -504,7 +494,8 @@ impl ContentStore {
     }
 
     /// Alias for `apply_batch`: one overlay batch = exactly one revision.
-    /// Renamed for symmetry with `apply_disk_batch`.
+    /// Renamed for symmetry with `apply_disk_batch`. Test-only.
+    #[cfg(test)]
     pub fn apply_overlay_batch(&mut self, changes: Vec<Change>) -> Revision {
         self.apply_batch(changes)
     }
@@ -565,18 +556,10 @@ fn walk_relevant_files(
         .unwrap()
 }
 
-/// Look a system path up inside a captured generation.
+/// Look a system path up inside a captured generation. Test-only helper.
+#[cfg(test)]
 pub fn lookup<'a>(generation: &'a Generation, path: &SystemPathBuf) -> Option<&'a Document> {
     generation.system.get(path)
-}
-
-impl ContentStore {
-    /// True if `path` currently has any overlay entry (a live buffer or a
-    /// delete-tombstone) in the head generation. Used by poll_changes to let an
-    /// unsaved overlay buffer win over a racing disk-watcher event.
-    pub fn has_overlay(&self, path: &SystemPathBuf) -> bool {
-        self.generation.system.contains_key(path)
-    }
 }
 
 // ── Project-relevant content predicate ──────────────────────────────────
@@ -920,39 +903,39 @@ mod tests {
 
     #[test]
     fn py_source_files_are_relevant() {
-        assert!(is_project_relevant(&SystemPathBuf::from("/p/a.py").as_path()));
-        assert!(is_project_relevant(&SystemPathBuf::from("/p/b.pyi").as_path()));
-        assert!(is_project_relevant(&SystemPathBuf::from("/p/c.ipynb").as_path()));
+        assert!(is_project_relevant(SystemPathBuf::from("/p/a.py").as_path()));
+        assert!(is_project_relevant(SystemPathBuf::from("/p/b.pyi").as_path()));
+        assert!(is_project_relevant(SystemPathBuf::from("/p/c.ipynb").as_path()));
     }
 
     #[test]
     fn config_files_are_relevant() {
-        assert!(is_project_relevant(&SystemPathBuf::from("/p/pyproject.toml").as_path()));
-        assert!(is_project_relevant(&SystemPathBuf::from("/p/ty.toml").as_path()));
-        assert!(is_project_relevant(&SystemPathBuf::from("/p/setup.cfg").as_path()));
-        assert!(is_project_relevant(&SystemPathBuf::from("/p/setup.py").as_path()));
+        assert!(is_project_relevant(SystemPathBuf::from("/p/pyproject.toml").as_path()));
+        assert!(is_project_relevant(SystemPathBuf::from("/p/ty.toml").as_path()));
+        assert!(is_project_relevant(SystemPathBuf::from("/p/setup.cfg").as_path()));
+        assert!(is_project_relevant(SystemPathBuf::from("/p/setup.py").as_path()));
     }
 
     #[test]
     fn non_relevant_files_are_excluded() {
-        assert!(!is_project_relevant(&SystemPathBuf::from("/p/README.md").as_path()));
-        assert!(!is_project_relevant(&SystemPathBuf::from("/p/Makefile").as_path()));
-        assert!(!is_project_relevant(&SystemPathBuf::from("/p/data.json").as_path()));
+        assert!(!is_project_relevant(SystemPathBuf::from("/p/README.md").as_path()));
+        assert!(!is_project_relevant(SystemPathBuf::from("/p/Makefile").as_path()));
+        assert!(!is_project_relevant(SystemPathBuf::from("/p/data.json").as_path()));
     }
 
     #[test]
     fn tyo3_sidecar_is_excluded() {
         // The sidecar dir itself is not relevant.
         assert!(!is_project_relevant(
-            &SystemPathBuf::from("/p/.tyo3/config.toml").as_path()
+            SystemPathBuf::from("/p/.tyo3/config.toml").as_path()
         ));
         // Any .py inside .tyo3/ is also excluded.
         assert!(!is_project_relevant(
-            &SystemPathBuf::from("/p/.tyo3/helper.py").as_path()
+            SystemPathBuf::from("/p/.tyo3/helper.py").as_path()
         ));
         // Nested directories inside .tyo3/ are excluded.
         assert!(!is_project_relevant(
-            &SystemPathBuf::from("/p/.tyo3/sub/config.toml").as_path()
+            SystemPathBuf::from("/p/.tyo3/sub/config.toml").as_path()
         ));
     }
 }

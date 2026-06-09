@@ -241,6 +241,9 @@ impl PySnapshot {
     // ── Code Actions ─────────────────────────────────────────
 
     /// Get quick fixes for a diagnostic at a range.
+    // PyO3 #[pymethod]: this positional signature is the Python-facing API, so
+    // the range/diagnostic params can't be bundled without changing the binding.
+    #[allow(clippy::too_many_arguments)]
     fn code_actions<'py>(
         &self,
         py: Python<'py>,

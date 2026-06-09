@@ -66,13 +66,13 @@ impl PyHeadView {
     // ── Files ────────────────────────────────────────────────────
 
     fn files(&self, py: Python<'_>) -> PyResult<Vec<String>> {
-        read_head_with_retry(py, &self.inner, "files", |s| compute_files(s))
+        read_head_with_retry(py, &self.inner, "files", compute_files)
     }
 
     // ── Check ────────────────────────────────────────────────────
 
     fn check<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let dto = read_head_with_retry(py, &self.inner, "check", |s| compute_check(s))?;
+        let dto = read_head_with_retry(py, &self.inner, "check", compute_check)?;
         pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
@@ -192,6 +192,9 @@ impl PyHeadView {
 
     // ── Code Actions ─────────────────────────────────────────────
 
+    // PyO3 #[pymethod]: this positional signature is the Python-facing API, so
+    // the range/diagnostic params can't be bundled without changing the binding.
+    #[allow(clippy::too_many_arguments)]
     fn code_actions<'py>(
         &self, py: Python<'py>, path: &str,
         start_line: u32, start_col: u32, end_line: u32, end_col: u32,

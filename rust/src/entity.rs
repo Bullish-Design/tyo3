@@ -89,8 +89,14 @@ pub struct Entity {
     pub container: Option<String>,
     pub name: String,
     pub file: String,
+    // Positional/name metadata carried for the entity model and asserted by the
+    // unit tests; identity reconciliation keys on `qualified_path`/`content_hash`,
+    // so prod read paths don't consume these three.
+    #[allow(dead_code)]
     pub full_range: ruff_text_size::TextRange,
+    #[allow(dead_code)]
     pub name_range: ruff_text_size::TextRange,
+    #[allow(dead_code)]
     pub qualified_name: String,
 }
 
@@ -197,6 +203,10 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
 }
 
 /// Recursively walk a hierarchical symbol subtree, building `Entity` records.
+// Threads a fixed analysis context plus the current tree node through the
+// recursion; folding the context into a struct is a tracked follow-up
+// (see PROGRESS §9.14).
+#[allow(clippy::too_many_arguments)]
 fn collect_entities_recursive(
     hierarchical: &ty_ide::HierarchicalSymbols,
     id: ty_ide::SymbolId,
@@ -271,7 +281,7 @@ fn collect_entities_recursive(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ruff_db::system::{SystemPath, SystemPathBuf};
+    use ruff_db::system::SystemPathBuf;
     use std::io::Write;
 
     /// Build a minimal TyProjectState over a temp dir with the given source.

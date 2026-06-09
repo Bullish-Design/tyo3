@@ -95,11 +95,6 @@ impl OverlaySystem {
         self.content.store(generation);
     }
 
-    /// Whether this is a frozen (pinned) overlay.
-    pub fn is_frozen(&self) -> bool {
-        self.frozen.is_some()
-    }
-
     // ── Content lookup helpers ───────────────────────────────────────────
 
     /// Look up the overlay document for `path`, if any.
@@ -401,15 +396,6 @@ mod tests {
         (dir, root, a)
     }
 
-    /// Create a generation with a pre-populated file entry (as the snapshot
-    /// builder will do in Step 8).
-    fn gen_with(path: SystemPathBuf, text: &str) -> Generation {
-        let mut map = ContentMap::new();
-        let doc = Document::text(text.to_string(), 1);
-        map.system = map.system.insert(path, doc);
-        Arc::new(map)
-    }
-
     #[test]
     fn reads_fall_through_to_disk_when_not_overlaid() {
         let (_dir, root, a) = fixture("X = 1\n");
@@ -530,7 +516,7 @@ mod tests {
     /// enumerates direct children correctly via `read_directory`.
     #[test]
     fn frozen_read_directory_from_generation() {
-        let (_dir, root, a) = fixture("X = 1\n");
+        let (_dir, root, _a) = fixture("X = 1\n");
         // Build a generation with multiple paths at different depths.
         let mut map = ContentMap::new();
         let a_path = root.join("a.py");

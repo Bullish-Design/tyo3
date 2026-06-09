@@ -35,10 +35,6 @@ impl DurableId {
     pub fn mint() -> Self {
         DurableId(ulid::Ulid::new().to_string())
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 impl fmt::Display for DurableId {
@@ -109,6 +105,8 @@ impl IdentityRegistry {
         self.by_id.values()
     }
 
+    /// Anchor count. Test-only assertion helper.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.by_id.len()
     }
@@ -234,7 +232,9 @@ impl IdentityRegistry {
 
     /// Assert all three indexes are mutually consistent.  Debug-only; call
     /// after any mutator in tests.
+    // Exercised by the unit tests; kept callable from any debug build.
     #[cfg(debug_assertions)]
+    #[allow(dead_code)]
     pub fn assert_consistent(&self) {
         // Every id in by_id is in by_path and by_hash by its current values.
         for (id, anchor) in &self.by_id {
@@ -254,7 +254,7 @@ impl IdentityRegistry {
             if anchor.status != IdentityStatus::Orphaned {
                 let hash_ids = self.by_hash.get(&anchor.content_hash);
                 assert!(
-                    hash_ids.map_or(false, |v| v.contains(id)),
+                    hash_ids.is_some_and(|v| v.contains(id)),
                     "active anchor {} missing from by_hash", id
                 );
             }
@@ -276,6 +276,7 @@ impl IdentityRegistry {
     }
 
     #[cfg(not(debug_assertions))]
+    #[allow(dead_code)]
     pub fn assert_consistent(&self) {
         // no-op in release
     }
@@ -498,39 +499,6 @@ pub enum Confidence {
 }
 
 impl Reconciliation {
-    /// All ids from `Moved` bindings.
-    pub fn moved(&self) -> Vec<&DurableId> {
-        self.bindings
-            .iter()
-            .filter_map(|(_, b)| match b {
-                Binding::Moved { id, .. } => Some(id),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// All ids from `Minted` bindings.
-    pub fn minted(&self) -> Vec<&DurableId> {
-        self.bindings
-            .iter()
-            .filter_map(|(_, b)| match b {
-                Binding::Minted { id } => Some(id),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// All ids from `Struct` bindings.
-    pub fn struct_binds(&self) -> Vec<&DurableId> {
-        self.bindings
-            .iter()
-            .filter_map(|(_, b)| match b {
-                Binding::Struct { id, .. } => Some(id),
-                _ => None,
-            })
-            .collect()
-    }
-
     /// Classify the reconciliation into the id-level commit-delta pieces
     /// (§5.4 / §5.5): minted → created; retired → deleted; same id with a
     /// **different content hash** → changed; same id at a new location with the
@@ -565,7 +533,7 @@ impl Reconciliation {
                     // low-confidence and its body almost always differs, so it
                     // reports as changed when the hash differs (and it already
                     // sits in needs_review).
-                    if new_hash.map_or(true, |h| h != *old_hash) {
+                    if new_hash != Some(*old_hash) {
                         changed.push(id.clone());
                     }
                 }
@@ -726,7 +694,7 @@ fn reconcile_impl(
         let best: Option<DurableId> = candidates
             .into_iter()
             .filter(|cid| {
-                registry.get(cid).map_or(false, |a| {
+                registry.get(cid).is_some_and(|a| {
                     // Allow match if paths differ (classic move) OR the
                     // anchor is not in by_path (orphaned, same path re-bind).
                     a.qualified_path != e.qualified_path
@@ -847,10 +815,10 @@ fn reconcile_impl(
     let all_ids: Vec<DurableId> = registry.by_id.keys().cloned().collect();
     for id in &all_ids {
         if !bound_ids.contains(id) {
-            let in_scope = scope.map_or(true, |scope| {
+            let in_scope = scope.is_none_or(|scope| {
                 registry
                     .get(id)
-                    .map_or(false, |anchor| anchor_file(&anchor.qualified_path).map_or(false, |file| scope.contains(file)))
+                    .is_some_and(|anchor| anchor_file(&anchor.qualified_path).is_some_and(|file| scope.contains(file)))
             });
             if !in_scope {
                 continue;
@@ -859,7 +827,7 @@ fn reconcile_impl(
             // already-orphaned anchors from prior commits do not re-fire (§5.5.3).
             let already_orphaned = registry
                 .get(id)
-                .map_or(false, |a| matches!(a.status, IdentityStatus::Orphaned));
+                .is_some_and(|a| matches!(a.status, IdentityStatus::Orphaned));
             if already_orphaned {
                 continue;
             }
@@ -884,10 +852,10 @@ fn anchor_in_scope(
     id: &DurableId,
     scope: Option<&HashSet<String>>,
 ) -> bool {
-    scope.map_or(true, |scope| {
+    scope.is_none_or(|scope| {
         registry
             .get(id)
-            .map_or(false, |anchor| anchor_file(&anchor.qualified_path).map_or(false, |file| scope.contains(file)))
+            .is_some_and(|anchor| anchor_file(&anchor.qualified_path).is_some_and(|file| scope.contains(file)))
     })
 }
 
@@ -1046,7 +1014,7 @@ mod tests {
 
     #[test]
     fn consistency_after_random_mutations() {
-        use std::collections::HashSet;
+        
         let mut reg = IdentityRegistry::default();
         let mut ids: Vec<DurableId> = Vec::new();
 
@@ -1067,14 +1035,14 @@ mod tests {
         }
 
         // Rebind half.
-        for i in 0..10 {
-            reg.rebind(&ids[i], format!("g{}.py::Sym{}", i, i), hash((i + 100) as u128), Revision(2));
+        for (i, id) in ids.iter().enumerate().take(10) {
+            reg.rebind(id, format!("g{}.py::Sym{}", i, i), hash((i + 100) as u128), Revision(2));
             reg.assert_consistent();
         }
 
         // Retire a quarter.
-        for i in 15..20 {
-            reg.retire(&ids[i], Revision(3));
+        for id in &ids[15..20] {
+            reg.retire(id, Revision(3));
             reg.assert_consistent();
         }
     }

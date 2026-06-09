@@ -50,12 +50,10 @@ impl Sidecar {
         self.authored_dir(layer).join(format!("{durable_id}.json"))
     }
 
+    /// Per-record history directory. Test-only.
+    #[cfg(test)]
     pub fn history_dir(&self, layer: &str, durable_id: &str) -> PathBuf {
         self.authored_dir(layer).join(format!("{durable_id}.history"))
-    }
-
-    pub fn cache_dir(&self, layer: &str) -> PathBuf {
-        self.root.join("cache").join(layer)
     }
 
     pub fn gitignore_path(&self) -> PathBuf {
@@ -64,11 +62,6 @@ impl Sidecar {
 
     pub fn layout_marker_path(&self) -> PathBuf {
         self.root.join("LAYOUT.md")
-    }
-
-    /// Ensure a directory under the sidecar exists (created lazily before a write).
-    pub fn ensure_dir(&self, dir: &Path) -> io::Result<()> {
-        fs::create_dir_all(dir)
     }
 
     /// Crash-safe write: write to `<path>.tmp`, fsync, rename over `path`

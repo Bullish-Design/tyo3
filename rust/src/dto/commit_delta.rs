@@ -60,6 +60,7 @@ pub struct CommitDeltaDto {
     ///   - `Some(empty)`          → computed, nothing changed (e.g. a
     ///     whitespace-only edit) ⇒ a clean no-op apply;
     ///   - `Some(populated)`      → the incremental delta ⇒ apply it.
+    ///
     /// `build_commit_delta` emits `None` while the in-commit producer is not
     /// running (deferred — see `run_identity_reconciliation`). Pythonizes to
     /// `None` / a dict, matching Python `CommitDelta.code_delta: dict | None`.

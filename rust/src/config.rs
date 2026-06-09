@@ -138,7 +138,7 @@ impl RawConfig {
         cfg.hashing
             .profiles
             .entry("structure".to_string())
-            .or_insert_with(HashProfileCfg::default);
+            .or_default();
 
         Ok(cfg)
     }
@@ -200,6 +200,8 @@ impl Default for HashProfileCfg {
 }
 
 impl HashProfileCfg {
+    /// Whether this profile equals the default hash policy. Test-only.
+    #[cfg(test)]
     pub fn matches_hash_policy_default(&self) -> bool {
         let policy = HashPolicy::default();
         self.whitespace_insensitive == policy.ignore_whitespace
@@ -545,6 +547,7 @@ impl Default for WatcherCfg {
 ///     set; the optional refinement worker never runs.
 ///   * `method` — additionally run an async worker that *narrows* the coarse
 ///     set to method-level precision over a frozen snapshot.
+///
 /// `refinement` selects how the narrowing is computed when `precision = method`:
 ///   * `async` (default) — off the commit hot path, on a daemon worker.
 ///   * `sync` — inline in the post-commit hook (opt-in; pays per-occurrence
@@ -740,7 +743,7 @@ fn topo_order(raw: &RawConfig) -> Result<Vec<String>, ConfigError> {
 
     let mut ready: Vec<String> = incoming
         .iter()
-        .filter_map(|(name, count)| (*count == 0).then(|| name.clone()))
+        .filter(|&(_name, count)| *count == 0).map(|(name, _count)| name.clone())
         .collect();
     ready.sort();
 

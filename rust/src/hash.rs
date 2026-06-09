@@ -194,15 +194,6 @@ pub fn render_stmt(stmt: &Stmt, policy: &HashPolicy) -> NormalForm {
     NormalForm(renderer.out)
 }
 
-/// Render a whole module body to a canonical token stream, treating the body as
-/// a docstring-bearing scope (the module's leading string is a docstring).
-pub fn render_module(body: &[Stmt], policy: &HashPolicy) -> NormalForm {
-    let mut renderer = CanonicalRenderer::new(policy);
-    renderer.pending_doc_scope = true;
-    renderer.visit_body(body);
-    NormalForm(renderer.out)
-}
-
 /// Field/record separator between emitted tokens. Keeps adjacent tokens from
 /// merging (e.g. two consecutive identifiers) so the rendering is unambiguous.
 const SEP: char = '\u{1f}';

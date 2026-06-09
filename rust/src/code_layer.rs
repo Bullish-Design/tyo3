@@ -235,6 +235,10 @@ impl CodeLayer {
     /// maintained in-commit — deferred to Phase 4), this returns exactly the
     /// seeds, i.e. `changed ∪ deleted`. The transitive dependents light up once
     /// the layer is authoritative.
+    ///
+    /// Superseded for prod by `affected_closure_with_prev` (which handles the
+    /// deleted-seed subtlety); retained as a focused unit-test helper.
+    #[cfg(test)]
     pub fn affected_closure(&self, seeds: &BTreeSet<String>) -> BTreeSet<String> {
         let mut visited: BTreeSet<String> = BTreeSet::new();
         let mut queue: VecDeque<String> = seeds.iter().cloned().collect();
@@ -482,6 +486,9 @@ struct FileSymbols {
     symbols: Vec<SymbolDto>,
 }
 
+/// One range-cache entry sorted by span ascending: `(sl, sc, el, ec, durable_id)`.
+type RangeCacheEntry = (u32, u32, u32, u32, String);
+
 /// Mutable build state mirroring `CodeGraph`'s secondary indexes.
 struct Builder<'a> {
     state: &'a TyProjectState,
@@ -492,7 +499,7 @@ struct Builder<'a> {
     /// graph_file → durable_ids in insertion order (module first).
     file_to_nodes: HashMap<String, Vec<String>>,
     /// graph_file → range cache sorted by span ascending: (sl, sc, el, ec, did).
-    range_cache: HashMap<String, Vec<(u32, u32, u32, u32, String)>>,
+    range_cache: HashMap<String, Vec<RangeCacheEntry>>,
     /// The set of project (graph) file paths.
     project_files: HashSet<String>,
 }
@@ -700,14 +707,11 @@ impl<'a> Builder<'a> {
         let mut files: Vec<FileSymbols> = Vec::new();
         for graph_path in &dirty_existing {
             let native_path = current_native.get(graph_path).cloned().unwrap();
-            match compute_document_symbols(self.state, &native_path) {
-                Ok(symbols) => files.push(FileSymbols {
-                    graph_path: graph_path.clone(),
-                    native_path,
-                    symbols,
-                }),
-                Err(_) => {}
-            }
+            if let Ok(symbols) = compute_document_symbols(self.state, &native_path) { files.push(FileSymbols {
+                graph_path: graph_path.clone(),
+                native_path,
+                symbols,
+            }) }
         }
 
         // 5. Same pass structure as a full build, restricted to dirty files.
@@ -1138,7 +1142,7 @@ impl<'a> Builder<'a> {
 
     /// Pass I: all INHERITS edges. The supertype cursor sits on the class
     /// **name range** (`selection_range`), never the `class` keyword.
-    fn inherits_pass(&mut self, file: &str, native_file: &str, symbols: &[SymbolDto]) {
+    fn inherits_pass(&mut self, _file: &str, native_file: &str, symbols: &[SymbolDto]) {
         for symbol in symbols {
             if symbol.kind != SymbolKindDto::Class {
                 continue;
@@ -1327,7 +1331,7 @@ mod tests {
         );
         assert!(layer.remove_edge(&e));
         assert!(
-            layer.reverse_deps.get("B").is_none(),
+            !layer.reverse_deps.contains_key("B"),
             "removing the only dependency edge prunes the reverse-dep entry"
         );
     }
@@ -1436,7 +1440,7 @@ mod tests {
         (dir, state)
     }
 
-    fn edges_of_kind<'a>(layer: &'a CodeLayer, kind: EdgeKind) -> Vec<&'a Edge> {
+    fn edges_of_kind(layer: &CodeLayer, kind: EdgeKind) -> Vec<&Edge> {
         layer.edges.iter().filter(|e| e.kind == kind).collect()
     }
 
@@ -1500,7 +1504,7 @@ class User(Base):
         assert!(layer
             .reverse_deps
             .get(&base_did)
-            .map_or(false, |s| s.contains(&user_did)));
+            .is_some_and(|s| s.contains(&user_did)));
     }
 
     #[test]
