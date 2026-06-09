@@ -59,6 +59,21 @@ class Handlers:
 
     # ── Methods ────────────────────────────────────────────────────
 
+    def ping(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Liveness + version probe for ``:checkhealth`` — confirms the actor
+        is responsive and reports the engine version, head, and method table."""
+        from tyo3 import __version__
+
+        revision = self._actor.submit(lambda s: s.head)
+        return {
+            "ok": True,
+            "engine_version": __version__,
+            "root": str(self._root),
+            "session_id": self._session_id,
+            "revision": revision,
+            "methods": self.methods,
+        }
+
     def open(self, params: dict[str, Any]) -> dict[str, Any]:
         """Idempotent project open. The session is already opened and indexed by
         the actor; this returns its identity and current head."""
@@ -416,6 +431,7 @@ def _note_text(value: Any) -> str:
 # Method table — name → bound function. Defined after the class so the
 # functions resolve. Mirrors OVERVIEW.md §5.
 _METHODS = {
+    "ping": Handlers.ping,
     "open": Handlers.open,
     "sync_buffer": Handlers.sync_buffer,
     "entity_at": Handlers.entity_at,

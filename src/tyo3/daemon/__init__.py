@@ -15,11 +15,14 @@ from __future__ import annotations
 
 from tyo3.daemon.handlers import Handlers
 from tyo3.daemon.protocol import Request, parse_request
+from tyo3.daemon.server import DaemonServer, default_socket_path
 from tyo3.daemon.session_actor import SessionActor
 
 __all__ = [
     "Handlers",
     "Request",
     "parse_request",
+    "DaemonServer",
+    "default_socket_path",
     "SessionActor",
 ]
