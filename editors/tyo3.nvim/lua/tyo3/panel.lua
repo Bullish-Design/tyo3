@@ -130,14 +130,18 @@ end
 local function note_rows(card)
   local rows = {}
   for layer, rec in pairs(card.authored or {}) do
-    if layer ~= "docs" and rec.status == "present" then
+    if layer ~= "docs" and rec.status ~= "absent" then
       local val = rec.value
       if type(val) == "table" and val.note then
         val = val.note
       elseif type(val) == "table" then
         val = vim.json.encode(val)
       end
-      table.insert(rows, { text = "  🏷 " .. tostring(val) })
+      local text = "  🏷 " .. tostring(val)
+      if rec.status == "needs_review" then
+        text = text .. " ⚠"
+      end
+      table.insert(rows, { text = text })
     end
   end
   if #rows == 0 then
@@ -166,7 +170,7 @@ end
 local function summary_rows(card)
   local rows = {}
   for layer, rec in pairs(card.derived or {}) do
-    if rec.status == "present" then
+    if rec.status ~= "absent" and rec.status ~= "failed" then
       local art = rec.artifact
       if art ~= nil and art ~= vim.NIL then
         table.insert(rows, { text = ("  ⟢ %s: %s"):format(layer, tostring(art)) })
@@ -194,7 +198,7 @@ local function count_of(card, section)
   if section == "NOTES" then
     local n = 0
     for layer, rec in pairs(card.authored or {}) do
-      if layer ~= "docs" and rec.status == "present" then
+      if layer ~= "docs" and rec.status ~= "absent" then
         n = n + 1
       end
     end
@@ -202,7 +206,7 @@ local function count_of(card, section)
   elseif section == "SUMMARY" then
     local n = 0
     for _, rec in pairs(card.derived or {}) do
-      if rec.status == "present" and rec.artifact ~= nil and rec.artifact ~= vim.NIL then
+      if rec.status ~= "absent" and rec.status ~= "failed" and rec.artifact ~= nil and rec.artifact ~= vim.NIL then
         n = n + 1
       end
     end

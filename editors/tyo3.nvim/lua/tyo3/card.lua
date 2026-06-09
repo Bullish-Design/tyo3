@@ -112,16 +112,24 @@ function M.context_lines(card, width)
     add("  ▪ " .. where)
   end
 
-  -- Every authored layer with a present record (notes etc.), not just `intent`.
+  -- Every authored layer with a live record (notes etc.), not just `intent`.
+  -- Authored statuses are present|needs_review|orphaned|absent — render all but
+  -- `absent`, flagging needs_review so honest staleness is visible.
   for _, rec in pairs(card.authored or {}) do
-    if rec.status == "present" then
-      add("  🏷 " .. authored_value(rec))
+    if rec.status ~= "absent" then
+      local line = "  🏷 " .. authored_value(rec)
+      if rec.status == "needs_review" then
+        line = line .. " ⚠"
+      end
+      add(line)
     end
   end
 
-  -- Every derived layer with a present artifact (summary etc.), not just `summary`.
+  -- Every derived layer with an artifact (summary etc.), not just `summary`.
+  -- Derived statuses are fresh|stale|failed|absent — a fresh/stale artifact is
+  -- real and must render; only absent/failed are dropped.
   for _, rec in pairs(card.derived or {}) do
-    if rec.status == "present" then
+    if rec.status ~= "absent" and rec.status ~= "failed" then
       local art = derived_artifact(rec)
       if art then
         add("  ⟢ " .. art)
