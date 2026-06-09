@@ -329,6 +329,63 @@ impl PyTyProject {
         commit_dto_to_py(py, dto)
     }
 
+    /// Register a Python-side **authored** layer into the in-memory validated
+    /// config (the one native shim for `tyo3.extend`, AB1 §5).
+    ///
+    /// Inserts a synthesized `LayerCfg { origin: Authored, .. }` so the native
+    /// commit validator (`commit.rs` `authored_layer_config`) keeps owning
+    /// author validation for a layer declared *from Python code* instead of
+    /// `config.toml`. Config-only — it teaches Rust no new code semantics: an
+    /// authored layer carries no generator/store/derivation and is a
+    /// commit-validated sink.
+    ///
+    /// Invariants:
+    /// - **Idempotent** — re-registering an existing authored layer is a no-op.
+    /// - **Rejects type collisions** — a name already declared as a *non*-authored
+    ///   (derived) layer is an error; Rust stays the sole validator.
+    /// - The name is appended to `topo_order` (if absent) so the Python config
+    ///   projection — which builds its layer table from `topo_order` membership —
+    ///   sees the registered authored layer. An authored layer has no
+    ///   dependents, so appending cannot create a cycle.
+    fn register_authored_layer(
+        &self,
+        name: &str,
+        history: bool,
+        review_on_change: bool,
+    ) -> PyResult<()> {
+        let mut guard = lock_state(&self.inner, "register_authored_layer")?;
+        let head = guard.as_mut().unwrap();
+        if let Some(existing) = head.config.raw.layers.get(name) {
+            if !matches!(existing.origin, config::LayerOrigin::Authored) {
+                return Err(PyConfigError::new_err(format!(
+                    "'{name}' is already declared as a non-authored layer"
+                )));
+            }
+            return Ok(()); // already an authored layer — idempotent.
+        }
+        head.config.raw.layers.insert(
+            name.to_string(),
+            config::LayerCfg {
+                origin: config::LayerOrigin::Authored,
+                depends_on: vec![],
+                generator: None,
+                generator_version: None,
+                hash_profile: None,
+                store: None,
+                serving: config::ServingMode::Stale,
+                recompute: config::RecomputeMode::Lazy,
+                key_locality: None,
+                entity_kinds: vec![],
+                history,
+                review_on_change,
+            },
+        );
+        if !head.config.topo_order.iter().any(|n| n == name) {
+            head.config.topo_order.push(name.to_string());
+        }
+        Ok(())
+    }
+
     /// Ingest a disk change for `path`: drop any overlay for it and re-read disk.
     fn sync_path<'py>(&self, py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyAny>> {
         let dto = {

@@ -38,10 +38,19 @@ class DerivationDAG:
 
     @classmethod
     def from_session(cls, session: TyO3Session) -> DerivationDAG:
-        """Build the DAG from a session's validated config."""
+        """Build the DAG from a session's **effective** layer table.
+
+        Iterates ``session.effective_layers`` (native config ∪ registered-derived
+        layers, AB1 §4) in topological order. A native config-declared derived
+        layer resolves its store/generator through ``config.stores``/
+        ``config.generators`` (the existing path); a layer registered via
+        ``tyo3.extend.register_layer`` resolves its store/producer from the spec
+        objects (or the ``_STORES``/``_GENERATORS`` registries)."""
         from tyo3.derive.generators import make_generator
+        from tyo3.extend import _LAYERS, DerivedLayerSpec, resolve_generator, resolve_store
 
         config = session.config
+        effective = getattr(session, "effective_layers", None) or config.layers
         sidecar = getattr(session, "_sidecar", None)
         # Snapshot doesn't have _sidecar; use root-based sidecar.
         if sidecar is None:
@@ -50,45 +59,55 @@ class DerivationDAG:
             root = getattr(session, "root", getattr(session, "_root", None))
             sidecar = Sidecar(str(root)) if root else None
 
-        if not config.topo_order:
+        # Topo order: the native order plus registered-derived additions, locally
+        # toposorted so ``iter_layers`` still yields in dependency order.
+        topo = _effective_topo_order(config.topo_order, effective)
+        if not topo:
             return cls([], [])
 
         layers: list[DerivedLayer] = []
-        for name in config.topo_order:
+        for name in topo:
             if name == "code":
                 continue
-            if name not in config.layers:
+            if name not in effective:
                 continue
-            layer_cfg = config.layers[name]
+            layer_cfg = effective[name]
             # Skip authored layers — they are sinks.
             if layer_cfg.origin == "authored":
                 continue
 
-            # Build the store.
-            store_name = layer_cfg.store
-            if store_name and store_name in config.stores:
-                store_cfg = config.stores[store_name]
-                store = open_store(store_cfg, sidecar, layer=name)
-            else:
-                # Fall back: fs store under cache/<name>
+            spec = _LAYERS.get(name)
+            if isinstance(spec, DerivedLayerSpec) and name not in config.layers:
+                # Registered layer: resolve store/producer from the spec objects.
                 if sidecar is None:
-                    raise ValueError(f"Cannot resolve store for layer '{name}'")
-                from tyo3.stores.fs import FsStore
+                    raise ValueError(f"Cannot resolve store for registered layer '{name}'")
+                store = resolve_store(spec.store, sidecar, layer=name)
+                generator = resolve_generator(spec.produce, name=name)
+            else:
+                # Native config-declared derived layer (the existing path).
+                store_name = layer_cfg.store
+                if store_name and store_name in config.stores:
+                    store_cfg = config.stores[store_name]
+                    store = open_store(store_cfg, sidecar, layer=name)
+                else:
+                    # Fall back: fs store under cache/<name>
+                    if sidecar is None:
+                        raise ValueError(f"Cannot resolve store for layer '{name}'")
+                    from tyo3.stores.fs import FsStore
 
-                store = FsStore(sidecar.cache_dir(name))
+                    store = FsStore(sidecar.cache_dir(name))
 
-            # Build the generator.
-            gen_name = layer_cfg.generator
-            gen_cfg = config.generators.get(gen_name) if gen_name else None
-            if gen_cfg is None:
-                raise ValueError(f"Layer '{name}' has no generator config")
-            generator = make_generator(gen_cfg, name=name)
+                gen_name = layer_cfg.generator
+                gen_cfg = config.generators.get(gen_name) if gen_name else None
+                if gen_cfg is None:
+                    raise ValueError(f"Layer '{name}' has no generator config")
+                generator = make_generator(gen_cfg, name=name)
 
             layer = DerivedLayer.from_config(layer_cfg, store, generator)
             layer.name = name
             layers.append(layer)
 
-        return cls(layers, list(config.topo_order))
+        return cls(layers, topo)
 
     @property
     def is_empty(self) -> bool:
@@ -312,6 +331,38 @@ class DerivationDAG:
             dep_hash = node.content_hashes.get(hash_profile, "") if node else ""
             parts.append(f"{dep_id}={dep_hash}")
         return _hash_bytes("\x00".join(parts).encode("utf-8"))
+
+
+def _effective_topo_order(native_topo: tuple[str, ...], effective: dict) -> list[str]:
+    """Native topo order extended with registered-derived layer names.
+
+    The native ``topo_order`` already orders config-declared layers (and the
+    registered *authored* layers the native shim appended). Registered *derived*
+    layers are not in it, so they are appended after a local Kahn toposort keyed
+    on their ``depends_on`` — deps already in the native order (or ``code``) are
+    treated as satisfied. Preserves dependency order so ``iter_layers`` is
+    correct."""
+    topo = list(native_topo)
+    placed = set(topo) | {"code"}
+    pending = [n for n in effective if n not in placed]
+    progress = True
+    while pending and progress:
+        progress = False
+        still: list[str] = []
+        for name in pending:
+            deps = effective[name].depends_on
+            if all(d in placed for d in deps):
+                topo.append(name)
+                placed.add(name)
+                progress = True
+            else:
+                still.append(name)
+        pending = still
+    # Any layer whose deps never resolved (declared on a missing/cyclic upstream)
+    # is appended last so it is still visited; resolve_input will surface the
+    # real error at read time rather than silently dropping the layer.
+    topo.extend(pending)
+    return topo
 
 
 def _hash_bytes(data: bytes) -> str:

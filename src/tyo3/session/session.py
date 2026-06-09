@@ -59,6 +59,12 @@ class TyO3Session(_ReadOps):
         if _native is None:
             raise ProjectOpenError("Rust native extension is not built. Run `devenv shell -- build` first.")
         root_str = str(root)
+        # Discovery runs strictly *before* open (AB1 §3): import every
+        # ``tyo3.plugins`` entry point once so registered specs are present
+        # before the native layer table freezes. Idempotent across sessions.
+        from tyo3.extend import _LAYERS, AuthoredLayerSpec, load_plugins
+
+        load_plugins()
         try:
             self._inner = _native.TyProject.open(root_str)
         except _NativeFormatVersionError as e:
@@ -67,7 +73,20 @@ class TyO3Session(_ReadOps):
             raise ConfigError(str(e)) from e
         except Exception as e:
             raise ProjectOpenError(f"Cannot open project at '{root_str}': {e}") from e
+        # Re-register each authored spec into the in-memory validated config via
+        # the one native shim — *before* reading ``config_json()``, so the
+        # registered authored layers ride the native projection (``snap.authored``,
+        # the ``layers`` verb, the card) with no second path (AB1 §5, load-bearing
+        # init order).
+        for spec in _LAYERS.values():
+            if isinstance(spec, AuthoredLayerSpec):
+                self._inner.register_authored_layer(spec.name, spec.history, spec.review_on_change)
         self._config = TyConfig.from_json(self._inner.config_json())
+        # The effective (native ∪ registered-derived) layer table — a thin
+        # ``LayerConfig`` projection the snapshot, DAG, and card loops consume
+        # (AB1 §4 / decision (b)). Rich per-spec metadata (schema/display/render)
+        # stays on the ``_LAYERS`` spec objects, looked up by name.
+        self._effective_layers = self._build_effective_layers()
         self._root = StdPath(root_str).resolve()
         self._closed = False
         self._head_snap: Any = None  # cached native head snapshot (current revision)
@@ -99,6 +118,50 @@ class TyO3Session(_ReadOps):
     @property
     def config(self) -> TyConfig:
         return self._config
+
+    @property
+    def effective_layers(self) -> dict:
+        """The merged layer table: native config layers ∪ registered-derived
+        layers, each a thin :class:`~tyo3.config.LayerConfig` (AB1 §4).
+
+        Registered *authored* layers already appear in ``config.layers`` (the
+        ``register_authored_layer`` shim ran before ``config_json()`` was read),
+        so the union is effectively native ∪ registered-derived; authored
+        registrations dedupe to the native projection."""
+        return self._effective_layers
+
+    def _build_effective_layers(self) -> dict:
+        from tyo3.config import LayerConfig
+        from tyo3.extend import _LAYERS, DerivedLayerSpec
+
+        eff: dict[str, LayerConfig] = dict(self._config.layers)
+        for name, spec in _LAYERS.items():
+            if name in eff:
+                # Native config wins on a name collision (authored registrations
+                # are already projected natively; a derived collision keeps the
+                # config-declared layer).
+                continue
+            if isinstance(spec, DerivedLayerSpec):
+                eff[name] = spec.to_layer_config()
+        return eff
+
+    def _display_for(self, layer: str) -> str:
+        """The editor display mode for *layer* (QW5 / decision (b)).
+
+        ``spec.display`` if the layer is registered, else a name heuristic:
+        ``intent`` → ``inline-note``, ``summary`` → ``inline-summary``, else
+        ``panel``. Rich per-spec metadata lives on the ``_LAYERS`` spec objects,
+        never on the thin ``LayerConfig`` projection."""
+        from tyo3.extend import _LAYERS
+
+        spec = _LAYERS.get(layer)
+        if spec is not None:
+            return spec.display
+        if layer == "intent":
+            return "inline-note"
+        if layer == "summary":
+            return "inline-summary"
+        return "panel"
 
     @property
     def head(self) -> int:
@@ -328,6 +391,7 @@ class TyO3Session(_ReadOps):
             native_snapshot,
             root=self._root,
             config=self._config,
+            layers=self._effective_layers,
             head_graph_getter=self._head_graph_or_none,
             derivation_getter=self._get_derivation,
         )

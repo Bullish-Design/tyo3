@@ -51,16 +51,19 @@ class Generator(Protocol):
 
 
 def make_generator(gen_cfg: GeneratorConfig, /, *, name: str = "") -> Generator:
-    """Dispatch to the right generator implementation based on config type."""
+    """Dispatch to the registered generator factory for ``gen_cfg.type``.
+
+    The built-in ``python``/``command``/``http`` types self-register their
+    factories at this module's import time (below). A custom type registered via
+    ``tyo3.extend.register_generator`` resolves here with no edit to this
+    function (AB1). An unknown type raises ``ValueError``."""
+    from tyo3.extend import _GENERATORS
+
     gen_type = gen_cfg.type or "python"
-    if gen_type == "python":
-        return PythonGenerator(gen_cfg, name=name)
-    elif gen_type == "command":
-        return CommandGenerator(gen_cfg, name=name)
-    elif gen_type == "http":
-        return HttpGenerator(gen_cfg, name=name)
-    else:
+    factory = _GENERATORS.get(gen_type)
+    if factory is None:
         raise ValueError(f"Unknown generator type: {gen_type}")
+    return factory(gen_cfg, name=name)
 
 
 # ── Python generator ────────────────────────────────────────────────────
@@ -263,3 +266,35 @@ class HttpGenerator:
                 )
 
         return all_results
+
+
+# ── Built-in generator factories (self-register into tyo3.extend) ────────────
+#
+# Seeded into the ``_GENERATORS`` registry at *this module's* import time, so
+# ``tyo3.extend`` carries no import-time dependency on this module (no cycle —
+# AB1_DESIGN_NOTE.md §2). Each factory is ``(cfg, *, name="") -> Generator`` so
+# ``make_generator``'s signature is unchanged.
+
+
+def _python_factory(cfg: GeneratorConfig, *, name: str = "") -> Generator:
+    return PythonGenerator(cfg, name=name)
+
+
+def _command_factory(cfg: GeneratorConfig, *, name: str = "") -> Generator:
+    return CommandGenerator(cfg, name=name)
+
+
+def _http_factory(cfg: GeneratorConfig, *, name: str = "") -> Generator:
+    return HttpGenerator(cfg, name=name)
+
+
+def _register_builtins() -> None:
+    from tyo3.extend import register_generator
+
+    for _type, _factory in (("python", _python_factory), ("command", _command_factory), ("http", _http_factory)):
+        # ``override=True`` keeps re-import idempotent (e.g. test reloads) without
+        # the dup-raise that protects *user* registrations.
+        register_generator(_type, _factory, override=True)
+
+
+_register_builtins()

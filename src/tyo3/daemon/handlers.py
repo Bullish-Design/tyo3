@@ -144,7 +144,7 @@ class Handlers:
             if did is None:
                 return None
             with s.snapshot() as snap:
-                return self._entity_dict(s, snap, did, s.config)
+                return self._entity_dict(s, snap, did, s.effective_layers)
 
         return self._actor.submit(work)
 
@@ -466,10 +466,13 @@ class Handlers:
                     "review_on_change": c.review_on_change,
                     "serving": c.serving,
                     "key_locality": c.key_locality,
-                    # ``display`` lands in QW5/AB1; default to the panel until then.
-                    "display": getattr(c, "display", "panel"),
+                    # ``display`` (QW5/AB1): registered spec's display, else a
+                    # name heuristic (intent→inline-note, summary→inline-summary).
+                    "display": s._display_for(name),
                 }
-                for name, c in s.config.layers.items()
+                # The effective table (native ∪ registered) so a registered layer
+                # is discoverable through the same verb (AB1).
+                for name, c in s.effective_layers.items()
             ]
             out.sort(key=lambda d: d["name"])
             return {"layers": out}
@@ -501,13 +504,14 @@ class Handlers:
 
     # ── Internal joins ─────────────────────────────────────────────
 
-    def _entity_dict(self, s: TyO3Session, snap: Snapshot, did: str, config: Any) -> dict[str, Any]:
+    def _entity_dict(self, s: TyO3Session, snap: Snapshot, did: str, layers: dict[str, Any]) -> dict[str, Any]:
         """The full per-entity card used by ``entity_at`` (and the inspector).
 
         Reads every *layer* off the one *snap* (a pinned :class:`Snapshot`) so
         the cross-layer join reflects a single revision (QW4). Identity
         (``locate``) is a live-registry read on the session, not the snapshot.
-        ``config`` carries the open-fixed layer table (not snapshot-versioned)."""
+        ``layers`` is the open-fixed **effective** table (native ∪ registered),
+        so a registered layer rides the card with no further wiring (AB1)."""
         node = _node_by_id(snap.graph(), did)
         card: dict[str, Any] = {
             "durable_id": did,
@@ -526,7 +530,7 @@ class Handlers:
             )
         # Authored records (every authored layer that has a record).
         authored: dict[str, Any] = {}
-        for lname, lcfg in config.layers.items():
+        for lname, lcfg in layers.items():
             if lcfg.origin != "authored":
                 continue
             av = snap.authored(lname, did)
@@ -535,7 +539,7 @@ class Handlers:
         card["authored"] = authored
         # Derived artifacts (every derived layer that applies to this kind).
         derived: dict[str, Any] = {}
-        for lname, lcfg in config.layers.items():
+        for lname, lcfg in layers.items():
             if lcfg.origin != "derived":
                 continue
             if node is not None and lcfg.entity_kinds and node.kind.value not in lcfg.entity_kinds:
@@ -550,18 +554,33 @@ class Handlers:
         return card
 
     def _note_layer(self, s: TyO3Session) -> str | None:
-        """The authored layer to read inline notes from: prefer ``intent``."""
-        authored = [n for n, c in s.config.layers.items() if c.origin == "authored"]
-        if not authored:
-            return None
-        return "intent" if "intent" in authored else authored[0]
+        """The authored layer to render as an inline note (QW5).
+
+        Picks the first authored layer whose ``display`` is ``inline-note``
+        (a registered spec's declared display, or the ``intent`` name heuristic),
+        so a registered layer opts into inline extmarks declaratively — no
+        hardcoded ``intent``."""
+        candidates = [
+            n
+            for n, c in s.effective_layers.items()
+            if c.origin == "authored" and s._display_for(n) == "inline-note"
+        ]
+        if candidates:
+            return "intent" if "intent" in candidates else sorted(candidates)[0]
+        return None
 
     def _summary_layer(self, s: TyO3Session) -> str | None:
-        """The derived layer to read inline summaries from: prefer ``summary``."""
-        derived = [n for n, c in s.config.layers.items() if c.origin == "derived"]
-        if not derived:
-            return None
-        return "summary" if "summary" in derived else derived[0]
+        """The derived layer to render as an inline summary (QW5).
+
+        Picks the first derived layer whose ``display`` is ``inline-summary``."""
+        candidates = [
+            n
+            for n, c in s.effective_layers.items()
+            if c.origin == "derived" and s._display_for(n) == "inline-summary"
+        ]
+        if candidates:
+            return "summary" if "summary" in candidates else sorted(candidates)[0]
+        return None
 
     def _read_note(self, snap: Snapshot, layer: str, did: str) -> str | None:
         av = snap.authored(layer, did)

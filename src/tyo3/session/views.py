@@ -88,6 +88,7 @@ class Snapshot(_ReadOps):
         *,
         root: StdPath,
         config: TyConfig | None = None,
+        layers: dict | None = None,
         head_graph_getter: Any | None = None,
         derivation_getter: Any | None = None,
     ) -> None:
@@ -95,6 +96,10 @@ class Snapshot(_ReadOps):
         self._closed = False
         self._root = root
         self._config = config
+        # The effective layer table (native ∪ registered-derived). Falls back to
+        # the native config layers when not supplied, so a Snapshot built without
+        # an effective table (e.g. directly in a test) still resolves layers.
+        self._effective_layers: dict = layers if layers is not None else (dict(config.layers) if config else {})
         self._head_graph_getter = head_graph_getter
         self._derivation_getter = derivation_getter
         self._graph: Any = None
@@ -129,9 +134,9 @@ class Snapshot(_ReadOps):
             return self.code
         if name in self._layer_views:
             return self._layer_views[name]
-        if self._config is None:
-            raise KeyError(f"No config available — cannot resolve layer '{name}'")
-        layer_cfg = self._config.layers.get(name)
+        # Resolve against the effective table (native ∪ registered-derived), so a
+        # registered layer rides ``snap.layer(...)`` reads with no further change.
+        layer_cfg = self._effective_layers.get(name)
         if layer_cfg is None:
             raise KeyError(f"Layer '{name}' is not declared in config")
         if layer_cfg.origin == "derived":
