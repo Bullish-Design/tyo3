@@ -299,6 +299,145 @@ class Handlers:
 
         return self._actor.submit(work)
 
+    # ── Navigation / analysis (the convert/ read surface) ──────────
+    # These expose the already-built ``_ReadOps`` methods (read_ops.py) over
+    # the wire. They are *reads only* — each runs on the actor over the
+    # session's frozen head snapshot (golden rules #2/#3). Per Spike C, the
+    # cheap-reverse data (references, diagnostics) is served **live**, never
+    # cached as a layer.
+
+    def references(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Find all references to the symbol at *(path, line, col)* (1-based).
+
+        Returns the call sites/usages — the "find callers" surface (Spike E)."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        include_decl = params.get("include_declaration", True)
+        if not isinstance(include_decl, bool):
+            raise ProtocolError("'include_declaration' must be a boolean", code=INVALID_PARAMS)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            return {
+                "references": [
+                    {"path": str(r.path), "range": _range_dict(r.range), "kind": r.kind.value}
+                    for r in s.find_references(rel, line, col, include_decl)
+                ]
+            }
+
+        return self._actor.submit(work)
+
+    def document_highlights(self, params: dict[str, Any]) -> dict[str, Any]:
+        """In-file occurrences of the symbol at *(path, line, col)* (1-based)."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            return {
+                "highlights": [
+                    {"path": str(r.path), "range": _range_dict(r.range), "kind": r.kind.value}
+                    for r in s.document_highlights(rel, line, col)
+                ]
+            }
+
+        return self._actor.submit(work)
+
+    def hover(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Hover (type/signature/docstring) for the symbol at *(path, line, col)*."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any] | None:
+            h = s.hover(rel, line, col)
+            return h.model_dump(mode="json") if h is not None else None
+
+        return self._actor.submit(work)
+
+    def type_hierarchy(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Type hierarchy (supertypes/subtypes) for the class at *(path, line, col)*."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any] | None:
+            th = s.type_hierarchy(rel, line, col)
+            return th.model_dump(mode="json") if th is not None else None
+
+        return self._actor.submit(work)
+
+    def can_rename(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Is the symbol at *(path, line, col)* renameable? Returns the editable range."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            rng = s.can_rename(rel, line, col)
+            return {
+                "can_rename": rng is not None,
+                "range": _range_dict(rng) if rng is not None else None,
+            }
+
+        return self._actor.submit(work)
+
+    def rename(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Compute the workspace edit to rename the symbol at *(path, line, col)*.
+
+        Returns ``{new_name, changes}`` where ``changes`` is
+        ``{path: [{range, new_text}]}`` — the LSP-shaped edit the editor applies.
+        This is the *read* (edit-computing) surface; it does **not** rebind
+        identity (that is AB8). Positions are 1-based on the wire."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        new_name = _require(params, "new_name", str)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any] | None:
+            edit = s.rename(rel, line, col, new_name)
+            if edit is None:
+                return None
+            changes: dict[str, list[dict[str, Any]]] = {}
+            for e in edit.edits:
+                changes.setdefault(str(e.path), []).append(
+                    {"range": _range_dict(e.range), "new_text": edit.new_name}
+                )
+            return {"new_name": edit.new_name, "changes": changes}
+
+        return self._actor.submit(work)
+
+    def diagnostics_at(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Diagnostics from ``check_file`` whose range contains *(line, col)*.
+
+        Cheap-reverse → served **live** (Spike C taxonomy); never cached."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            result = s.check_file(rel)
+            hits = [
+                {
+                    "message": d.message,
+                    "severity": d.severity.value,
+                    "code": d.code,
+                    "range": _range_dict(d.range),
+                }
+                for d in result.diagnostics
+                if d.range is not None and _range_contains(d.range, line, col)
+            ]
+            return {"diagnostics": hits, "count": len(hits)}
+
+        return self._actor.submit(work)
+
     # ── Internal joins ─────────────────────────────────────────────
 
     def _entity_dict(self, s: TyO3Session, did: str) -> dict[str, Any]:
@@ -406,6 +545,13 @@ def _range_dict(rng: Any) -> dict[str, Any]:
     }
 
 
+def _range_contains(rng: Any, line: int, col: int) -> bool:
+    """Does *rng* (1-based, inclusive) contain the position *(line, col)*?"""
+    start = (rng.start.line, rng.start.column)
+    end = (rng.end.line, rng.end.column)
+    return start <= (line, col) <= end
+
+
 def _commit_delta_dict(delta: Any) -> dict[str, Any]:
     """Project a ``CommitDelta`` to the wire shape (id-level, JSON-able)."""
     return {
@@ -468,4 +614,11 @@ _METHODS = {
     "reindex": Handlers.reindex,
     "gc": Handlers.gc,
     "check": Handlers.check,
+    "references": Handlers.references,
+    "document_highlights": Handlers.document_highlights,
+    "hover": Handlers.hover,
+    "type_hierarchy": Handlers.type_hierarchy,
+    "can_rename": Handlers.can_rename,
+    "rename": Handlers.rename,
+    "diagnostics_at": Handlers.diagnostics_at,
 }

@@ -48,7 +48,41 @@ local function author_note(card, src_buf)
   end)
 end
 
+-- Resolve a project-relative posix path to an absolute path for this buffer.
+local function abspath(src_buf, file)
+  if file:sub(1, 1) == "/" then
+    return file
+  end
+  local root = require("tyo3").root_for_buf(src_buf)
+  if root then
+    return root:gsub("/$", "") .. "/" .. file
+  end
+  return file
+end
+
+-- Open *file* at the 1-based *(line, col)* in a non-panel window.
+local function jump_to(src_buf, file, line, col)
+  local abs = abspath(src_buf, file)
+  local target = code_win()
+  if target then
+    vim.api.nvim_set_current_win(target)
+  end
+  vim.cmd("edit " .. vim.fn.fnameescape(abs))
+  if line then
+    -- nvim_win_set_cursor: row 1-based, col 0-based.
+    pcall(vim.api.nvim_win_set_cursor, 0, { line, math.max((col or 1) - 1, 0) })
+  end
+end
+
+-- Jump to the entity's own definition. The card already carries the exact
+-- file + range (resolved on the frozen snapshot), so we jump precisely — no
+-- regex search. Falls back to `locate` only when the card lacks a range.
 local function goto_def(card, src_buf)
+  local rng = card.range
+  if card.file and card.file ~= vim.NIL and rng and rng ~= vim.NIL then
+    jump_to(src_buf, card.file, rng.start.line, rng.start.column)
+    return
+  end
   require("tyo3").rpc(src_buf, "locate", { durable_id = card.durable_id }, function(err, res)
     if err or not res or not res.location or res.location == vim.NIL then
       notify("could not locate entity", vim.log.levels.WARN)
@@ -56,22 +90,48 @@ local function goto_def(card, src_buf)
     end
     local loc = res.location
     local file = loc:match("^(.-)::") or loc
-    local root = require("tyo3").root_for_buf(src_buf)
-    local abs = file
-    if root and file:sub(1, 1) ~= "/" then
-      abs = root:gsub("/$", "") .. "/" .. file
-    end
-    local target = code_win()
-    if target then
-      vim.api.nvim_set_current_win(target)
-    end
-    vim.cmd("edit " .. vim.fn.fnameescape(abs))
-    local name = loc:match("::([^:]+)$")
-    if name then
-      local bare = name:match("([^.]+)$") or name
-      vim.fn.search("\\<" .. vim.fn.escape(bare, "\\") .. "\\>", "w")
-    end
+    jump_to(src_buf, file)
   end)
+end
+
+-- Find callers (references) of the entity and drop them into the quickfix list.
+local function find_callers(card, src_buf)
+  local rng = card.range
+  if not (card.file and card.file ~= vim.NIL and rng and rng ~= vim.NIL) then
+    notify("entity has no resolved position to query references", vim.log.levels.WARN)
+    return
+  end
+  require("tyo3").rpc(
+    src_buf,
+    "references",
+    { path = card.file, line = rng.start.line, col = rng.start.column },
+    function(err, res)
+      if err then
+        notify("references failed: " .. (err.message or "error"), vim.log.levels.ERROR)
+        return
+      end
+      local refs = (res and res.references) or {}
+      local items = {}
+      for _, r in ipairs(refs) do
+        table.insert(items, {
+          filename = abspath(src_buf, r.path),
+          lnum = r.range.start.line,
+          col = r.range.start.column,
+          text = ("%s reference to %s"):format(r.kind or "?", card.name or card.durable_id),
+        })
+      end
+      if #items == 0 then
+        notify("no references found", vim.log.levels.INFO)
+        return
+      end
+      vim.fn.setqflist({}, " ", { title = "TyO3 callers: " .. (card.name or card.durable_id), items = items })
+      local target = code_win()
+      if target then
+        vim.api.nvim_set_current_win(target)
+      end
+      vim.cmd("copen")
+    end
+  )
 end
 
 --- The action list for a card (nil → only the entity-independent tools).
@@ -83,6 +143,7 @@ function M.list(card)
     table.insert(items, { label = "📝 Author intent note", run = author_note })
     table.insert(items, { label = "📄 Write / edit doc", run = function(c, sb) require("tyo3.entitydoc").edit_card(c, sb) end })
     table.insert(items, { label = "↪ Go to definition", run = goto_def })
+    table.insert(items, { label = "📞 Find callers (references)", run = find_callers })
   end
   table.insert(items, { label = "🌐 Affected set (picker)", run = function(_, _) require("tyo3.telescope").affected() end })
   return items
