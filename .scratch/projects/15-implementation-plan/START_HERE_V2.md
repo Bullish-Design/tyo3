@@ -21,9 +21,12 @@ you before you open any phase guide. Read it fully, then read in this order:
 - **Commit `aceabf6` landed an *interim* bus** (`Delta.from_commit_delta` with an
   Option-B transitive bridge over the materialised head graph). This is a stopgap;
   **Phase 7 deletes it.** Do not build on it.
-- **The next work is Phase 6** — the scoped in-commit code-layer producer. This is
-  the keystone that was deferred three times; building it ends the deferral
-  snowball and makes `affected_ids` transitive at the source.
+- **✅ COMPLETE (2026-06-08): the spine refactor (V2) is done.** All of Phases
+  6–14 landed; all ten §6.3 deviations closed; all five gate commands clean
+  (`ruff check`, `ruff format --check`, `cargo clippy --all-targets -- -D
+  warnings`, `cargo test`, `pytest -q`); `test_final_acceptance.py` proves the
+  whole story end to end. See PROGRESS §9.14. Nothing below is "next work" — it
+  is the historical record of how the refactor was sequenced.
 
 ## The numbering caveat (avoid a costly mix-up)
 

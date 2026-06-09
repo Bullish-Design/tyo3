@@ -201,9 +201,17 @@ open; config + sidecar tests green.
 
 ---
 
-## Phase 14 — Zero warnings, typing, hygiene + end-to-end acceptance
+## Phase 14 — Zero warnings, typing, hygiene + end-to-end acceptance ✅ **DONE** (2026-06-08)
 
 **Goal:** the codebase is clean and the whole story is proven end to end.
+
+> **LANDED — the spine refactor (V2) is complete.** All five gate commands clean
+> (`ruff check`, `ruff format --check`, `cargo clippy --all-targets -- -D
+> warnings`, `cargo test`, `pytest -q`). Lints to zero via real per-finding
+> decisions (delete dead code / `cfg(test)`-gate test-only helpers / narrow
+> `#[allow]` with reasons); F821/F841 resolved (several were genuine missing
+> assertions, now added); `test_final_acceptance.py` proves the whole story and
+> is wired into the `test-final` gate. See PROGRESS §9.14.
 
 - **14.1** Rust warnings to zero; `clippy --all-targets -- -D warnings` in the gate.
 - **14.2** Reduce untyped values; typed models for native payloads; factories for

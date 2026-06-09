@@ -736,6 +736,102 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 
 ---
 
+### §9.14 — V2 Phase 14: zero warnings + end-to-end acceptance ✅ **DONE** (2026-06-08)
+
+> **The closing gate of the whole spine refactor.** Two distinct kinds of work,
+> kept separate: **behaviour-preserving hygiene** (14.1–14.3) and the **one new
+> behaviour-asserting test** (14.4). The refactor is now **complete**.
+>
+> **Going-in lint baseline (measured post-13.3).**
+>   - Python: `ruff check src` → **113 errors** (78 auto-fixable); `ruff format
+>     --check` → **56 files** would reformat.
+>   - Rust: `cargo clippy --all-targets` → **61 lib + 75 lib-test warnings**
+>     (~14 + dupes unique) + 2 build-script.
+>   - **After:** all five gate commands clean (`ruff check`, `ruff format
+>     --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`,
+>     `pytest -q`).
+>
+> **14.1 — zero Rust warnings (decisions, not a blind `--fix`).** `cargo clippy
+> --fix` cleared the mechanical class (needless-borrow ×13, `map_or`, redundant
+> closures, manual `strip_prefix` in `build.rs`). The autofix **mis-fired** by
+> stripping `Document` (used only under `cfg(test)`) and the `sync::*` glob — fixed
+> by hand: deleted the genuinely-dead `dto/sync.rs` (`SyncResultDto`, superseded by
+> `commit_delta`) and `#[cfg(test)]`-gated the test-only `Document` re-export. The
+> ~20 **dead-code** findings were each classified by grepping real call sites
+> (the lib target flags test-only items as "never used"): **deleted** truly-dead
+> code (`render_module`, `gen_with`, `is_frozen`, `has_overlay`, `bump_revision`,
+> `disk_read_counter`, `forget_virtual` + `Change::ForgetVirtual`, `DurableId::as_str`,
+> `Reconciliation::{moved,minted,struct_binds}`, `sidecar::{cache_dir,ensure_dir}`,
+> `AuthoredStore::len`, `content::lookup`→test-only); **`#[cfg(test)]`-gated**
+> test-only helpers (`build_head`, `affected_closure`, `matches_hash_policy_default`,
+> `IdentityRegistry::len`, `apply_disk_batch`, `apply_overlay_batch`, `sidecar::history_dir`);
+> and **`#[allow(dead_code)]` + one-line reason** for documented model surface
+> consumed only by tests (`Document::{hash,version}` + fields, the ContentStore
+> single-change vocabulary, `Change::Forget`, `Entity` range fields,
+> `assert_consistent`'s debug-build design). Fixed an orphaned doc block (Phase-13
+> split left the HEAD-build doc above `load_authored_records`; moved it to
+> `build_head_with_config`). `too_many_arguments` ×6 → narrow per-fn
+> `#[allow(clippy::too_many_arguments)]` with honest reasons (PyO3 `#[pymethod]`
+> signatures are the Python-facing API; the DTO assembler; the recursive
+> symbol/entity walks — the latter noted as a context-struct follow-up). `type
+> RangeCacheEntry` alias for the complex-type lint; doc-lazy-continuation fixed
+> with blank `///` separators. The `clippy` script already enforced `--all-targets
+> -- -D warnings` (the deny-gate).
+>
+> **14.2 — typing.** Resolved the six `F821` undefined-name findings (real
+> type-checker gaps, not runtime bugs): `Generator`/`Delta` via `TYPE_CHECKING`
+> imports; `Optional[str]` modernised to `str | None` (no import needed).
+>
+> **14.3 — exception hygiene.** The bulk of session/`read_ops` handlers already
+> use the compliant `except … as e: raise <DomainError>` form. The silent
+> swallows in the read-surface / derived-diff / precision / bus / session core
+> were narrowed to a typed absence or given a **justifying comment** (the
+> `view`/`diff`/`refiner`/`queries`/`diagnostics`/`session` graceful-degradation
+> guards; the Gate-8 eviction test now swallows only the typed
+> `RevisionEvictedError`). The **22 `F841`** findings were judged per case (not a
+> sweep): the `sync = s.edit(...)` parity bindings were incidental (the
+> `_apply_and_assert` helper is the assertion) → dropped; but several were genuine
+> **missing assertions** and got real teeth — `test_gate7` now asserts head
+> advances and that the **live snapshot graph equals an independent rebuild**;
+> `test_gate2` two tests that set up scenarios with **no assertions** now verify
+> id-persistence-across-reopen and the relocated entity resolves; `test_gate6`
+> asserts the pinned snapshot's revision is frozen.
+>
+> **14.4 — the end-to-end acceptance test** (`test_final_acceptance.py`, new; wired
+> into the `test-final` gate). One deterministic project driven through its whole
+> lifecycle (open → author → pin → read → edit → move → delete → diff → subscribe
+> → refine → close/reopen → cache-bust), asserting the V2 story:
+>   - same revision ⇒ same content; **durable ids survive a cosmetic edit and an
+>     atomic move**; a **content hash changes only on a meaningful edit**;
+>   - **`affected_ids` is the transitive container-granular closure** — a
+>     base-class method edit reports the subclass (`Circle`) **and** the importers
+>     (`use_area`/`use_circle`); a strict superset of the seeds, never seeds-only;
+>   - the **local** derived layer does **not** recompute on a dependency-only
+>     change (same key, artifact reused, generator not called) while the
+>     **semantic** layer **does** (dependency-fingerprint key changes → fresh
+>     generator invocation);
+>   - authored intent present, survives **close/reopen**; identity survives reopen;
+>   - the **bus delta is ordered and id-level**; with `precision = method` a
+>     **refinement narrows** the coarse set (drops the name-only user) on the
+>     **refinement channel**, same revision;
+>   - the snapshot **diff agrees with an independent rebuild** (parity oracle,
+>     structural tier); **no read accessor advanced head**; the derived **cache
+>     bust forces a recompute**; and **no source file was modified on disk**.
+>   Determinism: fixed content + whitespace-insensitive structure profile ⇒
+>   reproducible hashes; ids are asserted **relationally** (resolved by name per
+>   revision), never as literal ULID strings. Stable across repeated runs (the
+>   async refinement polls with a generous timeout).
+>
+> **Final gate (2026-06-08).** `ruff check src` → **All checks passed**; `ruff
+> format --check src` → **128 files already formatted**; `cargo clippy
+> --all-targets -- -D warnings` → **clean**; `cargo test` → **green**; full
+> `pytest -q --no-cov` → **green**. **The spine refactor (V2) is complete** — all
+> ten §6.3 deviations closed, all eight Concept-§9 exit criteria hold, lints at
+> zero, and the acceptance suite proves the whole story.
+> [[phase13-monolith-split-done]] [[phase14-acceptance-done]] [[spine-refactor-v2-plan]]
+
+---
+
 ## 1. The six defects this refactor removes (from §6.3 of the Concept)
 
 | # | Defect | Status |
@@ -744,10 +840,10 @@ in-commit *scoped driver*, not new machinery.** ✅ **Landed** — see §9.6 bel
 | 2 | Transaction split across the lock boundary (Rust lock released before Python graph delta + bus) | ✅ **DONE** (Phase 5 in-lock stage→publish-last→rollback; Phase 6 closed the bus/post-commit-path half: one `_after_commit` hook, id-level deltas in asserted revision order, non-blocking bus) |
 | 3 | Read accessor performs a write (`session.graph` → `sync_all` → advances head) | ✅ **Phase 4 DONE** |
 | 4 | Delta is path-shaped not id-level (`SyncResultDto` has file-path strings, not `DurableId`s) | ✅ **Phase 3 DONE** |
-| 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | 🔴 **V2 Phase 8** |
+| 5 | Derived invalidation is silently inert (fed path-shaped values, opens snapshot it never closes) | ✅ **V2 Phase 8 DONE** (one affected-driven invalidation loop, id-level, per-layer key locality folded into `resolve_input`; one pinned snapshot) |
 | 6 | One write path forgets to publish (`discard` applies graph delta but never publishes to bus) | ✅ **DONE** (the single `_after_commit` hook makes "publish every revision" true by construction) |
 | 7 | Convenience reads return views over closed snapshots (`session.code`, `.layer`, `.entity`) | ✅ **V2 Phase 11 DONE** (`_OwnedView` owns/pins the snapshot; eager `entity`/`diff` materialise-then-close; floating-latest `graph()` non-canonical; layer views stop swallowing read failures) |
-| 8 | Hashing is text-heuristic not AST-canonical (collapses whitespace inside string literals) | 🔴 **V2 Phase 10** |
+| 8 | Hashing is text-heuristic not AST-canonical (collapses whitespace inside string literals) | ✅ **V2 Phase 10 DONE** (AST-canonical content hashing; container-subsumes-members invariant tested) |
 | 9 | Config parsed twice with silent fallback (Python re-reads config.toml, swallows errors) | ✅ **V2 Phase 12 DONE** (`_read_coordination_config` deleted; coordination read from the one validated native config via `TyConfig.coordination`; invalid overflow/precision/refinement fails loudly at open) |
 | 10 | Three central files are monoliths (`project.rs`, `session.py`, `graph/graph.py`) | ✅ **V2 Phase 13 DONE** (`project.rs` → `project/` submodules; `session.py` → `session/` package; `graph/graph.py` → `projection.py` + four mixins — behaviour-preserving, public surface unchanged) |
 
