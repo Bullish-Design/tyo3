@@ -1,6 +1,6 @@
 [project]
 name = "tyo3"
-version = "0.2.0"
+version = "0.3.0"
 description = "TyO3: Python semantic engine powered by ty/Ruff"
 readme = "README.md"
 requires-python = ">=3.13"
