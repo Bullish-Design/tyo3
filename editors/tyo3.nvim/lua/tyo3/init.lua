@@ -96,6 +96,10 @@ function M.on_buf_enter(bufnr)
   if config.get().lsp then
     require("tyo3.lsp").attach(bufnr, root)
   end
+  -- Seed layer-state diagnostics once on open (refreshed thereafter off the bus).
+  if config.layer_diagnostics_enabled() then
+    require("tyo3.lsp").refresh_layer_diagnostics(bufnr, root)
+  end
 end
 
 --- TextChanged / TextChangedI: debounce, then commit the buffer as the overlay.
@@ -143,6 +147,20 @@ end
 
 -- ── Notification routing (from the bus pump) ────────────────────────────────
 
+-- Refresh layer-state diagnostics on every loaded buffer of *root* (gated by the
+-- layer_diagnostics flag). Mirrors the decorate fan-out loop.
+local function refresh_layer_diags_for_root(root)
+  if not config.layer_diagnostics_enabled() then
+    return
+  end
+  local lsp = require("tyo3.lsp")
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr) and M.root_for_buf(bufnr) == root then
+      lsp.refresh_layer_diagnostics(bufnr, root)
+    end
+  end
+end
+
 function M.handle_notification(root, method, params)
   if method == "delta" then
     require("tyo3.panel").on_delta(root, params)
@@ -153,6 +171,14 @@ function M.handle_notification(root, method, params)
         require("tyo3.decorate").apply(bufnr)
       end
     end
+    -- Push type-checker diagnostics for the touched files so they refresh on
+    -- edit without the editor polling (server→client publishDiagnostics).
+    if config.get().lsp then
+      local touched = params.touched_files or params.affected_files
+      require("tyo3.lsp").publish_diagnostics(root, touched)
+    end
+    -- A structural edit can flip authored notes to needs_review.
+    refresh_layer_diags_for_root(root)
   elseif method == "derived" then
     -- A slow `serving="stale"` layer's value became fresh off the actor (AB3):
     -- re-pull the card (if the panel is on that entity) and re-decorate every
@@ -163,8 +189,10 @@ function M.handle_notification(root, method, params)
         require("tyo3.decorate").apply(bufnr)
       end
     end
+    refresh_layer_diags_for_root(root)
   elseif method == "refinement" then
     require("tyo3.panel").on_refinement(root, params)
+    refresh_layer_diags_for_root(root)
   end
 end
 

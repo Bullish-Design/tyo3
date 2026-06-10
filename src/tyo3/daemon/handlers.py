@@ -340,6 +340,30 @@ class Handlers:
 
         return self._actor.submit(work)
 
+    def definition(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Goto-definition for the symbol at *(path, line, col)* (1-based).
+
+        Returns the definition target(s) — the ``gd``/``grd`` surface. Like
+        ``references``, navigation verbs hand back **absolute** paths."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            return {
+                "definitions": [
+                    {
+                        "path": str(t.path),
+                        "range": _range_dict(t.range),
+                        "selection_range": _range_dict(t.selection_range) if t.selection_range else None,
+                    }
+                    for t in s.goto_definition(rel, line, col)
+                ]
+            }
+
+        return self._actor.submit(work)
+
     def document_highlights(self, params: dict[str, Any]) -> dict[str, Any]:
         """In-file occurrences of the symbol at *(path, line, col)* (1-based)."""
         path = _require(params, "path", str)
@@ -506,6 +530,45 @@ class Handlers:
                 if with_values:
                     result["values"] = {did: _layer_value(view, did) for did in ids}
                 return result
+
+        return self._actor.submit(work)
+
+    # ── Layer state (durable-identity review concepts) ─────────────
+
+    def review_state(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Join ``needs_review`` / ``orphaned`` ids with their graph node ranges.
+
+        The durable-identity concepts that have no LSP vocabulary; the editor
+        surfaces them as a dedicated ``vim.diagnostic`` namespace (``]d``/Trouble
+        for free). ``needs_review``/``orphaned`` are live-registry reads; the
+        ranges come from the pinned snapshot graph — one snapshot for the join
+        (golden rule #2). Optional ``path`` scopes to one file."""
+        path = params.get("path")
+        rel = self._relpath(path) if isinstance(path, str) else None
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            flagged = [(i, "needs_review") for i in s.needs_review()] + [
+                (i, "orphaned") for i in s.orphaned()
+            ]
+            items: list[dict[str, Any]] = []
+            with s.snapshot() as snap:
+                g = snap.graph()
+                for did, state in flagged:
+                    node = _node_by_id(g, did)
+                    if node is None:
+                        continue
+                    if rel is not None and node.file != rel:
+                        continue
+                    items.append(
+                        {
+                            "durable_id": did,
+                            "name": node.name,
+                            "path": node.file,
+                            "range": _range_dict(node.range),
+                            "state": state,
+                        }
+                    )
+            return {"items": items}
 
         return self._actor.submit(work)
 
@@ -720,6 +783,7 @@ _METHODS = {
     "gc": Handlers.gc,
     "check": Handlers.check,
     "references": Handlers.references,
+    "definition": Handlers.definition,
     "document_highlights": Handlers.document_highlights,
     "hover": Handlers.hover,
     "type_hierarchy": Handlers.type_hierarchy,
@@ -728,6 +792,7 @@ _METHODS = {
     "diagnostics_at": Handlers.diagnostics_at,
     "layers": Handlers.layers,
     "layer_ids": Handlers.layer_ids,
+    "review_state": Handlers.review_state,
 }
 
 # Verbs handled at the server (DaemonServer._handle_line), not through the shared

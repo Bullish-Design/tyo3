@@ -423,3 +423,81 @@ def test_diagnostics_at_returns_filtered_shape(handlers):
 def test_layer_discovery_verbs_registered(handlers):
     for m in ("layers", "layer_ids"):
         assert m in handlers.methods
+
+
+# ── definition (goto-definition) ──────────────────────────────────────────────
+
+
+def test_definition_resolves_usage_to_def(handlers):
+    """``definition`` on the ``usd`` call site in store.py resolves to its
+    definition in money.py — the goto-definition surface (Phase 2)."""
+    _, line, col = _checkout_position(handlers)
+    # Find a `usd(` usage line inside checkout; aim at the name token.
+    store = (handlers._root / "store.py").read_text().splitlines()
+    target = next(
+        (i, ln.index("usd") + 1)
+        for i, ln in enumerate(store, start=1)
+        if "usd(" in ln and "import" not in ln
+    )
+    res = handlers.definition({"path": "store.py", "line": target[0], "col": target[1]})
+    defs = res["definitions"]
+    assert defs, "at least one definition target"
+    assert any(d["path"].endswith("money.py") for d in defs), [d["path"] for d in defs]
+    for d in defs:
+        assert "range" in d and "start" in d["range"]
+        assert d["range"]["start"]["line"] >= 1
+
+
+def test_definition_requires_position(handlers):
+    with pytest.raises(ProtocolError) as e:
+        handlers.definition({"path": "store.py", "line": 1})
+    assert e.value.code == INVALID_PARAMS
+
+
+def test_definition_registered(handlers):
+    assert "definition" in handlers.methods
+
+
+# ── review_state (layer-state diagnostics) ────────────────────────────────────
+
+
+def test_review_state_empty_on_clean_project(handlers):
+    """Nothing authored + edited yet → no flagged ids, well-shaped result."""
+    res = handlers.review_state({})
+    assert res["items"] == []
+
+
+def test_review_state_flags_needs_review_after_body_edit(handlers, ids):
+    """Author an ``intent`` note (review_on_change=true), then edit the entity
+    body → the id is flagged ``needs_review`` and joined with its node range."""
+    legacy_id = ids["legacy_helper"]
+    handlers.author({"layer": "intent", "durable_id": legacy_id, "value": {"note": "watch me"}})
+    # A meaningful body edit flips the authored record to needs_review.
+    handlers.sync_buffer(
+        {"path": "legacy.py", "text": "def legacy_helper(x: int) -> int:\n    return x + 100\n"}
+    )
+    res = handlers.review_state({})
+    by_id = {it["durable_id"]: it for it in res["items"]}
+    assert legacy_id in by_id, [it["durable_id"] for it in res["items"]]
+    item = by_id[legacy_id]
+    assert item["state"] == "needs_review"
+    assert item["name"] == "legacy_helper"
+    assert item["path"] == "legacy.py"
+    assert item["range"]["start"]["line"] >= 1
+
+
+def test_review_state_scopes_to_path(handlers, ids):
+    """The optional ``path`` filter restricts the join to one file."""
+    legacy_id = ids["legacy_helper"]
+    handlers.author({"layer": "intent", "durable_id": legacy_id, "value": {"note": "watch"}})
+    handlers.sync_buffer(
+        {"path": "legacy.py", "text": "def legacy_helper(x: int) -> int:\n    return x + 100\n"}
+    )
+    # Scoped to a different file → no items; scoped to legacy.py → the id.
+    assert handlers.review_state({"path": "store.py"})["items"] == []
+    scoped = handlers.review_state({"path": "legacy.py"})["items"]
+    assert any(it["durable_id"] == legacy_id for it in scoped)
+
+
+def test_review_state_registered(handlers):
+    assert "review_state" in handlers.methods
