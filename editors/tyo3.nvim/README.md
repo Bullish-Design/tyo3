@@ -112,6 +112,7 @@ require("tyo3").setup({ daemon_cmd = { "python", "-m", "tyo3.daemon" } })
 | `panel` | `"auto"` | Side dock: `"auto"` (open on first delta), `"always"`, `"off"`. |
 | `context` | `"off"` | Cursor-driven CONTEXT tracking: `"cursor"` updates the dock from the entity under the cursor, or `"off"`. |
 | `context_debounce_ms` | `150` | Pause before a cursor-context lookup fires. |
+| `lsp` | `false` | Opt-in **native LSP bridge** — run an in-process `vim.lsp` server that forwards hover / references / documentHighlight / rename / pull-diagnostics to the daemon, so your own `K`, `grr`, `]d`, Trouble, and LSP pickers drive tyo3. See [Native LSP bridge](#native-lsp-bridge). |
 | `daemon_cmd` | `nil` | Launch command. `nil` ⇒ auto-detect `tyo3-daemon`, else `python -m tyo3.daemon`. |
 | `root_markers` | `{".tyo3","pyproject.toml",".git"}` | Upward search for the project root. |
 | `overseer` | `false` | Enable the optional overseer.nvim ops integration. |
@@ -122,6 +123,7 @@ require("tyo3").setup({ daemon_cmd = { "python", "-m", "tyo3.daemon" } })
 |---|---|
 | `:TyO3Inspect` | Floating inspector for the entity under the cursor. |
 | `:TyO3Context` | Toggle cursor-driven CONTEXT tracking in the side dock. |
+| `:TyO3Lsp` | Toggle the native LSP bridge (`vim.lsp` / `vim.diagnostic` over the daemon). |
 | `:TyO3Note [text]` | Author an intent note on the entity under the cursor (prompts if no text). |
 | `:TyO3Doc` | Write/edit a markdown doc for the entity under the cursor — glued to its identity. |
 | `:TyO3Docs` | Open the documentation (user guides + developer/architecture). |
@@ -144,6 +146,40 @@ expands a pane, `<CR>` activates a line (run an action, open/write a doc), and
 `gd` opens the pane's reference doc. The `DOCS` pane shows the entity's authored
 markdown doc (durably linked by identity — it rides edits and moves) and links to
 the guides below. See the recorded tour: [`demo/context/context.gif`](demo/context/context.gif).
+
+## Native LSP bridge
+
+> **Prototype, opt-in.** `setup{ lsp = true }`. Additive — the bespoke UI
+> (panel · inspector · decorations · pickers) is unchanged whether it's on or off.
+
+With `lsp = true` the plugin attaches an **in-process** `vim.lsp` server (no extra
+process, no socket of its own) that forwards a slice of the daemon's verbs to
+Neovim's native machinery. The win is that tyo3's code intelligence rides *your*
+existing config and plugins for free:
+
+| You press / plugin | LSP method | Daemon verb |
+|---|---|---|
+| `K` (hover) | `textDocument/hover` | `hover` |
+| `grr` / references picker (fzf-lua, snacks, telescope, Trouble) | `textDocument/references` | `references` |
+| document highlight (cursorhold) | `textDocument/documentHighlight` | `document_highlights` |
+| `grn` (rename) | `textDocument/prepareRename` + `textDocument/rename` | `can_rename` + `rename` |
+| `]d` / `[d`, `vim.diagnostic`, lualine, Trouble | `textDocument/diagnostic` (pull) | `check` |
+
+The server advertises `positionEncoding = "utf-32"` (the daemon's columns are
+Unicode codepoints) and only the capabilities it implements. One server is shared
+per project root (`vim.lsp.start` dedupes by `{name, root_dir}`). Buffer text is
+still synced to the daemon by the plugin's own `BufEnter` / debounced
+`TextChanged` path, so the LSP `did*` notifications are no-ops; a request issued
+inside the debounce window can read slightly stale state until the next sync.
+
+Toggle at runtime with `:TyO3Lsp`. `:checkhealth tyo3` reports whether the bridge
+is enabled and a client is attached.
+
+**Not yet bridged (follow-ups):** goto-definition (needs a daemon `definition`
+verb), `type_hierarchy` → LSP type-hierarchy, surfacing spine **layer state**
+(`needs_review` / `stale` / derived `computing`) as a `vim.diagnostic` namespace so
+`]d` / Trouble navigate it, push diagnostics on bus deltas (vs the pull model), and
+non-ASCII position-encoding correctness.
 
 ## Documentation
 
@@ -233,7 +269,10 @@ config so the recording is identical on any machine.
     -c "luafile editors/tyo3.nvim/tests/smoke.lua"
   ```
 
-  It exits non-zero on any failed check.
+  It exits non-zero on any failed check. Companion specs drive the cursor-context
+  dock (`tests/context.lua`) and the native LSP bridge (`tests/lsp.lua`, which
+  attaches the in-process server and round-trips hover / references /
+  documentHighlight / rename / pull-diagnostics through `vim.lsp.buf_request_sync`).
 
 ## License
 

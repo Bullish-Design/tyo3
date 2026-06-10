@@ -90,6 +90,12 @@ function M.on_buf_enter(bufnr)
       end)
     end)
   end, function(_) end)
+  -- Opt-in: attach the native LSP bridge (additive; idempotent via lsp.start
+  -- dedupe). Independent of the open/sync chain above — the in-process server
+  -- resolves the daemon client lazily on its first request.
+  if config.get().lsp then
+    require("tyo3.lsp").attach(bufnr, root)
+  end
 end
 
 --- TextChanged / TextChangedI: debounce, then commit the buffer as the overlay.

@@ -20,6 +20,11 @@ M.defaults = {
   -- Cursor-context section in the panel: "cursor" (auto-update from the entity
   -- under the cursor) or "off". Default off so existing behaviour is unchanged.
   context = "off",
+  -- Opt-in native LSP bridge: run an in-process `vim.lsp` server that forwards
+  -- hover / references / documentHighlight / rename / pull-diagnostics to the
+  -- daemon, so the user's own `K`/`grr`/`]d`/Trouble/pickers drive tyo3. Default
+  -- off; the bespoke UI is unchanged either way. See lua/tyo3/lsp.lua.
+  lsp = false,
   -- Debounce (ms) before the cursor-context lookup fires.
   context_debounce_ms = 150,
   -- Command used to launch the daemon. nil ⇒ auto-detect `tyo3-daemon`, else
