@@ -80,40 +80,40 @@ Sleep 3500ms
 # ── Scene 6: panes are collapsible — separation you control ──
 Ctrl+W
 Type "l"
-Sleep 800ms
+Sleep 1800ms
 Type "/SUMMARY" Enter
-Sleep 600ms
+Sleep 1600ms
 Tab
 Sleep 1500ms
 Type "/ACTIONS" Enter
-Sleep 400ms
+Sleep 1400ms
 Tab
 Sleep 1500ms
 Tab
-Sleep 800ms
+Sleep 1800ms
 Ctrl+W
 Type "h"
-Sleep 800ms
+Sleep 1800ms
 
 # ── Scene 7: the docs link to BOTH user and developer guides ──
 Type ":TyO3Docs" Enter
-Sleep 1200ms
+Sleep 2200ms
 Type "1" Enter
 Sleep 3500ms
 Type "q"
-Sleep 800ms
+Sleep 1800ms
 Type ":TyO3Docs" Enter
-Sleep 1200ms
+Sleep 2200ms
 Type "3" Enter
 Sleep 3500ms
 Type "q"
-Sleep 800ms
+Sleep 1800ms
 
 # ── Scene 8: live blast radius + async precision refinement (AFFECTED pane) ──
 Type ":e money.py" Enter
 Sleep 1500ms
 Type "/100" Enter
-Sleep 600ms
+Sleep 1600ms
 Type "ciw1000"
 Escape
 Type ":w" Enter
