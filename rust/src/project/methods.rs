@@ -749,14 +749,21 @@ impl PyTyProject {
         Ok(head.registry.get(&id).map(|a| a.qualified_path.clone()))
     }
 
-    /// List DurableIds currently flagged as NeedsReview.
+    /// List DurableIds whose body now differs from the hash captured when their
+    /// note was authored — the durable, level-triggered `needs_review` set.
+    ///
+    /// This is NOT the transient registry `NeedsReview` status (an edge signal
+    /// that auto-clears on the next reconcile); it survives saves, same-file
+    /// edits, and restart, and unflags on revert. See
+    /// `commit::needs_review_ids`.
     fn needs_review(&self) -> PyResult<Vec<String>> {
         let guard = lock_state(&self.inner, "needs_review")?;
         let head = guard.as_ref().unwrap();
-        Ok(head.registry.iter()
-            .filter(|a| a.status == crate::identity::IdentityStatus::NeedsReview)
-            .map(|a| a.id.0.clone())
-            .collect())
+        Ok(crate::project::commit::needs_review_ids(
+            &head.config,
+            &head.authored,
+            &head.registry,
+        ))
     }
 
     /// List DurableIds currently flagged as Orphaned.

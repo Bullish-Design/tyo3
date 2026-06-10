@@ -12,7 +12,15 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-pub const AUTHORED_FORMAT_VERSION: u32 = 1;
+use crate::hash::ContentHash;
+
+/// On-disk format version for authored records.
+///
+/// v2 adds `AuthoredVersion::reviewed_hash` — the entity's content hash at
+/// author time, which anchors durable (level) review-state. v1 records load
+/// with `reviewed_hash = None` (`#[serde(default)]`); `from_bytes` rejects only
+/// *newer* versions, so v1 stays loadable.
+pub const AUTHORED_FORMAT_VERSION: u32 = 2;
 
 // ── On-disk record format ──────────────────────────────────────────────
 
@@ -23,6 +31,43 @@ pub struct AuthoredVersion {
     pub value: serde_json::Value,
     /// The application revision this version was written at.
     pub revision: u64,
+    /// The entity's registry content hash at the moment this version was
+    /// authored — the baseline durable review-state compares against. `None`
+    /// for v1 records loaded from disk (treated as "not flagged"), or when the
+    /// id had no anchor at author time. Serialised as a fixed-width hex string.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_content_hash_hex")]
+    pub reviewed_hash: Option<ContentHash>,
+}
+
+/// Serde adapter: `Option<ContentHash>` ⇄ an optional 32-char hex string, so
+/// the 128-bit hash round-trips as a stable, human-diffable token (not a giant
+/// JSON number). Matches the registry's own hex convention for content hashes.
+mod opt_content_hash_hex {
+    use super::ContentHash;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        value: &Option<ContentHash>,
+        ser: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(h) => ser.serialize_some(&format!("{:032x}", h.0)),
+            None => ser.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        de: D,
+    ) -> Result<Option<ContentHash>, D::Error> {
+        let opt = Option::<String>::deserialize(de)?;
+        match opt {
+            Some(s) => {
+                let v = u128::from_str_radix(&s, 16).map_err(serde::de::Error::custom)?;
+                Ok(Some(ContentHash(v)))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 /// The on-disk document for one (layer, durable_id) authored record.
@@ -196,6 +241,7 @@ mod tests {
         AuthoredVersion {
             value: val,
             revision: rev,
+            reviewed_hash: None,
         }
     }
 
@@ -203,6 +249,7 @@ mod tests {
         AuthoredVersion {
             value: serde_json::Value::String(val.to_string()),
             revision: rev,
+            reviewed_hash: None,
         }
     }
 
@@ -230,7 +277,7 @@ mod tests {
         let doc = make_doc("intent", "01ABC", value.clone(), 1, vec![]);
         let bytes = doc.to_bytes().unwrap();
         let doc2 = AuthoredRecordDoc::from_bytes(&bytes).unwrap();
-        assert_eq!(doc2.format_version, 1);
+        assert_eq!(doc2.format_version, AUTHORED_FORMAT_VERSION);
         assert_eq!(doc2.layer, "intent");
         assert_eq!(doc2.durable_id, "01ABC");
         assert_eq!(doc2.current.value, value);
@@ -256,12 +303,49 @@ mod tests {
 
     #[test]
     fn format_version_error() {
-        let doc_str = r#"{"format_version":2,"layer":"intent","durable_id":"01ABC","current":{"value":"v","revision":1},"history":[]}"#;
+        // A *newer* version than we support is rejected (v3 here; v2 is current).
+        let doc_str = r#"{"format_version":3,"layer":"intent","durable_id":"01ABC","current":{"value":"v","revision":1},"history":[]}"#;
         let result = AuthoredRecordDoc::from_bytes(doc_str.as_bytes());
         assert!(result.is_err());
         let err = result.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("unknown") || msg.contains("2") || msg.contains("format"));
+        assert!(msg.contains("unknown") || msg.contains("3") || msg.contains("format"));
+    }
+
+    #[test]
+    fn v1_record_loads_with_no_reviewed_hash() {
+        // A v1 record on disk has no `reviewed_hash` field; it must still load,
+        // defaulting the new field to None (migration: legacy notes start
+        // unflagged until the next author re-stamps the baseline).
+        let doc_str = r#"{"format_version":1,"layer":"intent","durable_id":"01ABC","current":{"value":"v","revision":1},"history":[]}"#;
+        let doc = AuthoredRecordDoc::from_bytes(doc_str.as_bytes()).unwrap();
+        assert_eq!(doc.format_version, 1);
+        assert_eq!(doc.current.reviewed_hash, None);
+    }
+
+    #[test]
+    fn reviewed_hash_round_trips_as_hex() {
+        // A v2 record with a reviewed_hash serialises it as a hex string and
+        // reloads it byte-for-byte (no data loss across save → load).
+        let version = AuthoredVersion {
+            value: serde_json::json!({"note": "n"}),
+            revision: 4,
+            reviewed_hash: Some(ContentHash(0xdead_beef_u128)),
+        };
+        let doc = AuthoredRecordDoc {
+            format_version: AUTHORED_FORMAT_VERSION,
+            layer: "intent".to_string(),
+            durable_id: "01ABC".to_string(),
+            current: version,
+            history: vec![],
+        };
+        let bytes = doc.to_bytes().unwrap();
+        // Stored as a hex token, not a raw u128 number.
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("000000000000000000000000deadbeef"), "{text}");
+        let doc2 = AuthoredRecordDoc::from_bytes(&bytes).unwrap();
+        assert_eq!(doc2.format_version, 2);
+        assert_eq!(doc2.current.reviewed_hash, Some(ContentHash(0xdead_beef_u128)));
     }
 
     #[test]

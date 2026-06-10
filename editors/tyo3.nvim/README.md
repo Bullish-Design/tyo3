@@ -175,12 +175,26 @@ concepts that have no LSP vocabulary — into a dedicated `vim.diagnostic` names
 daemon's `review_state` verb and refreshed off the bus (`delta` / `derived` /
 `refinement`). Controlled by `layer_diagnostics` (defaults to following `lsp`).
 
+`needs_review` is **durable level state**: a note on a `review_on_change` layer
+flags when the entity's body differs from the body as it was when the note was
+authored (the engine stamps that hash at author time). So the WARN survives a
+save, survives editing a *different* function in the same file, survives an
+editor restart, **clears when you revert the body** to the reviewed bytes, and
+**clears when you re-author the note** (re-authoring is the "I reviewed this"
+acknowledge action). This is distinct from the per-commit *edge* signal on the
+bus delta (`needs_review` = "a noted entity changed in *this* commit"), which the
+plugin only uses as a refresh trigger — it always re-queries `review_state` for
+the authoritative level set.
+
 The server advertises `positionEncoding = "utf-32"` (the daemon's columns are
 Unicode codepoints) and only the capabilities it implements. One server is shared
 per project root (`vim.lsp.start` dedupes by `{name, root_dir}`). Buffer text is
 still synced to the daemon by the plugin's own `BufEnter` / debounced
 `TextChanged` path, so the LSP `did*` notifications are no-ops; a request issued
-inside the debounce window can read slightly stale state until the next sync.
+inside the debounce window can read slightly stale state until the next sync. The
+write path dedupes on a per-buffer content hash, so the debounced `TextChanged`
+sync and the `BufWritePost` sync of identical bytes commit only once (no
+redundant re-reconcile on every `:w`).
 
 Toggle at runtime with `:TyO3Lsp`. `:checkhealth tyo3` reports whether the bridge
 is enabled and a client is attached.
