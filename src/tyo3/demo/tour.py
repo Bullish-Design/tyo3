@@ -35,6 +35,7 @@ from tyo3.demo.cli import bold, cyan, dim, green, red
 
 SUMMARY_CALLS: list[str] = []
 EMBED_CALLS: list[str] = []
+BLURB_CALLS: list[str] = []
 
 
 def summary_generator(inputs):
@@ -45,6 +46,22 @@ def summary_generator(inputs):
 def embedding_generator(inputs):
     EMBED_CALLS.extend(i.durable_id for i in inputs)
     return [f"vec[dim={len(i.source or '')}]" for i in inputs]
+
+
+def blurb_generator(inputs):
+    """A *deliberately slow* class-summary producer (the LLM/HTTP stand-in).
+
+    The ``blurb`` layer is ``serving="stale"``: a read serves last-good/``absent``
+    immediately and hands this slow produce to the off-actor recompute worker, so
+    the cursor path never blocks on the ~1.5s call. When it finishes the daemon
+    emits a ``derived`` notification and the editor swaps the card in place
+    (stale → fresh). The sleep is tuned so the pop-in is clearly visible in the
+    recording without dragging."""
+    import time
+
+    time.sleep(1.5)  # simulate an LLM / HTTP / embedding round-trip
+    BLURB_CALLS.extend(i.durable_id for i in inputs)
+    return [f"blurb<{(i.source or '').splitlines()[0].strip()}>" for i in inputs]
 
 
 # ── The fixed synthetic project ─────────────────────────────────────────────
@@ -145,6 +162,22 @@ serving = "block"
 key_locality = "semantic"
 entity_kinds = ["function"]
 
+# A *slow* derived layer over classes (an LLM/HTTP-style class blurb). ``serving
+# = "stale"`` makes it serve last-good/absent immediately and recompute off the
+# actor (AB3) — the read never blocks. Scoped to ``class`` so it rides only the
+# class header card (the function-keyed cards the other scenes inspect stay
+# deterministic), giving the demo one clean place to show the stale→fresh pop-in.
+[layers.blurb]
+origin = "derived"
+depends_on = ["code"]
+generator = "blurb_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv_blurb"
+serving = "stale"
+key_locality = "local"
+entity_kinds = ["class"]
+
 [generators.summary_gen]
 type = "python"
 callable = "tyo3.demo.tour:summary_generator"
@@ -153,6 +186,10 @@ callable = "tyo3.demo.tour:summary_generator"
 type = "python"
 callable = "tyo3.demo.tour:embedding_generator"
 
+[generators.blurb_gen]
+type = "python"
+callable = "tyo3.demo.tour:blurb_generator"
+
 [stores.kv_summary]
 backend = "fs"
 path = "cache/summary"
@@ -160,6 +197,10 @@ path = "cache/summary"
 [stores.kv_embed]
 backend = "fs"
 path = "cache/embed"
+
+[stores.kv_blurb]
+backend = "fs"
+path = "cache/blurb"
 """
 
 

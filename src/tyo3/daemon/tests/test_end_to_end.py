@@ -220,6 +220,49 @@ def test_full_flow_over_socket(daemon: _SocketClient):
     assert entry["note"] == "money shot"
 
 
+def test_derived_notification_arrives_over_socket(daemon: _SocketClient):
+    """AB3: a slow ``serving="stale"`` layer serves promptly, recomputes off the
+    actor, and a ``derived`` notification crosses the wire when it is fresh.
+
+    The shop config's ``blurb`` layer (scoped to ``class``) has a ~1.5s producer.
+    Reading it must not block the actor: the first read returns ``absent``/``stale``
+    far under the producer sleep, the off-actor worker finishes and the daemon
+    pushes a ``derived`` notification, and a re-pull then returns ``fresh``."""
+    daemon.request("open", {"root": "."})
+
+    # Resolve the ``Item`` *class* id (blurb is class-scoped; the wire kind for a
+    # class is ``"class_"`` — the SymbolKind enum value).
+    deco = daemon.request("decorate", {"path": "catalog.py"})
+    item = next(d for d in deco if d["name"] == "Item" and d["kind"] == "class_")
+    item_id = item["durable_id"]
+
+    # ── First read must NOT block on the 1.5s producer ───────────────────
+    t0 = time.monotonic()
+    first = daemon.request("derived", {"layer": "blurb", "durable_id": item_id}, timeout=5.0)
+    elapsed = time.monotonic() - t0
+    assert first["status"] in ("absent", "stale"), first
+    assert first["artifact"] is None
+    assert elapsed < 1.0, f"derived read blocked on the slow producer ({elapsed:.2f}s)"
+
+    # ── Actor-not-blocked: a fast request returns while the producer sleeps ──
+    t1 = time.monotonic()
+    assert daemon.request("ping", timeout=2.0)["ok"] is True
+    assert time.monotonic() - t1 < 1.0, "a fast request queued behind the slow produce"
+
+    # ── The off-actor worker finished → a `derived` notification crosses the wire ──
+    note = daemon.wait_notification(
+        "derived",
+        lambda p: p["layer"] == "blurb" and p["durable_id"] == item_id,
+        timeout=10.0,
+    )
+    assert note["params"]["durable_id"] == item_id
+
+    # ── Re-pull → now fresh with the produced artifact ───────────────────
+    fresh = daemon.request("derived", {"layer": "blurb", "durable_id": item_id}, timeout=5.0)
+    assert fresh["status"] == "fresh", fresh
+    assert fresh["artifact"].startswith("blurb<"), fresh
+
+
 def test_per_connection_subscription_filters_deltas(shop_project: Path, tmp_path: Path):
     """AB7: each connection has its own ``Interest``; a ``subscribe`` RPC sets it.
 

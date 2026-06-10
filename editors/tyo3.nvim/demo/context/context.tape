@@ -33,6 +33,23 @@ Sleep 6s
 Type "/def checkout" Enter
 Sleep 3500ms
 
+# ── Async beat: a slow derived layer never blocks the cursor (AB3) ──
+# The `blurb` layer is serving="stale" with a ~1.5s producer (an LLM/HTTP stand-
+# in), scoped to classes. Land on the `Item` class header: the read is served
+# instantly and the SUMMARY pane shows `blurb: computing…` — the cursor path
+# never blocks. The produce runs off the actor; when it finishes the daemon
+# pushes a `derived` notification and the card swaps *in place* to the fresh
+# value. Sleeps are generous and wait past the producer + the push.
+Type ":e catalog.py" Enter
+Sleep 1500ms
+Type "/class Item" Enter
+Sleep 2000ms
+Sleep 2500ms
+Type ":e store.py" Enter
+Sleep 1200ms
+Type "/def checkout" Enter
+Sleep 2000ms
+
 # ── Scene 2: author durable intent (NOTES pane) ──
 Type ":TyO3Note load-bearing checkout path" Enter
 Sleep 1500ms

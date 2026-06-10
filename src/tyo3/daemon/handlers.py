@@ -549,11 +549,17 @@ class Handlers:
         for lname, lcfg in layers.items():
             if lcfg.origin != "derived":
                 continue
-            if node is not None and lcfg.entity_kinds and node.kind.value not in lcfg.entity_kinds:
+            if node is not None and lcfg.entity_kinds and not _kind_matches(node.kind.value, lcfg.entity_kinds):
                 continue
             dv = snap.derived(lname, did)
             if dv.status != "absent":
                 derived[lname] = {"artifact": _artifact_str(dv.artifact), "status": dv.status}
+            elif lcfg.serving == "stale":
+                # A slow ``serving="stale"`` layer with no value yet (AB3): the
+                # read above just handed an off-actor recompute to the worker, so
+                # surface it as ``computing`` — the ``derived`` notification will
+                # swap it to ``fresh`` and the editor re-pulls this card in place.
+                derived[lname] = {"artifact": None, "status": "computing"}
         card["derived"] = derived
         # Last revision whose affected closure included this id (best-effort).
         if self._tracker is not None:
@@ -627,6 +633,18 @@ def _require(params: dict[str, Any], key: str, typ: type) -> Any:
     if not isinstance(val, typ):
         raise ProtocolError(f"'{key}' must be of type {typ.__name__}", code=INVALID_PARAMS)
     return val
+
+
+def _kind_matches(node_kind: str, entity_kinds: Any) -> bool:
+    """Does a graph node of *node_kind* fall under a layer's ``entity_kinds``?
+
+    The config's kind vocabulary (validated in Rust: ``module``/``class``/
+    ``function``/``method``/…) uses the bare names, but a few ``SymbolKind`` enum
+    values carry a trailing underscore to dodge Python keywords (``class`` →
+    ``"class_"``, ``import`` → ``"import_"``). Normalise that single suffix so a
+    config ``entity_kinds = ["class"]`` matches a ``class_`` node — otherwise a
+    class-scoped layer (e.g. the demo's ``blurb``) would silently never bind."""
+    return node_kind in entity_kinds or node_kind.removesuffix("_") in entity_kinds
 
 
 def _range_dict(rng: Any) -> dict[str, Any]:
