@@ -25,6 +25,13 @@ PY
 export TYO3_DEMO_DIR="${_base}/shop"
 export TYO3_PLUGIN_DIR="${_plugin}"
 
+# The `explain` code action's LLM seam, set to the curated *offline* backend so
+# the recording shows model-quality prose deterministically — no network, no key
+# (src/tyo3/demo/explanations.py). The daemon, spawned by nvim, inherits this.
+# A real install sets `TYO3_LLM=anthropic` + ANTHROPIC_API_KEY instead.
+export TYO3_LLM=callable
+export TYO3_LLM_CALLABLE=tyo3.demo.explanations:explain
+
 # Resolve a *pristine* nvim for the recording. The `nvim` on PATH here is a
 # Nix/home-manager wrapper that force-injects the user config dir (~/.dotfiles/
 # nvim and its after/ftplugin) onto the runtimepath EVEN under `--clean` and

@@ -38,6 +38,11 @@ local CAPS = {
   ["typeHierarchy/supertypes"] = true,
   ["typeHierarchy/subtypes"] = true,
   renameProvider = { prepareProvider = true },
+  -- Code actions are the "act on what's under the cursor" trigger (proj 26).
+  -- We return client-side commands (tyo3.explain), so tiny-code-actions / `gra`
+  -- / vim.lsp.buf.code_action() all drive them with no server round-trip.
+  codeActionProvider = true,
+  executeCommandProvider = { commands = { "tyo3.explain", "tyo3.run" } },
   -- Pull diagnostics stay advertised so `vim.diagnostic` on-demand pulls work;
   -- Phase 2 also *pushes* via dispatchers.notification on bus deltas. Pull is
   -- on-demand, push is event-driven — in practice nvim 0.12 doesn't fire both
@@ -223,6 +228,81 @@ handlers["textDocument/definition"] = function(root, params, reply)
     reply(nil, out)
   end)
 end
+
+-- ── Code actions — an extensible registry (proj 26) ──────────────────────────
+--
+-- The code-action surface is a *registry of providers*, not a hardcoded list,
+-- so a third-party spine plugin contributes actions with no fork of this file:
+-- it calls `M.register_code_action` (or the `M.register_entity_action`
+-- convenience) at setup, and its actions appear in `gra`, tiny-code-action, and
+-- `vim.lsp.buf.code_action` like any other. We don't round-trip the daemon to
+-- *offer* the actions — the work happens when the user picks one (a client
+-- command, resolved through `vim.lsp.commands`, which every code-action UI
+-- including tiny-code-action honours via `client:exec_cmd`).
+--
+-- The selection's `range.start` (from treesitter-textobjects, visual mode, or
+-- the cursor) resolves up to its enclosing durable entity via the daemon's
+-- id_for, so a sub-expression selection still lands on the function/class.
+
+-- Each provider is `function(ctx) -> CodeAction[]` where
+-- ctx = { uri, line, col, bufnr } (line/col are 1-based daemon positions).
+M._code_action_providers = M._code_action_providers or {}
+
+--- Register a code-action provider — the raw extensibility seam. The provider
+--- is called for every `textDocument/codeAction` request; return a list of LSP
+--- CodeActions (commonly each with a `command` resolved by a `vim.lsp.commands`
+--- entry you registered via `M.register_command`).
+function M.register_code_action(provider)
+  table.insert(M._code_action_providers, provider)
+end
+
+--- Register a client-side LSP command so a CodeAction's
+--- `command = { command = name, arguments = {...} }` runs `fn(command, ctx)`
+--- when chosen. Every code-action front end (gra / tiny-code-action /
+--- vim.lsp.buf.code_action) resolves client commands through `vim.lsp.commands`,
+--- so this is all a plugin needs to make its action actually do something.
+function M.register_command(name, fn)
+  vim.lsp.commands[name] = fn
+end
+
+handlers["textDocument/codeAction"] = function(_root, params, reply)
+  local uri = params.textDocument.uri
+  local start = (params.range and params.range.start) or { line = 0, character = 0 }
+  local p = lsp_pos_to_daemon(start)
+  local ctx = { uri = uri, line = p.line, col = p.col, bufnr = vim.fn.bufnr(uri_to_path(uri)) }
+  local actions = {}
+  for _, provider in ipairs(M._code_action_providers) do
+    local ok, contributed = pcall(provider, ctx)
+    if ok and type(contributed) == "table" then
+      vim.list_extend(actions, contributed)
+    elseif not ok then
+      vim.schedule(function()
+        vim.notify("[tyo3] a code-action provider errored: " .. tostring(contributed), vim.log.levels.WARN)
+      end)
+    end
+  end
+  reply(nil, actions)
+end
+
+-- Built-in: the proj-26 explain / simplify actions — also the reference example
+-- of a registered provider. A custom plugin's provider looks exactly like this.
+M.register_code_action(function(ctx)
+  local function action(title, mode)
+    return {
+      title = title,
+      kind = "refactor",
+      command = {
+        title = title,
+        command = "tyo3.explain",
+        arguments = { { uri = ctx.uri, line = ctx.line, col = ctx.col, mode = mode } },
+      },
+    }
+  end
+  return {
+    action("tyo3: Explain this entity", "explain"),
+    action("tyo3: Suggest a simplification", "simplify"),
+  }
+end)
 
 -- ── Type hierarchy ───────────────────────────────────────────────────────────
 --
@@ -561,5 +641,143 @@ function M.toggle()
     vim.notify("[tyo3] native LSP bridge disabled", vim.log.levels.INFO)
   end
 end
+
+-- ── tyo3.explain client command (proj 26) ────────────────────────────────────
+--
+-- Registered client-side so every code-action entry point (`gra`,
+-- tiny-code-actions, vim.lsp.buf.code_action) drives it for free. Resolves the
+-- selection to a durable entity, runs the daemon `explain` verb (LLM → durable
+-- authored layer), shows the text, then re-decorates + refreshes the layer-state
+-- diagnostics so the new record and its future needs_review surface.
+
+--- Run daemon *verb* with *params* for *bufnr* (project *root*); on success
+--- re-decorate + refresh layer-state diagnostics (so a new/updated layer record
+--- and its future needs_review surface), then `cb(err, res)`. The generic core
+--- a spine plugin's command builds on — and what run_explain / tyo3.run use.
+function M.run_verb(bufnr, root, verb, params, cb)
+  daemon_request(root, verb, params, function(err, res)
+    if not err and res and vim.api.nvim_buf_is_loaded(bufnr) then
+      pcall(function()
+        require("tyo3.decorate").apply(bufnr)
+      end)
+      if require("tyo3.config").layer_diagnostics_enabled() then
+        M.refresh_layer_diagnostics(bufnr, root)
+      end
+    end
+    if cb then
+      cb(err, res)
+    end
+  end)
+end
+
+--- Run the `explain` daemon verb for *args* (`{uri,line,col,mode}`) on *bufnr*.
+--- Split out from the command so headless tests can call it directly.
+function M.run_explain(bufnr, root, args, cb)
+  M.run_verb(bufnr, root, "explain", {
+    path = (args.uri and uri_to_path(args.uri)) or vim.api.nvim_buf_get_name(bufnr),
+    line = args.line,
+    col = args.col,
+    mode = args.mode or "explain",
+  }, cb)
+end
+
+M.register_command("tyo3.explain", function(command, ctx)
+  local args = (command.arguments or {})[1] or {}
+  local bufnr = (ctx and ctx.bufnr) or vim.api.nvim_get_current_buf()
+  local root = args.root or require("tyo3").root_for_buf(bufnr)
+  if not root then
+    return
+  end
+  M.run_explain(bufnr, root, args, function(err, res)
+    vim.schedule(function()
+      if err then
+        vim.notify("[tyo3] explain failed: " .. (err.message or "daemon error"), vim.log.levels.ERROR)
+      elseif not res then
+        vim.notify("[tyo3] no entity under the cursor to explain", vim.log.levels.WARN)
+      else
+        vim.lsp.util.open_floating_preview(
+          vim.split(res.text, "\n", { plain = true }),
+          "markdown",
+          { border = "rounded", wrap = true, title = "tyo3: " .. (res.mode or "explain") }
+        )
+      end
+    end)
+  end)
+end)
+
+-- ── register_entity_action: the one-call seam for spine plugins ───────────────
+--
+-- The 80% case: "call a daemon verb on the entity under the cursor and show the
+-- text". A plugin author who registered a layer/generator with Python's
+-- `tyo3.extend` writes ONE call here and gets a code action in tiny-code-action:
+--
+--   require("tyo3.lsp").register_entity_action({
+--     title = "tyo3: Summarize for docs",
+--     verb  = "explain",                 -- any daemon verb taking {path,line,col}
+--     params = { mode = "explain" },     -- extra params merged over the position
+--   })
+
+M._entity_actions = M._entity_actions or {}
+
+local function default_entity_result(err, res, _bufnr, _root, spec)
+  if err then
+    vim.notify("[tyo3] " .. spec.title .. " failed: " .. (err.message or "daemon error"), vim.log.levels.ERROR)
+  elseif not res then
+    vim.notify("[tyo3] no entity under the cursor", vim.log.levels.WARN)
+  else
+    local text = (type(res) == "table" and (res.text or vim.inspect(res))) or tostring(res)
+    vim.lsp.util.open_floating_preview(
+      vim.split(text, "\n", { plain = true }),
+      "markdown",
+      { border = "rounded", wrap = true, title = spec.title }
+    )
+  end
+end
+
+--- Register a code action that calls daemon *spec.verb* on the entity under the
+--- cursor and shows the result. ``spec`` = ``{ id?, title, verb, kind?, params?,
+--- on_result? }`` — ``params`` merge over ``{path,line,col}``; ``on_result`` is
+--- ``function(err, res, bufnr, root, spec)`` (default floats ``res.text``).
+function M.register_entity_action(spec)
+  local id = spec.id or spec.title
+  M._entity_actions[id] = spec
+  M.register_code_action(function(ctx)
+    return {
+      {
+        title = spec.title,
+        kind = spec.kind or "refactor",
+        command = {
+          title = spec.title,
+          command = "tyo3.run",
+          arguments = { { id = id, uri = ctx.uri, line = ctx.line, col = ctx.col } },
+        },
+      },
+    }
+  end)
+end
+
+-- Generic dispatcher for register_entity_action's actions.
+M.register_command("tyo3.run", function(command, ctx)
+  local args = (command.arguments or {})[1] or {}
+  local spec = M._entity_actions[args.id]
+  if not spec then
+    return
+  end
+  local bufnr = (ctx and ctx.bufnr) or vim.api.nvim_get_current_buf()
+  local root = require("tyo3").root_for_buf(bufnr)
+  if not root then
+    return
+  end
+  local params = vim.tbl_extend("force", {
+    path = (args.uri and uri_to_path(args.uri)) or vim.api.nvim_buf_get_name(bufnr),
+    line = args.line,
+    col = args.col,
+  }, spec.params or {})
+  M.run_verb(bufnr, root, spec.verb, params, function(err, res)
+    vim.schedule(function()
+      (spec.on_result or default_entity_result)(err, res, bufnr, root, spec)
+    end)
+  end)
+end)
 
 return M

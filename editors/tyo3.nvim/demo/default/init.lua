@@ -38,6 +38,19 @@ require("tyo3").setup({
 -- Open the ambient affected-set panel up front (Scene 1).
 vim.schedule(function()
   require("tyo3.panel").open()
+  -- Showcase the spine code-action plugin seam (proj 26): a third-party-style
+  -- action registered in ONE call. It appears in the SAME code-action menu
+  -- (gra / tiny-code-action / vim.lsp.buf.code_action) as the built-in
+  -- Explain / Simplify — the whole point of the registry. A real plugin would
+  -- point `verb` at its own daemon verb; here it reuses `explain`.
+  local ok, lsp = pcall(require, "tyo3.lsp")
+  if ok then
+    lsp.register_entity_action({
+      title = "myplugin: Draft a docstring",
+      verb = "explain",
+      params = { mode = "explain" },
+    })
+  end
 end)
 
 -- A friendly statusline note that the engine is live.

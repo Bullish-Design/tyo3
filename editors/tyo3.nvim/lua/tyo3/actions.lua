@@ -27,8 +27,9 @@ local function code_win()
 end
 
 -- Authored layers that already have a dedicated, richer entry in the menu, so
--- we don't *also* offer a plain note-author entry for them.
-local SPECIAL_AUTHORED = { docs = true }
+-- we don't *also* offer a plain note-author entry for them. `explain` is
+-- LLM-generated, never hand-typed → it gets the "Explain (AI)" action instead.
+local SPECIAL_AUTHORED = { docs = true, explain = true }
 
 -- Discovered authored layer names (via the `layers` RPC). `nil` until the first
 -- fetch resolves; we fall back to {"intent"} so the menu is never empty.
@@ -121,6 +122,52 @@ local function author_layer(layer)
   end
 end
 
+-- Is *name* a discovered authored layer in this project?
+local function has_layer(name)
+  for _, n in ipairs(M._authored_layers or {}) do
+    if n == name then
+      return true
+    end
+  end
+  return false
+end
+
+-- Run the daemon `explain` verb (LLM → durable `explain` layer) on the card's
+-- entity, then refresh the inline decorations + panel and float the result. The
+-- panel-driven sibling of the LSP code action — same verb, same durable record.
+local function run_explain(mode, gerund)
+  return function(card, src_buf)
+    local rng = card.range
+    if not (card.file and card.file ~= vim.NIL and rng and rng ~= vim.NIL) then
+      notify("entity has no resolved position to explain", vim.log.levels.WARN)
+      return
+    end
+    notify(gerund .. " " .. (card.name or "entity") .. " …")
+    require("tyo3").rpc(
+      src_buf,
+      "explain",
+      { path = card.file, line = rng.start.line, col = rng.start.column, mode = mode },
+      function(err, res)
+        if err then
+          notify("explain failed: " .. (err.message or "error"), vim.log.levels.ERROR)
+          return
+        end
+        if not res or res == vim.NIL then
+          notify("no entity under the cursor to explain", vim.log.levels.WARN)
+          return
+        end
+        require("tyo3.decorate").apply(src_buf)
+        require("tyo3.panel").reload()
+        vim.lsp.util.open_floating_preview(
+          vim.split(res.text, "\n", { plain = true }),
+          "markdown",
+          { border = "rounded", wrap = true, title = "tyo3: " .. (res.mode or mode) }
+        )
+      end
+    )
+  end
+end
+
 -- Jump to the entity's own definition. The card already carries the exact
 -- file + range (resolved on the frozen snapshot), so we jump precisely — no
 -- regex search. Falls back to `locate` only when the card lacks a range.
@@ -187,6 +234,11 @@ function M.list(card)
   local items = {}
   if has then
     table.insert(items, { label = "🔍 Inspect entity card", run = function(c, _) require("tyo3.inspect").show_card(c) end })
+    -- LLM-derived actions (proj 26) — only when the project declares the layer.
+    if has_layer("explain") then
+      table.insert(items, { label = "🤖 Explain (AI)", run = run_explain("explain", "Explaining") })
+      table.insert(items, { label = "✨ Suggest a simplification", run = run_explain("simplify", "Simplifying") })
+    end
     for _, layer in ipairs(note_author_layers()) do
       table.insert(items, { label = "📝 Author " .. layer, run = author_layer(layer) })
     end

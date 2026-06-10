@@ -124,6 +124,13 @@ review_on_change = true
 origin = "authored"
 history = true
 
+# LLM-derived "Explain this" output (proj 26 spike), authored + monitored so a
+# drifted body shows needs_review and a re-run (re-author) clears it.
+[layers.explain]
+origin = "authored"
+history = true
+review_on_change = true
+
 [layers.summary]
 origin = "derived"
 depends_on = ["code"]

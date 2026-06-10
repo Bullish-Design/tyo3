@@ -6,7 +6,9 @@
 # affected panel); scenes 7-12 flip on the opt-in native LSP bridge (:TyO3Lsp) and
 # drive Neovim's own machinery through tyo3 — hover (K) + goto-definition (<C-]>),
 # project references (grr), type hierarchy (super/subtypes → quickfix), a
-# cross-file rename, and the headline: a durable note's drift (needs_review) and a
+# cross-file rename, an AI "Explain this" code action whose answer is stored on a
+# durable, identity-keyed layer (Scene 11b), and the headline: a durable note's
+# drift (needs_review) and a
 # type-checker error riding the *same* ]d stream, surfaced on a normal :w now that
 # review-state is durable. Sleeps are generous and deliberate — we wait past every
 # async beat (daemon open, debounced commit, precision refinement, pushed
@@ -145,6 +147,37 @@ Type ":e store.py" Enter
 Sleep 2s
 Type "/Product().label" Enter
 Sleep 2500ms
+
+# ── Scene 11b: AI code action — "Explain this", stored durably on the spine ──
+# The same in-process server speaks code actions too. Open checkout (moved to its
+# own file in Scene 4, its note still attached) and trigger the code-action menu.
+# tyo3 lists "Explain this entity", "Suggest a simplification", AND a one-call
+# CUSTOM plugin action — the registry seam means anyone can add a spine action and
+# it appears here (and in tiny-code-action / gra) with no fork. Pick Explain: the
+# daemon resolves checkout's durable id, gathers real context (its source + where-
+# used + the existing note), runs the LLM, and stores the answer on the durable
+# `explain` layer keyed by identity — not a throwaway popup. (The recording uses a
+# curated OFFLINE model for determinism; a real install points the seam at the API.)
+Type ":e checkout.py" Enter
+Sleep 2000ms
+Type "/def checkout" Enter
+Sleep 700ms
+Type ":lua vim.lsp.buf.code_action()" Enter
+Sleep 4500ms
+Type "1" Enter
+Sleep 5500ms
+Escape
+Sleep 1000ms
+# Show the menu's breadth once more — three tyo3 actions, the third contributed by
+# a plugin in one call — then run the simplification variant.
+Type ":lua vim.lsp.buf.code_action()" Enter
+Sleep 3500ms
+Type "2" Enter
+Sleep 5000ms
+Escape
+Sleep 1000ms
+Type ":e store.py" Enter
+Sleep 1200ms
 
 # ── Scene 12: the headline — durable review-state AND a type error, unified in ]d ──
 # Author durable intent on show_label, then make one edit that both *drifts* the

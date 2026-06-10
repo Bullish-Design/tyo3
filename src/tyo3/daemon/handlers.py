@@ -15,9 +15,11 @@ layer.
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from tyo3.daemon.llm import _llm, llm_model
 from tyo3.daemon.protocol import INVALID_PARAMS, METHOD_NOT_FOUND, ProtocolError
 from tyo3.graph.identity import is_entity_durable_id
 
@@ -572,6 +574,126 @@ class Handlers:
 
         return self._actor.submit(work)
 
+    # ── LLM-derived explanation (proj 26 spike) ───────────────────
+
+    def context_pack(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Gather the LLM context for the entity at *(path, line, col)*: its
+        source, where-it's-used (references), and any existing authored layers.
+
+        Pure read (no LLM, no commit) — the reusable substrate the ``explain``
+        verb runs over, and the same shape an MCP/agent bridge would consume.
+        Returns ``null`` if nothing resolves at the position."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        mode = self._explain_mode(params)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any] | None:
+            did = s.id_for(rel, line, col)
+            if did is None:
+                return None
+            return self._gather_context(s, rel, line, col, did, mode=mode)
+
+        return self._actor.submit(work)
+
+    def explain(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Resolve the entity under *(path, line, col)*, run the LLM seam over
+        its gathered context, and store the result **durably** on the authored
+        ``explain`` layer keyed by the durable id (proj 26 spike).
+
+        Because the record is keyed by identity on a ``review_on_change`` layer,
+        the explanation rides edits/moves and flips to ``needs_review`` when the
+        body later drifts (clearing on a re-run = re-author). ``mode`` is
+        ``"explain"`` (default) or ``"simplify"`` (also pulls caller bodies).
+        Returns ``null`` if nothing resolves at the position. All of context
+        gather + LLM + author runs in one actor hop (golden rules #2/#3)."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        mode = self._explain_mode(params)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any] | None:
+            did = s.id_for(rel, line, col)
+            if did is None:
+                return None
+            ctx = self._gather_context(s, rel, line, col, did, mode=mode)
+            text = _llm(_build_explain_prompt(ctx, mode), system=_EXPLAIN_SYSTEM[mode])
+            s.author(
+                "explain",
+                did,
+                {
+                    "text": text,
+                    "mode": mode,
+                    "model": llm_model(),
+                    "generated_at": _utcnow_iso(),
+                },
+            )
+            return {"durable_id": did, "text": text, "mode": mode}
+
+        return self._actor.submit(work)
+
+    @staticmethod
+    def _explain_mode(params: dict[str, Any]) -> str:
+        mode = params.get("mode", "explain")
+        if mode not in ("explain", "simplify"):
+            raise ProtocolError("'mode' must be 'explain' or 'simplify'", code=INVALID_PARAMS)
+        return mode
+
+    def _gather_context(
+        self, s: TyO3Session, rel: str, line: int, col: int, did: str, *, mode: str
+    ) -> dict[str, Any]:
+        """The context pack for *did*: node card, source slice, references, prior
+        authored layers, and (simplify only) the bodies of the direct callers.
+
+        References are a live op; the source + layer reads share one pinned
+        snapshot (golden rule #2). ``_entity_source`` reads the entity's range
+        off the snapshot's project root — for the spike that is the on-disk
+        text, so an explanation generated after an unsaved overlay edit
+        describes the saved body (noted in the write-up)."""
+        from tyo3.derive.dag import _entity_source
+
+        # Where-used (cap so a hot symbol doesn't blow up the prompt).
+        refs = [
+            {"path": str(r.path), "range": _range_dict(r.range), "kind": r.kind.value}
+            for r in s.find_references(rel, line, col, include_declaration=False)
+        ][:_MAX_REFERENCES]
+
+        with s.snapshot() as snap:
+            node = _node_by_id(snap.graph(), did)
+            source = _entity_source(snap, did)
+            layers: dict[str, Any] = {}
+            for lname, lcfg in s.effective_layers.items():
+                if lcfg.origin != "authored":
+                    continue
+                av = snap.authored(lname, did)
+                if av.status != "absent" and av.value is not None:
+                    layers[lname] = av.value
+            reference_bodies: list[dict[str, Any]] = []
+            if mode == "simplify":
+                seen: set[str] = set()
+                for r in refs:
+                    start = r["range"]["start"]
+                    rid = s.id_for(self._relpath(r["path"]), start["line"], start["column"])
+                    if rid is None or rid == did or rid in seen:
+                        continue
+                    seen.add(rid)
+                    reference_bodies.append({"durable_id": rid, "source": _entity_source(snap, rid)})
+                    if len(reference_bodies) >= _MAX_REFERENCE_BODIES:
+                        break
+
+        return {
+            "durable_id": did,
+            "name": node.name if node is not None else did,
+            "kind": node.kind.value if node is not None else "entity",
+            "qualified_name": node.qualified_name if node is not None else did,
+            "source": source,
+            "references": refs,
+            "reference_bodies": reference_bodies,
+            "layers": layers,
+        }
+
     # ── Internal joins ─────────────────────────────────────────────
 
     def _entity_dict(self, s: TyO3Session, snap: Snapshot, did: str, layers: dict[str, Any]) -> dict[str, Any]:
@@ -675,6 +797,57 @@ class Handlers:
             except ValueError:
                 return p.as_posix()
         return p.as_posix()
+
+
+# ── LLM-explain helpers (proj 26 spike) ──────────────────────────────────────
+
+# Bounds so a hot symbol's context stays prompt-sized.
+_MAX_REFERENCES = 12
+_MAX_REFERENCE_BODIES = 3
+
+_EXPLAIN_SYSTEM = {
+    "explain": (
+        "You are a code-comprehension assistant for a Python codebase. Explain "
+        "what the given entity does in 2–4 plain sentences. Use the listed "
+        "usages and any existing notes to ground the explanation. Do not restate "
+        "the code line by line."
+    ),
+    "simplify": (
+        "You are a refactoring assistant for a Python codebase. Propose one "
+        "concrete, safe simplification of the given entity, taking its callers "
+        "and dependencies into account. Be specific and concise; note any "
+        "behaviour you must preserve."
+    ),
+}
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _build_explain_prompt(ctx: dict[str, Any], mode: str) -> str:
+    """Render the gathered context pack into a focused prompt.
+
+    The first non-blank line is ``Entity: <qualified_name> (<kind>)`` so the
+    offline stub can echo the subject without a model."""
+    lines = [f"Entity: {ctx['qualified_name']} ({ctx['kind']})", "", "Source:", ctx["source"]]
+    if ctx["layers"]:
+        lines += ["", "Existing notes / annotations (prior human or agent intent):"]
+        lines += [f"- {name}: {value}" for name, value in sorted(ctx["layers"].items())]
+    if ctx["references"]:
+        lines += ["", f"Used in {len(ctx['references'])} place(s):"]
+        lines += [f"- {r['path']}:{r['range']['start']['line']}" for r in ctx["references"]]
+    if mode == "simplify" and ctx["reference_bodies"]:
+        lines += ["", "Bodies of direct callers / dependents:"]
+        for rb in ctx["reference_bodies"]:
+            lines += [f"# {rb['durable_id']}", rb["source"]]
+    task = (
+        "Explain this entity."
+        if mode == "explain"
+        else "Suggest a simplification of this entity."
+    )
+    lines += ["", task]
+    return "\n".join(lines)
 
 
 # ── Serialisation helpers ────────────────────────────────────────────────────
@@ -793,6 +966,8 @@ _METHODS = {
     "layers": Handlers.layers,
     "layer_ids": Handlers.layer_ids,
     "review_state": Handlers.review_state,
+    "context_pack": Handlers.context_pack,
+    "explain": Handlers.explain,
 }
 
 # Verbs handled at the server (DaemonServer._handle_line), not through the shared

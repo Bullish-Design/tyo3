@@ -536,3 +536,98 @@ def test_review_state_scopes_to_path(handlers, ids):
 
 def test_review_state_registered(handlers):
     assert "review_state" in handlers.methods
+
+
+# ── explain / context_pack (proj 26 LLM-derived layer spike) ─────────────────
+
+
+def test_explain_verbs_registered(handlers):
+    for m in ("explain", "context_pack"):
+        assert m in handlers.methods
+
+
+def test_context_pack_gathers_source_and_references(handlers):
+    """``context_pack`` on ``usd`` returns its source, the call site in store.py,
+    and an empty layer map (nothing authored yet) — the LLM substrate, no call."""
+    pack = handlers.context_pack({"path": "money.py", "line": 1, "col": 5})
+    assert pack is not None
+    assert pack["name"] == "usd"
+    assert "def usd" in pack["source"]
+    paths = [r["path"] for r in pack["references"]]
+    assert any(p.endswith("store.py") for p in paths), paths
+    assert pack["layers"] == {}, "no authored records yet"
+    assert pack["reference_bodies"] == [], "reference bodies only gathered for simplify"
+
+
+def test_context_pack_surfaces_existing_layers(handlers, ids):
+    """An authored note rides the context pack, so the LLM sees prior intent."""
+    handlers.author({"layer": "intent", "durable_id": ids["usd"], "value": {"note": "money ctor"}})
+    pack = handlers.context_pack({"path": "money.py", "line": 1, "col": 5})
+    assert pack["layers"]["intent"] == {"note": "money ctor"}
+
+
+def test_context_pack_off_entity_is_null(handlers):
+    assert handlers.context_pack({"path": "store.py", "line": 4, "col": 1}) is None
+
+
+def test_explain_stores_durable_record(handlers, ids):
+    """``explain`` returns text and authors it on the ``explain`` layer keyed by
+    the entity's durable id (hermetic — the offline stub, no network)."""
+    res = handlers.explain({"path": "money.py", "line": 1, "col": 5})
+    assert res is not None
+    assert res["durable_id"] == ids["usd"]
+    assert res["mode"] == "explain"
+    assert res["text"], "the stub returns a non-empty explanation"
+    # The record is present on the explain layer for usd's id.
+    got = handlers.authored({"layer": "explain", "durable_id": ids["usd"]})
+    assert got["status"] == "present"
+    assert got["value"]["text"] == res["text"]
+    assert got["value"]["mode"] == "explain"
+    assert got["value"]["model"] == "stub", "offline backend stamped on the record"
+
+
+def test_explain_simplify_mode(handlers, ids):
+    """``mode='simplify'`` authors a simplify record (still hermetic)."""
+    res = handlers.explain({"path": "money.py", "line": 1, "col": 5, "mode": "simplify"})
+    assert res["mode"] == "simplify"
+    assert handlers.authored({"layer": "explain", "durable_id": ids["usd"]})["value"]["mode"] == "simplify"
+
+
+def test_explain_rejects_bad_mode(handlers):
+    with pytest.raises(ProtocolError) as e:
+        handlers.explain({"path": "money.py", "line": 1, "col": 5, "mode": "rewrite"})
+    assert e.value.code == INVALID_PARAMS
+
+
+def test_explain_off_entity_is_null(handlers):
+    assert handlers.explain({"path": "store.py", "line": 4, "col": 1}) is None
+
+
+def test_explain_flips_needs_review_on_drift_and_clears_on_rerun(handlers, ids):
+    """The durability tie-in (proj 25): an explanation is durable level state.
+
+    Author an explanation, edit the entity body → the explain record goes
+    ``needs_review`` (survives a save-equivalent identical re-commit), and
+    re-running ``explain`` (= re-author) acknowledges it back to ``present``."""
+    legacy_id = ids["legacy_helper"]
+    # Position legacy_helper from the decorate batch (robust to fixture layout).
+    deco = handlers.decorate({"path": "legacy.py"})
+    entry = next(d for d in deco if d["durable_id"] == legacy_id)
+    start = entry["range"]["start"]
+
+    handlers.explain({"path": "legacy.py", "line": start["line"], "col": start["column"]})
+    assert handlers.authored({"layer": "explain", "durable_id": legacy_id})["status"] == "present"
+
+    # Drift the body → needs_review, and it survives an identical re-commit (save).
+    edited = "def legacy_helper(x: int) -> int:\n    return x + 100\n"
+    handlers.sync_buffer({"path": "legacy.py", "text": edited})
+    assert handlers.authored({"layer": "explain", "durable_id": legacy_id})["status"] == "needs_review"
+    handlers.sync_buffer({"path": "legacy.py", "text": edited})
+    assert handlers.authored({"layer": "explain", "durable_id": legacy_id})["status"] == "needs_review"
+    assert any(it["durable_id"] == legacy_id for it in handlers.review_state({})["items"])
+
+    # Re-run explain against the new body = re-author = acknowledge → present.
+    new_deco = handlers.decorate({"path": "legacy.py"})
+    new_start = next(d for d in new_deco if d["durable_id"] == legacy_id)["range"]["start"]
+    handlers.explain({"path": "legacy.py", "line": new_start["line"], "col": new_start["column"]})
+    assert handlers.authored({"layer": "explain", "durable_id": legacy_id})["status"] == "present"
