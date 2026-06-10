@@ -170,7 +170,11 @@ end
 local function summary_rows(card)
   local rows = {}
   for layer, rec in pairs(card.derived or {}) do
-    if rec.status ~= "absent" and rec.status ~= "failed" then
+    if rec.status == "computing" then
+      -- A slow serving="stale" layer mid-recompute (AB3): an honest pending cue
+      -- until the `derived` notification re-pulls this card with the fresh value.
+      table.insert(rows, { text = ("  ⟢ %s: computing…"):format(layer) })
+    elseif rec.status ~= "absent" and rec.status ~= "failed" then
       local art = rec.artifact
       if art ~= nil and art ~= vim.NIL then
         table.insert(rows, { text = ("  ⟢ %s: %s"):format(layer, tostring(art)) })
@@ -206,7 +210,8 @@ local function count_of(card, section)
   elseif section == "SUMMARY" then
     local n = 0
     for _, rec in pairs(card.derived or {}) do
-      if rec.status ~= "absent" and rec.status ~= "failed" and rec.artifact ~= nil and rec.artifact ~= vim.NIL then
+      local has_value = rec.artifact ~= nil and rec.artifact ~= vim.NIL
+      if rec.status == "computing" or (rec.status ~= "absent" and rec.status ~= "failed" and has_value) then
         n = n + 1
       end
     end

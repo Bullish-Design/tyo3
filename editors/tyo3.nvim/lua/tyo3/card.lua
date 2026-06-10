@@ -126,10 +126,15 @@ function M.context_lines(card, width)
   end
 
   -- Every derived layer with an artifact (summary etc.), not just `summary`.
-  -- Derived statuses are fresh|stale|failed|absent — a fresh/stale artifact is
-  -- real and must render; only absent/failed are dropped.
-  for _, rec in pairs(card.derived or {}) do
-    if rec.status ~= "absent" and rec.status ~= "failed" then
+  -- Derived statuses are fresh|stale|failed|absent (plus the daemon's transient
+  -- `computing` for a slow serving="stale" layer mid-recompute, AB3). A
+  -- fresh/stale artifact is real and renders; a `computing` row shows an honest
+  -- pending cue (then the `derived` notification swaps it to the value);
+  -- absent/failed are dropped.
+  for layer, rec in pairs(card.derived or {}) do
+    if rec.status == "computing" then
+      add(("  ⟢ %s: computing…"):format(layer))
+    elseif rec.status ~= "absent" and rec.status ~= "failed" then
       local art = derived_artifact(rec)
       if art then
         add("  ⟢ " .. art)
