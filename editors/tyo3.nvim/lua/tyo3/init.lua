@@ -9,9 +9,11 @@ local daemon = require("tyo3.daemon")
 
 local M = {}
 
--- bufnr -> root (cached); bufnr -> uv timer for debounce.
+-- bufnr -> root (cached); bufnr -> uv timer for debounce;
+-- bufnr -> sha256 of the last-synced overlay text (double-commit dedup).
 M._root_by_buf = {}
 M._debounce = {}
+M._last_synced = {}
 M._setup_done = false
 
 local function buf_path(bufnr)
@@ -83,13 +85,26 @@ function M.on_buf_enter(bufnr)
     return
   end
   local path = buf_path(bufnr)
+  local text = buffer_text(bufnr)
   M.with_client(bufnr, function(client)
     client:request("open", { root = root }, function()
-      client:request("sync_buffer", { path = path, text = buffer_text(bufnr) }, function()
+      client:request("sync_buffer", { path = path, text = text }, function()
+        -- Seed the dedup hash so the first `:w` of an unedited buffer is a no-op.
+        M._last_synced[bufnr] = vim.fn.sha256(text)
         require("tyo3.decorate").apply(bufnr)
       end)
     end)
   end, function(_) end)
+  -- Opt-in: attach the native LSP bridge (additive; idempotent via lsp.start
+  -- dedupe). Independent of the open/sync chain above — the in-process server
+  -- resolves the daemon client lazily on its first request.
+  if config.get().lsp then
+    require("tyo3.lsp").attach(bufnr, root)
+  end
+  -- Seed layer-state diagnostics once on open (refreshed thereafter off the bus).
+  if config.layer_diagnostics_enabled() then
+    require("tyo3.lsp").refresh_layer_diagnostics(bufnr, root)
+  end
 end
 
 --- TextChanged / TextChangedI: debounce, then commit the buffer as the overlay.
@@ -123,19 +138,44 @@ function M.on_text_changed(bufnr)
 end
 
 --- Force a sync of *bufnr* now (BufWritePost, or after the debounce fires).
+--
+-- The editor commits twice per save: the debounced TextChanged sync, then the
+-- BufWritePost sync of identical bytes. A redundant re-commit re-reconciles the
+-- file and would clear durable level state (e.g. needs_review) on the engine.
+-- Dedup on a per-buffer content hash so an unchanged buffer is never re-synced.
 function M.sync_now(bufnr)
   local path = buf_path(bufnr)
   if not path then
     return
   end
-  M.rpc(bufnr, "sync_buffer", { path = path, text = buffer_text(bufnr) }, function(err, _delta)
+  local text = buffer_text(bufnr)
+  local h = vim.fn.sha256(text)
+  if h == M._last_synced[bufnr] then
+    return
+  end
+  M.rpc(bufnr, "sync_buffer", { path = path, text = text }, function(err, _delta)
     if not err then
+      M._last_synced[bufnr] = h
       require("tyo3.decorate").apply(bufnr)
     end
   end)
 end
 
 -- ── Notification routing (from the bus pump) ────────────────────────────────
+
+-- Refresh layer-state diagnostics on every loaded buffer of *root* (gated by the
+-- layer_diagnostics flag). Mirrors the decorate fan-out loop.
+local function refresh_layer_diags_for_root(root)
+  if not config.layer_diagnostics_enabled() then
+    return
+  end
+  local lsp = require("tyo3.lsp")
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr) and M.root_for_buf(bufnr) == root then
+      lsp.refresh_layer_diagnostics(bufnr, root)
+    end
+  end
+end
 
 function M.handle_notification(root, method, params)
   if method == "delta" then
@@ -147,6 +187,14 @@ function M.handle_notification(root, method, params)
         require("tyo3.decorate").apply(bufnr)
       end
     end
+    -- Push type-checker diagnostics for the touched files so they refresh on
+    -- edit without the editor polling (server→client publishDiagnostics).
+    if config.get().lsp then
+      local touched = params.touched_files or params.affected_files
+      require("tyo3.lsp").publish_diagnostics(root, touched)
+    end
+    -- A structural edit can flip authored notes to needs_review.
+    refresh_layer_diags_for_root(root)
   elseif method == "derived" then
     -- A slow `serving="stale"` layer's value became fresh off the actor (AB3):
     -- re-pull the card (if the panel is on that entity) and re-decorate every
@@ -157,8 +205,10 @@ function M.handle_notification(root, method, params)
         require("tyo3.decorate").apply(bufnr)
       end
     end
+    refresh_layer_diags_for_root(root)
   elseif method == "refinement" then
     require("tyo3.panel").on_refinement(root, params)
+    refresh_layer_diags_for_root(root)
   end
 end
 

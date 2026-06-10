@@ -26,6 +26,7 @@ import tempfile
 from pathlib import Path
 
 from tyo3.demo.cli import bold, cyan, dim, green, red
+from tyo3.sidecar import Sidecar
 
 # ── Deterministic in-process derived generators ─────────────────────────────
 #
@@ -123,6 +124,13 @@ review_on_change = true
 origin = "authored"
 history = true
 
+# LLM-derived "Explain this" output (proj 26 spike), authored + monitored so a
+# drifted body shows needs_review and a re-run (re-author) clears it.
+[layers.explain]
+origin = "authored"
+history = true
+review_on_change = true
+
 [layers.summary]
 origin = "derived"
 depends_on = ["code"]
@@ -172,9 +180,12 @@ def _build_project(root: Path) -> None:
     (root / "store.py").write_text(STORE_SRC)
     (root / "legacy.py").write_text(LEGACY_SRC)
     (root / "legacy_moved.py").write_text("")  # known path for the atomic move
-    cfg = root / ".tyo3"
-    cfg.mkdir()
-    (cfg / "config.toml").write_text(CONFIG_TOML)
+    # Construct the sidecar layout through its sole owner (Sidecar), never an
+    # inline sidecar-dir literal — the single-path-owner policy enforced by
+    # test_sidecar_is_sole_path_owner_in_source.
+    sidecar = Sidecar(root)
+    sidecar.root.mkdir()
+    sidecar.config_path().write_text(CONFIG_TOML)
 
 
 # ── Presentation helpers ────────────────────────────────────────────────────

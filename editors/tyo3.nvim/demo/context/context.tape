@@ -5,8 +5,10 @@
 # A guided tour of TyO3's real, user-facing capabilities with the data-type-
 # separated sidebar on throughout. The right dock hosts collapsible panes, each a
 # different kind of data hanging off the entity under the cursor — IDENTITY,
-# NOTES, DOCS, SUMMARY, ACTIONS — plus an AFFECTED log. The headline: notes AND a
-# markdown doc you author in-editor stay glued to the entity across an edit and an
+# NOTES, DOCS, SUMMARY, ACTIONS — plus an AFFECTED log. You also run an AI
+# "Explain (AI)" action from the ACTIONS pane and watch its answer land in NOTES,
+# stored on a durable layer. The headline: notes, a markdown doc, AND the AI
+# summary you author in-editor stay glued to the entity across an edit and an
 # atomic move. Sleeps wait past every async beat so the recording is deterministic.
 
 Output editors/tyo3.nvim/demo/context/context.gif
@@ -41,6 +43,26 @@ Sleep 1200ms
 Type "/def checkout" Enter
 Sleep 2500ms
 
+# ── Scene 2b: run the AI "Explain" from the ACTIONS pane → it lands in NOTES ──
+# The ACTIONS pane lists the tools you can run on the entity under the cursor.
+# Activate "🤖 Explain (AI)": the daemon gathers context (source + where-used +
+# your note), runs the LLM, and stores the summary on the durable `explain` layer.
+# It comes back as a 🤖 paragraph in the NOTES pane — a second kind of data on the
+# spine, keyed by checkout's identity, right beside your hand-written note.
+# (Curated offline model so the recording is deterministic; real installs use the API.)
+Ctrl+W
+Type "l"
+Sleep 1000ms
+Type "/Explain (AI)" Enter
+Sleep 800ms
+Enter
+Sleep 4500ms
+Escape
+Sleep 800ms
+Ctrl+W
+Type "h"
+Sleep 3500ms
+
 # ── Scene 3: write a markdown doc *while navigating* (DOCS pane) ──
 # :TyO3Doc opens a markdown editor for the entity under the cursor; :w authors it
 # into the `docs` layer, keyed by the entity's durable id.
@@ -69,7 +91,7 @@ Sleep 2500ms
 Type "/def checkout" Enter
 Sleep 3s
 
-# ── Scene 5: the headline — atomic MOVE carries id + note + doc to a new file ──
+# ── Scene 5: the headline — atomic MOVE carries id + note + doc + AI summary ──
 Type ":TyO3Move checkout checkout.py" Enter
 Sleep 3s
 Type ":e checkout.py" Enter
@@ -80,40 +102,40 @@ Sleep 3500ms
 # ── Scene 6: panes are collapsible — separation you control ──
 Ctrl+W
 Type "l"
-Sleep 800ms
+Sleep 1800ms
 Type "/SUMMARY" Enter
-Sleep 600ms
+Sleep 1600ms
 Tab
 Sleep 1500ms
 Type "/ACTIONS" Enter
-Sleep 400ms
+Sleep 1400ms
 Tab
 Sleep 1500ms
 Tab
-Sleep 800ms
+Sleep 1800ms
 Ctrl+W
 Type "h"
-Sleep 800ms
+Sleep 1800ms
 
 # ── Scene 7: the docs link to BOTH user and developer guides ──
 Type ":TyO3Docs" Enter
-Sleep 1200ms
+Sleep 2200ms
 Type "1" Enter
 Sleep 3500ms
 Type "q"
-Sleep 800ms
+Sleep 1800ms
 Type ":TyO3Docs" Enter
-Sleep 1200ms
+Sleep 2200ms
 Type "3" Enter
 Sleep 3500ms
 Type "q"
-Sleep 800ms
+Sleep 1800ms
 
 # ── Scene 8: live blast radius + async precision refinement (AFFECTED pane) ──
 Type ":e money.py" Enter
 Sleep 1500ms
 Type "/100" Enter
-Sleep 600ms
+Sleep 1600ms
 Type "ciw1000"
 Escape
 Type ":w" Enter

@@ -127,21 +127,49 @@ local function identity_rows(card)
   return rows
 end
 
+-- Word-wrap *text* to *width* columns → a list of lines.
+local function wrap(text, width)
+  local out, line = {}, ""
+  for word in tostring(text):gmatch("%S+") do
+    if #line + #word + 1 > width and #line > 0 then
+      table.insert(out, line)
+      line = word
+    else
+      line = (#line == 0) and word or (line .. " " .. word)
+    end
+  end
+  if #line > 0 then
+    table.insert(out, line)
+  end
+  return out
+end
+
 local function note_rows(card)
   local rows = {}
   for layer, rec in pairs(card.authored or {}) do
     if layer ~= "docs" and rec.status ~= "absent" then
       local val = rec.value
-      if type(val) == "table" and val.note then
-        val = val.note
-      elseif type(val) == "table" then
-        val = vim.json.encode(val)
+      local flag = rec.status == "needs_review" and " ⚠" or ""
+      if type(val) == "table" and val.text then
+        -- LLM-derived explanation (the `explain` layer): a 🤖-marked, wrapped
+        -- mini-paragraph glued to the entity. Rides edits/moves; the ⚠ rides
+        -- the last line when the body has drifted from when it was generated.
+        local first = true
+        for _, l in ipairs(wrap(val.text, 44)) do
+          table.insert(rows, { text = (first and "  🤖 " or "     ") .. l })
+          first = false
+        end
+        if flag ~= "" and #rows > 0 then
+          rows[#rows].text = rows[#rows].text .. flag
+        end
+      else
+        if type(val) == "table" and val.note then
+          val = val.note
+        elseif type(val) == "table" then
+          val = vim.json.encode(val)
+        end
+        table.insert(rows, { text = "  🏷 " .. tostring(val) .. flag })
       end
-      local text = "  🏷 " .. tostring(val)
-      if rec.status == "needs_review" then
-        text = text .. " ⚠"
-      end
-      table.insert(rows, { text = text })
     end
   end
   if #rows == 0 then

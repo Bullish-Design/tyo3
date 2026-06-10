@@ -47,6 +47,18 @@ function M.check()
   info("project root: " .. root)
   info("socket: " .. require("tyo3.daemon").socket_path(root))
 
+  -- Native LSP bridge (opt-in).
+  if cfg.lsp then
+    local attached = vim.lsp.get_clients({ name = "tyo3", bufnr = bufnr })
+    if #attached > 0 then
+      ok(("native LSP bridge enabled — client attached (encoding %s)"):format(attached[1].offset_encoding))
+    else
+      info("native LSP bridge enabled — no client attached to this buffer yet")
+    end
+  else
+    info("native LSP bridge disabled (setup{ lsp = true } to ride vim.lsp / vim.diagnostic)")
+  end
+
   -- Synchronous-ish probe: ensure + ping, waiting briefly.
   local done, result, errmsg = false, nil, nil
   require("tyo3").rpc(bufnr, "ping", {}, function(e, r)
