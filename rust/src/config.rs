@@ -218,6 +218,13 @@ pub enum LayerOrigin {
     Authored,
 }
 
+/// How a derived read behaves when the cached value is stale/absent.
+///
+/// * `Block` (the default) — produce synchronously at read and return `fresh`
+///   (or fail). The simple, predictable path for cheap producers.
+/// * `Stale` — serve last-good/`absent` immediately and recompute **off the
+///   actor**, publishing a `DerivedFresh` when ready. The opt-in for slow
+///   producers (LLM/HTTP/embeddings) that must never block the cursor path.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ServingMode {
@@ -684,7 +691,14 @@ fn default_hash_profile() -> String {
 }
 
 fn default_serving() -> ServingMode {
-    ServingMode::Stale
+    // Synchronous (produce-at-read, return fresh) is the safe, predictable
+    // default: most derived layers are cheap and have nothing to gain from
+    // background serving. A layer opts into `stale` (serve last-good/absent now,
+    // recompute off the actor) precisely when its producer is slow (LLM/HTTP/
+    // embeddings) and must not block the cursor path. Async-by-default would add
+    // flicker + a background worker for no benefit and fail quietly on cheap
+    // layers; blocking-by-default fails loudly on a mis-declared slow one.
+    ServingMode::Block
 }
 
 fn default_recompute() -> RecomputeMode {

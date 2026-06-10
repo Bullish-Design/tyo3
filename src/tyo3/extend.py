@@ -85,7 +85,9 @@ class AuthoredLayerSpec:
             generator_version=None,
             hash_profile=None,
             store=None,
-            serving="stale",
+            # Inert for an authored layer (a sink — never produced/served), but
+            # use the honest default so no layer carries a stale (async) marker.
+            serving="block",
             recompute="lazy",
             entity_kinds=tuple(self.entity_kinds),
             history=self.history,
@@ -118,7 +120,11 @@ class DerivedLayerSpec:
     # changes by construction. ``local``/``semantic``/``reverse-semantic`` are
     # explicit fast-path overrides that key without running the producer.
     key_locality: KeyLocality | None = None
-    serving: Serving = "stale"
+    # ``block`` (the default) produces synchronously at read — the right choice
+    # for a cheap producer. Opt into ``stale`` (serve last-good/absent now,
+    # recompute off the actor, AB3) only when the producer is slow (LLM/HTTP/
+    # embeddings) and must not block the cursor path.
+    serving: Serving = "block"
     recompute: Recompute = "lazy"
     entity_kinds: tuple[str, ...] = ()
     schema: type[BaseModel] | None = None

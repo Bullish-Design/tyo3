@@ -40,7 +40,7 @@ def flaky_generator(inputs):
     return [inp.source.upper().encode() if isinstance(inp.source, str) else inp.source for inp in inputs]
 
 
-def _config(generator: str = "counting_gen", callable_name: str = "counting_generator", serving: str = "stale") -> str:
+def _config(generator: str = "counting_gen", callable_name: str = "counting_generator", serving: str = "block") -> str:
     return f"""\
 schema_version = 1
 
@@ -216,7 +216,7 @@ generator = "counting_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv_upper"
-serving = "stale"
+serving = "block"
 key_locality = "{key_locality}"
 entity_kinds = ["function"]
 

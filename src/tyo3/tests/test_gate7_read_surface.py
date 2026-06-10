@@ -118,7 +118,7 @@ generator = "upper_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv_upper"
-serving = "stale"
+serving = "block"
 entity_kinds = ["function"]
 
 [layers.intent]

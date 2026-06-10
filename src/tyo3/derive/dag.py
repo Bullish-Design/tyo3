@@ -466,7 +466,7 @@ class DerivationDAG:
         artifacts = layer.generator.generate([gen_input])
         return artifacts[0] if artifacts else None
 
-    def derived_traced(self, layer: DerivedLayer, snapshot: Snapshot, durable_id: str):
+    def derived_traced(self, layer: DerivedLayer, snapshot: Snapshot, durable_id: str, *, on_miss: str = "produce"):
         """Resolve a **traced** layer's value at *snapshot* (AB2 produce-then-key).
 
         The traced key is only known by running the producer, so this inverts the
@@ -480,7 +480,18 @@ class DerivationDAG:
            key. A new caller (or a caller's body change) moves a traced id ⇒ the
            cheap check fails ⇒ the value recomputes and reflects the change.
         3. **Honest staleness.** A failed/empty produce serves last-good (``stale``
-           / ``failed``) or ``absent``, mirroring the override read path."""
+           / ``failed``) or ``absent``, mirroring the override read path.
+
+        ``on_miss`` selects what happens when the cheap check misses (AB3):
+
+        * ``"produce"`` (default) — run the producer inline (steps 2–3). This is
+          the AB2 behaviour and what ``serving="block"`` reads + the off-actor
+          worker both want.
+        * ``"serve_stale"`` — **skip the slow produce** and serve last-good /
+          ``absent`` (step 3) immediately. The cheap self-heal check (O(read-set)
+          hashing) still runs on the caller's thread; only the slow producer is
+          deferred. The ``serving="stale"`` read seam uses this and enqueues the
+          produce on the off-actor worker."""
         from tyo3.models.derived import DerivedValue
 
         rev = snapshot.revision
@@ -497,6 +508,11 @@ class DerivationDAG:
                 art = layer.cache.get(layer.keys_for(prior_hash))
                 if art is not None:
                     return DerivedValue(artifact=art, status="fresh", revision=rev, layer=layer.name)
+
+        # Cheap check missed. For ``serve_stale`` we stop here and serve last-good
+        # honestly — the slow producer is deferred to the off-actor worker (AB3).
+        if on_miss == "serve_stale":
+            return self._traced_serve_last_good(layer, durable_id, rev)
 
         # 2. Produce-then-key (first read, or a traced id moved).
         art: bytes | None = None
@@ -515,6 +531,14 @@ class DerivationDAG:
             return DerivedValue(artifact=art, status="fresh", revision=rev, layer=layer.name)
 
         # 3. Produce failed / produced nothing → serve last-good honestly.
+        return self._traced_serve_last_good(layer, durable_id, rev)
+
+    def _traced_serve_last_good(self, layer: DerivedLayer, durable_id: str, rev: int):
+        """Serve a traced layer's honest last-good value (``stale`` / ``failed`` /
+        ``absent``) without producing. Shared by the produce-failed tail and the
+        AB3 ``serve_stale`` miss path."""
+        from tyo3.models.derived import DerivedValue
+
         last_key = layer.last_good_store_key(durable_id)
         if last_key:
             last_art = layer.cache._store.get(last_key)

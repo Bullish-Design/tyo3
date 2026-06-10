@@ -49,7 +49,7 @@ generator = "upper_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv_upper"
-serving = "stale"
+serving = "block"
 entity_kinds = ["function"]
 
 [generators.upper_gen]
@@ -563,7 +563,7 @@ generator = "echo_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv"
-serving = "stale"
+serving = "block"
 
 [generators.echo_gen]
 type = "python"
@@ -605,7 +605,7 @@ generator = "echo_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv"
-serving = "stale"
+serving = "block"
 
 [generators.echo_gen]
 type = "python"
@@ -721,7 +721,7 @@ generator = "echo_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv"
-serving = "stale"
+serving = "block"
 
 [generators.echo_gen]
 type = "python"

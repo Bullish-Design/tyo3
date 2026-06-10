@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from tyo3.bus.delta import Delta
+    from tyo3.bus.derived import DerivedFresh
     from tyo3.bus.interest import Interest
     from tyo3.bus.refinement import AffectedRefinement
     from tyo3.bus.subscription import Subscription
@@ -146,6 +147,33 @@ class Bus:
             interest = sub.interest
             if interest.all or (interest.ids and (interest.ids & ids)):
                 sub._offer_refinement(ref)
+
+    def publish_derived_fresh(self, msg: DerivedFresh) -> None:
+        """Fan a ``DerivedFresh`` out on the **derived-fresh channel** (AB3).
+
+        Delivered on a channel **separate** from the primary delta stream (like
+        ``publish_refinement``), so it does **not** touch the ``revision > last``
+        invariant: a "value X is now fresh" signal is produced off the actor and
+        may arrive after R's primary delta (and after R+1's). Each matching
+        subscriber receives it on its derived-fresh queue and re-pulls.
+
+        Matching: ``ALL`` subscribers always receive it; a scoped subscriber
+        receives it when its **id**-interest contains the durable_id or its
+        **layer**-interest contains the layer. Like ``publish`` it never blocks
+        the off-actor worker."""
+        with self._lock:
+            if self._closed or not self._subs:
+                return
+            subs_snapshot = list(self._subs)
+
+        for sub in subs_snapshot:
+            interest = sub.interest
+            if (
+                interest.all
+                or (interest.ids and msg.durable_id in interest.ids)
+                or (interest.layers and msg.layer in interest.layers)
+            ):
+                sub._offer_derived(msg)
 
     def has_subscribers(self) -> bool:
         """Fast check for the write-path no-op guard."""

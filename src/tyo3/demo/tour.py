@@ -130,7 +130,7 @@ generator = "summary_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv_summary"
-serving = "stale"
+serving = "block"
 key_locality = "local"
 entity_kinds = ["function"]
 
@@ -141,7 +141,7 @@ generator = "embed_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv_embed"
-serving = "stale"
+serving = "block"
 key_locality = "semantic"
 entity_kinds = ["function"]
 

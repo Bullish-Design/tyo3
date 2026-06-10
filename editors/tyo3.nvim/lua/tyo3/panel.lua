@@ -404,6 +404,19 @@ function M.on_delta(_root, params)
   end
 end
 
+--- Handle a `derived` notification (AB3): a `serving="stale"` value the daemon
+--- produced off the actor is now fresh. If the panel is showing that entity,
+--- re-pull its card so the stale value is replaced by the fresh one.
+function M.on_derived(_root, params)
+  if not M.is_open() then
+    return
+  end
+  if M._entity and params.durable_id and M._entity.durable_id ~= params.durable_id then
+    return
+  end
+  M.reload()
+end
+
 --- Handle a `refinement` notification: annotate the matching revision's line.
 function M.on_refinement(_root, params)
   local idx = M._rev_index[params.revision]

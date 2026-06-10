@@ -197,6 +197,43 @@ def test_refinement_channel_delivers_after_primary_delta(tmp_path):
         s.close()
 
 
+def test_derived_fresh_channel_is_independent_and_scoped(tmp_path):
+    """The derived-fresh channel (AB3) is a third, out-of-band stream.
+
+    A ``DerivedFresh`` ("``serving="stale"`` value X became fresh off the actor")
+    is delivered on its own queue — never on the primary delta or refinement
+    streams — and matches a scoped subscriber by **id** or **layer** interest
+    (an ``ALL`` subscriber always receives it). It must not perturb the primary
+    ``revision > last`` assertion.
+    """
+    from tyo3.bus import Bus
+    from tyo3.bus.derived import DerivedFresh
+
+    bus = Bus()
+    try:
+        all_sub = bus.subscribe(Interest.ALL)
+        id_sub = bus.subscribe(Interest(ids=frozenset({"X"})))
+        layer_sub = bus.subscribe(Interest(layers=frozenset({"summaries"})))
+        other_sub = bus.subscribe(Interest(ids=frozenset({"Z"})))
+
+        # Publish "layer=summaries, id=X is now fresh at rev 7".
+        bus.publish_derived_fresh(DerivedFresh(revision=7, layer="summaries", durable_id="X"))
+
+        # ALL, the matching-id, and the matching-layer subscribers receive it.
+        for sub, who in ((all_sub, "all"), (id_sub, "id"), (layer_sub, "layer")):
+            msg = sub.poll_derived(timeout=1.0)
+            assert msg is not None, f"{who}-interest subscriber must receive the derived-fresh signal"
+            assert (msg.revision, msg.layer, msg.durable_id) == (7, "summaries", "X")
+            # It rode ONLY the derived-fresh channel — not the primary or refinement queues.
+            assert sub.poll(timeout=0.0) is None
+            assert sub.poll_refinement(timeout=0.0) is None
+
+        # A subscriber interested in neither id "X" nor layer "summaries" gets nothing.
+        assert other_sub.poll_derived(timeout=0.0) is None
+    finally:
+        bus.close()
+
+
 def test_config_rejects_writer_blocking_overflow_policy(tmp_path):
     config = 'schema_version = 1\n\n[coordination.bus]\nqueue_capacity = 8\noverflow = "block"\n'
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'bus'\nversion = '0.1.0'\n")

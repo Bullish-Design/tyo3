@@ -181,6 +181,7 @@ class Snapshot(_ReadOps):
         layers: dict | None = None,
         head_graph_getter: Any | None = None,
         derivation_getter: Any | None = None,
+        async_worker_getter: Any | None = None,
     ) -> None:
         self._inner = native_snapshot
         self._closed = False
@@ -192,6 +193,11 @@ class Snapshot(_ReadOps):
         self._effective_layers: dict = layers if layers is not None else (dict(config.layers) if config else {})
         self._head_graph_getter = head_graph_getter
         self._derivation_getter = derivation_getter
+        # Lazily resolves the session's off-actor recompute worker for AB3
+        # ``serving="stale"`` background produce. ``None`` ⇒ no async serving
+        # (e.g. a Snapshot built directly in a test); the read seam then degrades
+        # to synchronous produce, never silently dropping a value.
+        self._async_worker_getter = async_worker_getter
         self._graph: Any = None
         self._code_view: Any = None
         self._layer_views: dict[str, Any] = {}
@@ -298,6 +304,22 @@ class Snapshot(_ReadOps):
         self._graph = g._pin_at(self.revision)
         return self._graph
 
+    def _enqueue_recompute(self, layer: str, durable_id: str) -> None:
+        """Hand a ``serving="stale"`` cache miss to the off-actor recompute worker
+        (AB3). A no-op (degrading to "the next read self-heals synchronously")
+        when no worker is wired or it can't be reached — a failed enqueue is never
+        a miss, since last-good/absent was already served."""
+        getter = self._async_worker_getter
+        if getter is None:
+            return
+        try:
+            worker = getter()
+            worker.enqueue(layer, durable_id, self.revision)
+        except Exception:
+            # Never let async wiring surface as a read failure (graceful
+            # degradation — the honest stale/absent value already serves).
+            pass
+
     def derived(self, layer: str, durable_id: str) -> DerivedValue:
         """Resolve a derived value for *durable_id* under *layer* at this revision.
 
@@ -322,7 +344,18 @@ class Snapshot(_ReadOps):
         # with a cheap self-heal check. The override strategies below stay on the
         # key-then-fetch fast path.
         if L.is_traced:
-            return dag.derived_traced(L, self, durable_id)
+            # ``serving="block"`` ⇒ produce inline at read (AB2 behaviour). A slow
+            # producer stalls the caller — acceptable only when the layer opted in.
+            if L.serving != "stale":
+                return dag.derived_traced(L, self, durable_id)
+            # ``serving="stale"`` ⇒ the cheap self-heal check stays on this thread
+            # (it's O(read-set) hashing, not the slow producer), but a real miss
+            # serves last-good/absent NOW and defers the slow produce to the
+            # off-actor worker (AB3). Never block the cursor path.
+            dv = dag.derived_traced(L, self, durable_id, on_miss="serve_stale")
+            if dv.status != "fresh":
+                self._enqueue_recompute(layer, durable_id)
+            return dv
         try:
             gen_input, input_hash = dag.resolve_input(L, self, durable_id)
         except (KeyError, AttributeError):
@@ -338,16 +371,21 @@ class Snapshot(_ReadOps):
             # closure), so a move-unchanged hit serves the reused artifact.
             return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
 
-        # Miss at the resolved key. Self-heal with a synchronous recompute over
-        # this pinned snapshot (§8.3). With no async derived worker, this serves
-        # both `block` and `stale` layers; the serving policy is honoured on
-        # failure, where we fall back to the last-good artifact tagged honestly.
-        scheduler = dag._get_scheduler()
-        art = scheduler.recompute_now(dag, L, self, durable_id)
-        if art is not None:
-            return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
+        # Miss at the resolved key. ``serving="stale"`` serves last-good/absent NOW
+        # and defers the (possibly slow) recompute to the off-actor worker (AB3) —
+        # never blocking the cursor path. ``serving="block"`` self-heals with a
+        # synchronous recompute over this pinned snapshot (§8.3) as before.
+        if L.serving == "stale":
+            self._enqueue_recompute(layer, durable_id)
+        else:
+            scheduler = dag._get_scheduler()
+            art = scheduler.recompute_now(dag, L, self, durable_id)
+            if art is not None:
+                return DerivedValue(artifact=art, status="fresh", revision=self.revision, layer=layer)
 
-        # Recompute failed (or produced nothing) → serve last-good honestly.
+        # No fresh value at the resolved key → serve last-good honestly. (For a
+        # `stale` layer this is the immediate serve; for `block` it is the
+        # recompute-failed fallback.)
         last_key = L.last_good_store_key(durable_id)
         if last_key:
             last_art = L.cache._store.get(last_key)

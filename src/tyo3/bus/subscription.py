@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from tyo3.bus.delta import Delta
+    from tyo3.bus.derived import DerivedFresh
     from tyo3.bus.interest import Interest
     from tyo3.bus.refinement import AffectedRefinement
 
@@ -61,6 +62,11 @@ class Subscription:
         # or its revision-order invariant. Shares the lock/cond for cheap
         # signalling; consumers poll it independently of the delta queue.
         self._refinements: deque[AffectedRefinement] = deque()
+        # The derived-fresh channel is ALSO a separate queue (AB3): a "value X is
+        # now fresh" signal is out-of-band like a refinement — it may arrive after
+        # later revisions' deltas and must not perturb the primary stream or its
+        # revision-order invariant. Shares the lock/cond; polled independently.
+        self._derived: deque[DerivedFresh] = deque()
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._closed = False
@@ -149,6 +155,22 @@ class Subscription:
                 self._refinements.popleft()
             self._cond.notify_all()
 
+    def _offer_derived(self, msg: DerivedFresh) -> None:
+        """Append *msg* to the derived-fresh queue (non-blocking).
+
+        Called by the ``Bus`` on the derived-fresh channel. Like ``_offer`` it
+        must NEVER block the producer; on overflow it drops the **oldest** signal
+        (a derived-fresh is advisory — the subscriber already holds the honest
+        stale/absent value and will re-pull on any later signal, so dropping an
+        old one only delays one re-pull, never hides correctness, AB3)."""
+        with self._lock:
+            if self._closed:
+                return
+            self._derived.append(msg)
+            if len(self._derived) > self._capacity:
+                self._derived.popleft()
+            self._cond.notify_all()
+
     # ── Consumer side (called by the subscriber's own thread) ───────
 
     def poll(self, timeout: float | None = 0.0) -> Delta | None:
@@ -208,6 +230,34 @@ class Subscription:
 
         return None
 
+    def poll_derived(self, timeout: float | None = 0.0) -> DerivedFresh | None:
+        """Non-blocking poll of the **derived-fresh** channel (or block up to
+        *timeout* seconds).
+
+        Returns the next :class:`~tyo3.bus.derived.DerivedFresh` or ``None`` if
+        none is queued and the timeout expires. Independent of ``poll`` /
+        ``poll_refinement`` — the derived-fresh stream is consumed separately, in
+        its own order (a signal for R may arrive after R+1's delta)."""
+        with self._cond:
+            if timeout is None:
+                while not self._closed and not self._derived:
+                    self._cond.wait()
+            elif timeout > 0:
+                deadline = _time.monotonic() + timeout
+                while not self._closed and not self._derived:
+                    remaining = deadline - _time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._cond.wait(timeout=remaining)
+            # timeout == 0: non-blocking, just check.
+
+            if self._derived:
+                msg = self._derived.popleft()
+                self._cond.notify_all()
+                return msg
+
+        return None
+
     def __iter__(self) -> Iterator[Delta]:
         """Blocking iterator: yields deltas in revision order.
 
@@ -256,6 +306,7 @@ class Subscription:
         with self._lock:
             self._queue.clear()
             self._refinements.clear()
+            self._derived.clear()
 
     @property
     def lagged(self) -> bool:

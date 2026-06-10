@@ -155,3 +155,32 @@ surface); **expensive-reverse** (e.g. an LLM summarising an entity's call-sites)
 a `traced` layer — the recording read-set fingerprints exactly the callee + the
 call-site ids it read, so adding a caller self-heals the cached value by
 construction (salsa's dependency model; ty/salsa is the engine underneath).
+
+**Serving: `block` (sync, default) vs `stale` (async).** `serving` is the
+reader-observable freshness contract — orthogonal to `key_locality` (which decides
+*when* a value is invalid) and `recompute` (lazy/eager invalidation). On a cache
+miss:
+
+| `serving` | behaviour on a miss | for |
+|---|---|---|
+| `block` *(default)* | produce **synchronously** at read, return `fresh` (or serve last-good honestly on failure) | cheap producers — the common case |
+| `stale` | serve last-good/`absent` **immediately** and recompute **off the actor**, publishing a `derived` notification when the value warms | slow producers (LLM/HTTP/embeddings) that must never block the cursor path |
+
+The daemon serves reads on the single `SessionActor` thread, so a slow producer on
+the `block` path would stall *every* read. A `stale` layer hands the produce to an
+off-actor `DerivedRecomputeWorker` (`derive/async_recompute.py`, the same daemon-
+thread + queue shape as the precision refiner): it pins a frozen snapshot at the
+read's revision, recomputes through the **same** reentrant DAG seam
+(`derived_traced` / `recompute_now`), warms the content-addressed cache, and — only
+if the bus has subscribers — publishes a `DerivedFresh` on a dedicated out-of-band
+channel (like a refinement; never on the primary `revision > last` stream). The bus
+pump turns that into a `derived` JSON-RPC notification carrying `{layer, id,
+revision}`; the editor re-pulls and swaps the stale card/decoration for the fresh
+value. The worker is a **reader/recompute over a frozen snapshot** — never a writer
+to committed truth, so the one-writer rule holds. A failed recompute or an evicted
+revision is never a miss: the honest last-good/`absent` already served, and the
+cache is warm for the next read regardless of any notification (in-process use
+self-heals). Per-`(layer, id, revision)` dedup keeps a burst of reads from
+stampeding the producer. The default is `block` because async-by-default would add
+flicker + a background worker for cheap layers that gain nothing, and a
+mis-declared slow layer fails *loudly* (it blocks) rather than silently flickering.

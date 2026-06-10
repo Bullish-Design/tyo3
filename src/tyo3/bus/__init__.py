@@ -7,8 +7,9 @@ what-changed (§12.1).  It lives in Python, fed from the write path
 
 from tyo3.bus.bus import Bus
 from tyo3.bus.delta import Delta
+from tyo3.bus.derived import DerivedFresh
 from tyo3.bus.interest import Interest
 from tyo3.bus.refinement import AffectedRefinement
 from tyo3.bus.subscription import Subscription
 
-__all__ = ["Interest", "Delta", "AffectedRefinement", "Subscription", "Bus"]
+__all__ = ["Interest", "Delta", "AffectedRefinement", "DerivedFresh", "Subscription", "Bus"]

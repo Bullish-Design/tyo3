@@ -158,7 +158,7 @@ generator = "loc_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv_loc"
-serving = "stale"
+serving = "block"
 key_locality = "local"
 entity_kinds = ["function"]
 
@@ -169,7 +169,7 @@ generator = "sem_gen"
 generator_version = "v1"
 hash_profile = "structure"
 store = "kv_sem"
-serving = "stale"
+serving = "block"
 key_locality = "semantic"
 entity_kinds = ["function"]
 

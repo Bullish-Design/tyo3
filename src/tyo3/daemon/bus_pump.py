@@ -25,6 +25,7 @@ from tyo3.daemon.protocol import encode_notification
 
 if TYPE_CHECKING:
     from tyo3.bus.delta import Delta
+    from tyo3.bus.derived import DerivedFresh
     from tyo3.bus.refinement import AffectedRefinement
     from tyo3.daemon.session_actor import SessionActor
     from tyo3.daemon.tracking import AffectedTracker
@@ -110,6 +111,16 @@ class BusPump:
                 if ref is None:
                     break
                 self._emit_refinement(ref)
+            # Drain derived-fresh signals (AB3) — another out-of-band channel;
+            # each says "go re-pull (layer, id), the cache is now warm".
+            while True:
+                try:
+                    msg = sub.poll_derived(timeout=0.0)
+                except Exception:
+                    msg = None
+                if msg is None:
+                    break
+                self._emit_derived(msg)
 
     def _emit_delta(self, delta: Delta) -> None:
         # Tracker recording is delta-level — it runs once per revision,
@@ -133,3 +144,16 @@ class BusPump:
             "added": sorted(ref.added),
         }
         self._broadcast(encode_notification("refinement", params))
+
+    def _emit_derived(self, msg: DerivedFresh) -> None:
+        """Emit a ``derived`` notification (AB3): a ``serving="stale"`` value the
+        off-actor worker just produced is now fresh — the editor re-pulls it.
+
+        Broadcast-to-all like a refinement: a client that never read the stale
+        value simply ignores the signal (re-pulling is idempotent)."""
+        params = {
+            "revision": msg.revision,
+            "layer": msg.layer,
+            "durable_id": msg.durable_id,
+        }
+        self._broadcast(encode_notification("derived", params))

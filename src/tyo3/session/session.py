@@ -97,6 +97,7 @@ class TyO3Session(_ReadOps):
         self._watcher_thread: Any = None  # auto-poll daemon thread
         self._watcher_stop: Any = None  # threading.Event for watcher stop
         self._refiner: Any = None  # lazily-built PrecisionRefiner (Phase 9)
+        self._async_worker: Any = None  # lazily-built DerivedRecomputeWorker (AB3)
         # Affected-set precision policy (Concept V2 §5.4). Read from the one
         # validated native config (single source) — not a second TOML parser.
         cg = self._config.code_graph
@@ -414,6 +415,7 @@ class TyO3Session(_ReadOps):
             layers=self._effective_layers,
             head_graph_getter=self._head_graph_or_none,
             derivation_getter=self._get_derivation,
+            async_worker_getter=self._get_async_worker,
         )
 
     # ── Write path ────────────────────────────────────────────────────
@@ -694,6 +696,18 @@ class TyO3Session(_ReadOps):
 
             self._refiner = PrecisionRefiner(self, mode=self._refinement_mode)
         return self._refiner
+
+    def _get_async_worker(self):
+        """Lazily build the off-actor derived recompute worker (AB3).
+
+        Built on first ``serving="stale"`` cache miss (the read seam enqueues
+        through it), the worker's daemon thread starts on its first ``enqueue``.
+        Stopped in ``close()`` alongside the refiner."""
+        if self._async_worker is None:
+            from tyo3.derive.async_recompute import DerivedRecomputeWorker
+
+            self._async_worker = DerivedRecomputeWorker(self)
+        return self._async_worker
 
     def _maybe_refine(self, delta: CommitDelta) -> None:
         """Feed the precision refiner when precision=method (§5.4).
@@ -1008,6 +1022,17 @@ class TyO3Session(_ReadOps):
                 # not block session close.
                 pass
             self._refiner = None
+        # Stop the off-actor derived recompute worker (AB3) before the bus, so no
+        # in-flight "now fresh" publish races a closing bus (mirrors the refiner).
+        worker = getattr(self, "_async_worker", None)
+        if worker is not None:
+            try:
+                worker.stop()
+            except Exception:
+                # Best-effort shutdown: a worker that fails to stop cleanly must
+                # not block session close.
+                pass
+            self._async_worker = None
         # Close the bus (closes all subscriptions).
         bus = getattr(self, "_bus", None)
         if bus is not None:

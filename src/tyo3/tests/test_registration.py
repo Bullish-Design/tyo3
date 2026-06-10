@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import json
+import time
 
 import pytest
 from pydantic import BaseModel
@@ -666,3 +667,134 @@ def test_ab2_producer_lifecycle_setup_teardown(tmp_path):
         s.derived("life", did)  # forces the DAG to build (setup)
         assert events == ["setup"], "setup ran once at DAG build"
     assert events == ["setup", "teardown"], "teardown ran at session close"
+
+
+# ── AB3: Async serve for slow producers ───────────────────────────────────────
+
+_SLEEP = 0.4  # the slow producer's per-call wall-clock cost
+
+
+class _SlowProducer:
+    """A *slow* (LLM/HTTP-style) producer that sleeps in ``produce``. Records each
+    produce so we can assert recompute-once (dedup) and off-actor execution."""
+
+    __test__ = False
+
+    def __init__(self, sleep: float = _SLEEP):
+        self.sleep = sleep
+        self.calls: list[str] = []
+
+    def setup(self) -> None:
+        pass
+
+    def teardown(self) -> None:
+        pass
+
+    def produce(self, ctxs):
+        out = []
+        for c in ctxs:
+            time.sleep(self.sleep)
+            self.calls.append(c.durable_id)
+            out.append(json.dumps({"slow": c.durable_id}).encode())
+        return out
+
+
+def _read_until_fresh(s, layer, did, *, timeout=5.0):
+    """Poll a derived read until the off-actor worker warms the cache."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        dv = s.derived(layer, did)
+        if dv.status == "fresh":
+            return dv
+        time.sleep(0.02)
+    return s.derived(layer, did)
+
+
+def test_ab3_stale_serving_serves_promptly_then_fresh(tmp_path):
+    """A ``serving="stale"`` slow producer never blocks the read: the first read
+    returns promptly (wall-clock < the producer's sleep) as ``absent``/``stale``,
+    and a later read (after the off-actor worker finishes) returns ``fresh`` with
+    the produced value."""
+    prod = _SlowProducer()
+    register_layer(DerivedLayerSpec(name="slow", produce=prod, serving="stale", entity_kinds=("function",)))
+    proj = _make_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        did = s.id_for("m.py", 1, 5)
+        assert s._get_derivation().layer("slow").is_traced
+
+        # First read returns promptly — far under the producer's sleep — and is
+        # honestly non-fresh (no artifact has ever been produced).
+        t0 = time.monotonic()
+        dv = s.derived("slow", did)
+        elapsed = time.monotonic() - t0
+        assert elapsed < _SLEEP, f"stale serving must not block on the producer (took {elapsed:.3f}s)"
+        assert dv.status == "absent", "no last-good yet ⇒ honest absent, not a blocking produce"
+
+        # The off-actor worker eventually warms the cache ⇒ a later read is fresh.
+        fresh = _read_until_fresh(s, "slow", did)
+        assert fresh.status == "fresh", "the background recompute warms the cache for the next read"
+        assert json.loads(fresh.artifact) == {"slow": did}
+        assert prod.calls, "the slow producer ran (off the read thread)"
+
+
+def test_ab3_block_serving_unchanged(tmp_path):
+    """``serving="block"`` keeps today's synchronous behaviour: the first read
+    blocks on the producer and returns ``fresh`` immediately (no async path)."""
+    prod = _SlowProducer(sleep=0.05)
+    register_layer(DerivedLayerSpec(name="blk", produce=prod, serving="block", entity_kinds=("function",)))
+    proj = _make_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        did = s.id_for("m.py", 1, 5)
+        dv = s.derived("blk", did)
+        assert dv.status == "fresh", "a blocking producer's first read produces synchronously ⇒ fresh"
+        assert json.loads(dv.artifact) == {"slow": did}
+        assert prod.calls == [did], "produced once, inline"
+
+
+def test_ab3_stale_dedup_single_produce(tmp_path):
+    """Two rapid reads of the same missing ``(layer, id, revision)`` enqueue/produce
+    **once** — the in-flight dedup keeps a burst of reads from stampeding the
+    producer before the first completes."""
+    prod = _SlowProducer()
+    register_layer(DerivedLayerSpec(name="slow", produce=prod, serving="stale", entity_kinds=("function",)))
+    proj = _make_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        did = s.id_for("m.py", 1, 5)
+        # Two reads back-to-back, both inside the producer's sleep window ⇒ both
+        # enqueue while the first is in flight ⇒ dedup to a single produce.
+        d1 = s.derived("slow", did)
+        d2 = s.derived("slow", did)
+        assert d1.status in ("absent", "stale") and d2.status in ("absent", "stale")
+
+        _read_until_fresh(s, "slow", did)
+        assert prod.calls == [did], "the slow producer ran exactly once despite two rapid reads"
+
+
+def test_ab3_stale_serving_does_not_block_the_actor(tmp_path):
+    """Daemon-shaped (off-actor) check: a slow ``serving="stale"`` ``derived`` fired
+    on the single actor thread returns promptly and a following fast read is not
+    queued behind the slow producer — the produce ran off the actor."""
+    from tyo3.daemon.session_actor import SessionActor
+
+    prod = _SlowProducer()
+    register_layer(DerivedLayerSpec(name="slow", produce=prod, serving="stale", entity_kinds=("function",)))
+    proj = _make_project(tmp_path)
+
+    actor = SessionActor(str(proj))
+    actor.start()
+    try:
+        did = actor.submit(lambda s: s.id_for("m.py", 1, 5))
+        t0 = time.monotonic()
+        dv = actor.submit(lambda s: s.derived("slow", did))  # the slow layer
+        rev = actor.submit(lambda s: s.head)  # a fast read right behind it
+        elapsed = time.monotonic() - t0
+        assert dv.status == "absent"
+        assert isinstance(rev, int)
+        # Both actor round-trips together finish well under one producer sleep ⇒
+        # the slow produce did NOT run on the actor (it was enqueued off it).
+        assert elapsed < _SLEEP, f"the actor must not block on the slow producer (took {elapsed:.3f}s)"
+    finally:
+        actor.stop()
