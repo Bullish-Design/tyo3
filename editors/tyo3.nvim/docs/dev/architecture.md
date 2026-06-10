@@ -110,3 +110,48 @@ a `summary` subscriber does not. Derived layers are lazy (nothing recomputes
 inside the commit), so layer-stamping at publish time is authored-only.
 `refinement` notifications stay broadcast-to-all (a client that didn't receive a
 revision's delta simply ignores its refinement); scoping them is a follow-up.
+
+## Derived layers — producers + cache-key strategy (AB2)
+
+A derived layer's compute is a **`Producer`** (`tyo3.extend`): `produce(ctxs) ->
+list[bytes | BaseModel | None]` plus optional `setup`/`teardown` lifecycle (open
+an LLM/embedding client once at DAG build, close it at `session.close`). The
+legacy `Generator` (`generate(inputs) -> list[bytes]`, the `python`/`command`/
+`http` built-ins) rides a thin `_GeneratorProducer` adapter unchanged — config
+stays valid.
+
+Each `ctx` is a **recording read handle** to the *pinned snapshot* (never the live
+head): `find_references` / `symbol` / `dependents` / `dependencies` / `upstream`
+log every id the producer touches into a per-call **read-set** (the raw
+`ctx.snapshot` is an escape hatch — reads there are recorded only via
+`ctx.note_read`). The read-set is seeded with the entity's own id, because a
+producer always depends on its own `source`.
+
+**Cache key by `key_locality`** (`derive/dag.py`):
+
+| `key_locality` | key = | when it recomputes |
+|---|---|---|
+| `traced` *(default)* | fingerprint of the producer's read-set (each id's content hash) | any read id changes — forward, reverse, sibling, mixed |
+| `local` | the entity's own content hash | own body changes |
+| `semantic` | own hash ⊕ forward-dependency-closure fingerprint | own body or a dependency changes |
+| `reverse-semantic` | own hash ⊕ *direct* reverse-edge fingerprint | own body or a direct caller changes |
+
+`traced` is **produce-then-key**: the key isn't knowable until the producer runs,
+so it inverts the usual key-then-fetch. A read first does a cheap self-heal check
+— re-fingerprint the *previously read* ids over the current snapshot; unchanged +
+cached ⇒ reuse without re-running the producer — and only re-runs (produce → key →
+cache) when a traced id moved or on first read. A `{durable_id}`-only read-set (the
+legacy adapter) degenerates to **byte-identically** the `local` key. The override
+strategies stay key-then-fetch. Self-healing is **lazy-at-read**: adding a caller
+does not eagerly recompute the callee (commit-time invalidation skips traced
+layers); the next *read* of it does.
+
+**Cheap vs expensive reverse (the Spike C taxonomy).** A *reverse*-direction value
+(references, callers, "who implements me") is invisible to forward invalidation, so
+a naive `semantic` references layer is **stale-forever**. The resolution is cost ×
+direction, not one enum: **cheap-reverse** (references, diagnostics — ms to
+recompute) is served as a **live RPC**, never cached as a layer (the `convert/`
+surface); **expensive-reverse** (e.g. an LLM summarising an entity's call-sites) is
+a `traced` layer — the recording read-set fingerprints exactly the callee + the
+call-site ids it read, so adding a caller self-heals the cached value by
+construction (salsa's dependency model; ty/salsa is the engine underneath).

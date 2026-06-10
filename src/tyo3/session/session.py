@@ -1013,6 +1013,11 @@ class TyO3Session(_ReadOps):
         if bus is not None:
             bus.close()
             self._bus = None
+        # Tear down derived-layer producers' clients (AB2 lifecycle), if the DAG
+        # was ever built. Paired with Producer.setup() at DAG build.
+        derivation = getattr(self, "_derivation", None)
+        if derivation is not None:
+            derivation.teardown_producers()
         self._invalidate_head_snap()
         self._head_graph = None
         self._inner.close()

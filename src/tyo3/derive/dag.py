@@ -9,6 +9,7 @@ layers key on the upstream artifact's hash.
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import TYPE_CHECKING, Any
 
 from tyo3.derive.layer import DerivedLayer
@@ -16,6 +17,8 @@ from tyo3.stores import open_store
 
 if TYPE_CHECKING:
     from tyo3.session import Snapshot, TyO3Session
+
+logger = logging.getLogger(__name__)
 
 
 class DerivationDAG:
@@ -46,8 +49,8 @@ class DerivationDAG:
         ``config.generators`` (the existing path); a layer registered via
         ``tyo3.extend.register_layer`` resolves its store/producer from the spec
         objects (or the ``_STORES``/``_GENERATORS`` registries)."""
-        from tyo3.derive.generators import make_generator
-        from tyo3.extend import _LAYERS, DerivedLayerSpec, resolve_generator, resolve_store
+        from tyo3.derive.generators import _GeneratorProducer, make_generator
+        from tyo3.extend import _LAYERS, DerivedLayerSpec, resolve_store
 
         config = session.config
         effective = getattr(session, "effective_layers", None) or config.layers
@@ -77,12 +80,13 @@ class DerivationDAG:
                 continue
 
             spec = _LAYERS.get(name)
+            producer: object | None
             if isinstance(spec, DerivedLayerSpec) and name not in config.layers:
                 # Registered layer: resolve store/producer from the spec objects.
                 if sidecar is None:
                     raise ValueError(f"Cannot resolve store for registered layer '{name}'")
                 store = resolve_store(spec.store, sidecar, layer=name)
-                generator = resolve_generator(spec.produce, name=name)
+                generator, producer = _resolve_producer(spec.produce, name=name)
             else:
                 # Native config-declared derived layer (the existing path).
                 store_name = layer_cfg.store
@@ -102,12 +106,36 @@ class DerivationDAG:
                 if gen_cfg is None:
                     raise ValueError(f"Layer '{name}' has no generator config")
                 generator = make_generator(gen_cfg, name=name)
+                producer = _GeneratorProducer(generator)
 
             layer = DerivedLayer.from_config(layer_cfg, store, generator)
             layer.name = name
+            # The recording producer drives only code-derived layers (AB2). A
+            # layer-derived layer keys on its upstream artifact bytes and runs the
+            # legacy ``generator`` over the upstream ``GenInput`` instead.
+            layer.producer = producer if layer.is_code_derived else None
             layers.append(layer)
 
-        return cls(layers, topo)
+        dag = cls(layers, topo)
+        # Lifecycle: open each producer's client once at DAG build (AB2). Paired
+        # with ``teardown_producers()`` at ``session.close()``.
+        for layer in layers:
+            if layer.producer is not None:
+                layer.producer.setup()
+        return dag
+
+    def teardown_producers(self) -> None:
+        """Tear down every producer's client (AB2 lifecycle, ``session.close``).
+
+        Best-effort: a producer that fails to tear down cleanly must not block
+        session close. Idempotent enough for the single close path."""
+        for layer in self._layers:
+            producer = getattr(layer, "producer", None)
+            if producer is not None:
+                try:
+                    producer.teardown()
+                except Exception:
+                    pass
 
     @property
     def is_empty(self) -> bool:
@@ -158,6 +186,14 @@ class DerivationDAG:
         snap = session.snapshot()
         try:
             for layer in self.iter_layers():
+                if layer.is_traced:
+                    # Traced layers self-heal lazily at read — adding a caller does
+                    # NOT eagerly recompute the callee's value; the next read does
+                    # (AB2: no eager reverse recompute). Still honour deletions so a
+                    # removed entity's binding/read-set is dropped.
+                    for durable_id in deleted:
+                        layer.drop(durable_id)
+                    continue
                 for durable_id in dirty:
                     if not layer.applies_to(_kind_for_id(snap, durable_id)):
                         continue
@@ -256,6 +292,13 @@ class DerivationDAG:
             if layer.key_locality == "semantic":
                 fingerprint = self._dependency_fingerprint(snapshot, durable_id, layer.hash_profile)
                 input_hash = _hash_bytes(f"{content_hash}\x00{fingerprint}".encode())
+            elif layer.key_locality == "reverse-semantic":
+                # Fold in the *direct* reverse edges only (who references me), so a
+                # new/changed caller moves the key — without the transitive-cone
+                # thrash. The traced read-set (§2.4) is the general solution; this
+                # is the cheap opt-out override.
+                fingerprint = self._direct_reverse_fingerprint(snapshot, durable_id, layer.hash_profile)
+                input_hash = _hash_bytes(f"{content_hash}\x00{fingerprint}".encode())
             else:
                 input_hash = content_hash
             source = _entity_source(snapshot, durable_id)
@@ -331,6 +374,173 @@ class DerivationDAG:
             dep_hash = node.content_hashes.get(hash_profile, "") if node else ""
             parts.append(f"{dep_id}={dep_hash}")
         return _hash_bytes("\x00".join(parts).encode("utf-8"))
+
+    def _direct_reverse_fingerprint(self, snapshot: Snapshot, durable_id: str, hash_profile: str) -> str:
+        """Stable fingerprint of *durable_id*'s **direct** reverse edges.
+
+        Folds the content hash of every symbol that directly depends on
+        *durable_id* (its callers/referencers — the maintained reverse index,
+        ``graph.dependents``). Deliberately **direct edges only**: the transitive
+        reverse cone thrashes on hot symbols (§Spike C resolution). Memoised per
+        pinned snapshot — the snapshot is immutable, so the reverse fingerprint of
+        an id never moves under it."""
+        cache = getattr(snapshot, "_ab2_rev_fp_cache", None)
+        if cache is None:
+            cache = {}
+            snapshot._ab2_rev_fp_cache = cache  # type: ignore[attr-defined]
+        ck = (durable_id, hash_profile)
+        if ck in cache:
+            return cache[ck]
+        graph = snapshot.graph()
+        parts: list[str] = []
+        for dep_id in sorted(graph.dependents(durable_id)):
+            node = graph.symbol(dep_id)
+            dep_hash = node.content_hashes.get(hash_profile, "") if node else ""
+            parts.append(f"{dep_id}={dep_hash}")
+        fp = _hash_bytes("\x00".join(parts).encode("utf-8"))
+        cache[ck] = fp
+        return fp
+
+    def _traced_fingerprint(self, snapshot: Snapshot, durable_id: str, read_set: set[str], hash_profile: str) -> str:
+        """Fingerprint a producer's **traced read-set** into a cache key (AB2).
+
+        Folds the content hash (under *hash_profile*) of every id the producer
+        read. The key moves iff any traced id's content changed — forward,
+        reverse, sibling, or mixed — so a lazy read self-heals by construction.
+
+        Degenerate case: a read-set of exactly the entity's own id keys
+        **byte-identically to ``local``** (the legacy-adapter equivalence). A
+        missing/absent id contributes the empty hash, so a deleted dependency
+        still moves the key."""
+        graph = snapshot.graph()
+        if read_set == {durable_id}:
+            node = graph.symbol(durable_id)
+            return node.content_hashes.get(hash_profile, "") if node else ""
+        parts: list[str] = []
+        for did in sorted(read_set):
+            node = graph.symbol(did)
+            h = node.content_hashes.get(hash_profile, "") if node else ""
+            parts.append(f"{did}={h}")
+        return _hash_bytes("\x00".join(parts).encode("utf-8"))
+
+    @staticmethod
+    def _coerce_artifact(value: Any) -> bytes | None:
+        """Coerce a producer's output to artifact bytes (``bytes | BaseModel |
+        None`` per §2.4). ``None`` passes through as "no artifact"."""
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, str):
+            return value.encode("utf-8")
+        dump = getattr(value, "model_dump_json", None)  # pydantic BaseModel
+        if callable(dump):
+            return dump().encode("utf-8")
+        return str(value).encode("utf-8")
+
+    def _produce_code(self, layer: DerivedLayer, snapshot: Snapshot, durable_id: str) -> tuple[bytes | None, set[str]]:
+        """Run the layer's recording producer for one code entity.
+
+        Returns ``(artifact_bytes_or_None, read_set)``. The read-set is the set of
+        ids the producer touched through its recording context — used as the key
+        for traced layers, ignored by the override strategies."""
+        from tyo3.session.views import _RecordingContext
+
+        ctx = _RecordingContext(snapshot, durable_id)
+        results = layer.producer.produce([ctx])  # type: ignore[union-attr]
+        art = self._coerce_artifact(results[0]) if results else None
+        return art, ctx.read_set
+
+    def produce_artifact(
+        self, layer: DerivedLayer, snapshot: Snapshot, durable_id: str, gen_input: Any
+    ) -> bytes | None:
+        """Produce one artifact for a **non-traced** layer (override / layer-derived).
+
+        Code-derived layers run the recording producer (its read-set is ignored —
+        the key already came from the override strategy); a layer-derived layer
+        runs the legacy ``generator`` over the upstream ``GenInput``. The unified
+        seam so the ``python``/``command``/``http`` built-ins ride one path."""
+        if layer.is_code_derived and layer.producer is not None:
+            art, _ = self._produce_code(layer, snapshot, durable_id)
+            return art
+        artifacts = layer.generator.generate([gen_input])
+        return artifacts[0] if artifacts else None
+
+    def derived_traced(self, layer: DerivedLayer, snapshot: Snapshot, durable_id: str):
+        """Resolve a **traced** layer's value at *snapshot* (AB2 produce-then-key).
+
+        The traced key is only known by running the producer, so this inverts the
+        usual key-then-fetch order:
+
+        1. **Cheap self-heal check.** If a prior binding exists, re-fingerprint the
+           *previously read* ids over the current snapshot (no produce). Unchanged
+           + cached ⇒ reuse (a lazy read that nothing it depends on perturbed).
+        2. **Produce-then-key.** Otherwise run the producer through a recording
+           context, fingerprint its read-set, and cache the artifact under that
+           key. A new caller (or a caller's body change) moves a traced id ⇒ the
+           cheap check fails ⇒ the value recomputes and reflects the change.
+        3. **Honest staleness.** A failed/empty produce serves last-good (``stale``
+           / ``failed``) or ``absent``, mirroring the override read path."""
+        from tyo3.models.derived import DerivedValue
+
+        rev = snapshot.revision
+        if snapshot.graph().symbol(durable_id) is None:
+            # Not present at this revision (deleted / never reconciled).
+            return DerivedValue(artifact=None, status="absent", revision=rev, layer=layer.name)
+
+        # 1. Cheap self-heal check over the previously-read set.
+        prior_hash = layer.binding(durable_id)
+        prior_set = layer.traced_read_set(durable_id)
+        if prior_hash is not None and prior_set is not None:
+            live_hash = self._traced_fingerprint(snapshot, durable_id, prior_set, layer.hash_profile)
+            if live_hash == prior_hash:
+                art = layer.cache.get(layer.keys_for(prior_hash))
+                if art is not None:
+                    return DerivedValue(artifact=art, status="fresh", revision=rev, layer=layer.name)
+
+        # 2. Produce-then-key (first read, or a traced id moved).
+        art: bytes | None = None
+        read_set: set[str] | None = None
+        try:
+            art, read_set = self._produce_code(layer, snapshot, durable_id)
+        except Exception:
+            layer.mark_failed(durable_id)
+            logger.warning("Traced produce failed for layer=%s id=%s", layer.name, durable_id, exc_info=True)
+
+        if art is not None and read_set is not None:
+            input_hash = self._traced_fingerprint(snapshot, durable_id, read_set, layer.hash_profile)
+            key = layer.keys_for(input_hash)
+            layer.cache.put(key, art)
+            layer.bind_traced(durable_id, input_hash, read_set, key.to_store_key())
+            return DerivedValue(artifact=art, status="fresh", revision=rev, layer=layer.name)
+
+        # 3. Produce failed / produced nothing → serve last-good honestly.
+        last_key = layer.last_good_store_key(durable_id)
+        if last_key:
+            last_art = layer.cache._store.get(last_key)
+            if last_art is not None:
+                status = "failed" if durable_id in layer._failed else "stale"
+                return DerivedValue(artifact=last_art, status=status, revision=rev, layer=layer.name)
+        if durable_id in layer._failed:
+            return DerivedValue(artifact=None, status="failed", revision=rev, layer=layer.name)
+        return DerivedValue(artifact=None, status="absent", revision=rev, layer=layer.name)
+
+
+def _resolve_producer(produce: Any, *, name: str) -> tuple[Any, object]:
+    """Resolve a ``DerivedLayerSpec.produce`` value to ``(generator, producer)``.
+
+    - a recording ``Producer`` object (exposes ``produce``) → used directly, no
+      legacy generator;
+    - a dotted string or a legacy ``Generator`` (exposes ``generate``) → resolved
+      through ``resolve_generator`` and wrapped in ``_GeneratorProducer`` so it
+      keys identically to ``local``."""
+    from tyo3.derive.generators import _GeneratorProducer
+    from tyo3.extend import resolve_generator
+
+    if not isinstance(produce, str) and hasattr(produce, "produce"):
+        return None, produce
+    generator = resolve_generator(produce, name=name)
+    return generator, _GeneratorProducer(generator)
 
 
 def _effective_topo_order(native_topo: tuple[str, ...], effective: dict) -> list[str]:

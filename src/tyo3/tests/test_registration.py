@@ -104,6 +104,64 @@ def _make_project(tmp_path, body: str = "def f(x):\n    if x > 0:\n        retur
     return proj
 
 
+# ── AB2 helpers: a callee/caller project + a real references producer ──────────
+
+_CALLER_LIB = "def target(x: int) -> int:\n    if x > 0:\n        return x + 1\n    return 0\n"
+_CALLER_APP = "from lib import target\n\n\ndef caller() -> int:\n    return target(5)\n"
+
+
+def _make_caller_project(tmp_path):
+    """A two-file project where ``app.caller`` calls ``lib.target`` — the Spike C
+    setup (a *reverse*-dependency layer lives on the callee)."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text('[project]\nname = "p"\n')
+    (proj / "lib.py").write_text(_CALLER_LIB)
+    (proj / "app.py").write_text(_CALLER_APP)
+    return proj
+
+
+class _RefsProducer:
+    """A real *references* producer (now possible — it reads the recording
+    snapshot, not just text). Its value is the number of references to the
+    entity; ``find_references()`` records the callers into the read-set, so a new
+    caller self-heals the cached value. ``calls`` records each produce for the
+    recompute-vs-reuse assertions."""
+
+    __test__ = False
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def setup(self) -> None:
+        pass
+
+    def teardown(self) -> None:
+        pass
+
+    def produce(self, ctxs):
+        out = []
+        for c in ctxs:
+            self.calls.append(c.durable_id)
+            refs = c.find_references()
+            out.append(json.dumps({"n": len(refs)}).encode())
+        return out
+
+
+class _CountingComplexity:
+    """A legacy ``Generator`` (text-only) that records its invocations — the
+    ``{durable_id}`` read-set baseline (keys like ``local``)."""
+
+    __test__ = False
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    def generate(self, inputs):
+        self.calls.extend(i.durable_id for i in inputs)
+        return [json.dumps({"score": 1}).encode() for _ in inputs]
+
+
 def _register_tests_and_complexity():
     register_layer(AuthoredLayerSpec(name="tests", entity_kinds=("function", "method"), display="inline-note"))
     register_layer(
@@ -445,3 +503,166 @@ def test_registered_authored_record_rides_edit_and_move_not_rename(tmp_path):
         assert renamed_did is not None
         assert renamed_did != did, "a rename mints a new id (identity hole — AB8)"
         assert s.authored("tests", renamed_did).status == "absent", "the authored record does NOT ride a rename"
+
+
+# ── AB2: Producer protocol + traced read-sets ─────────────────────────────────
+
+
+def test_ab2_registered_producer_defaults_to_traced(tmp_path):
+    """A registered ``Producer`` with ``key_locality`` omitted keys on the traced
+    read-set (the new default), not ``local``."""
+    register_layer(DerivedLayerSpec(name="refs", produce=_RefsProducer(), entity_kinds=("function",)))
+    proj = _make_caller_project(tmp_path)
+    with TyO3Session(str(proj)) as s:
+        s.sync_all()
+        L = s._get_derivation().layer("refs")
+        assert L.key_locality == "traced"
+        assert L.is_traced
+
+
+def test_ab2_traced_references_layer_self_heals_on_new_caller(tmp_path):
+    """The Spike C inverse (``spike_c2.py`` port): prime a references layer on the
+    callee, add a new caller, **re-read** → the producer recomputes and the value
+    reflects the new caller. Today's ``semantic`` references layer is
+    stale-forever here; the traced read-set fixes it by construction."""
+    prod = _RefsProducer()
+    register_layer(DerivedLayerSpec(name="refs", produce=prod, entity_kinds=("function",)))
+    proj = _make_caller_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        s.sync_all()
+        tid = s.id_for("lib.py", 1, 5)  # the callee `target`
+        assert s._get_derivation().layer("refs").is_traced
+
+        # First read primes the cache (cold produce).
+        prod.calls.clear()
+        v1 = s.derived("refs", tid)
+        assert v1.status == "fresh"
+        n1 = json.loads(v1.artifact)["n"]
+        assert prod.calls == [tid], "cold read produces once"
+
+        # A no-op re-read reuses the cache (cheap self-heal hit, no recompute).
+        prod.calls.clear()
+        s.derived("refs", tid)
+        assert prod.calls == [], "an unchanged re-read does NOT re-run the producer"
+
+        # Add a NEW caller — the callee's own body is untouched, but a *reverse*
+        # dependency (the caller's body) changes.
+        s.edit("app.py", _CALLER_APP.replace("return target(5)", "return target(5) + target(6)"))
+        tid2 = s.id_for("lib.py", 1, 5)
+        assert tid2 == tid, "the callee id is stable across the caller edit"
+
+        # Re-read → recomputes (the inverse of stale-forever) and reflects it.
+        prod.calls.clear()
+        v2 = s.derived("refs", tid2)
+        assert tid in prod.calls, "a new caller self-heals the callee's references layer at read"
+        n2 = json.loads(v2.artifact)["n"]
+        assert n2 > n1, "the recomputed value reflects the new caller"
+
+
+def test_ab2_legacy_adapter_keys_identically_to_local(tmp_path):
+    """A legacy ``Generator`` ridden as a traced producer records read-set
+    ``{durable_id}`` ⇒ its cache key is **byte-identical** to the pre-AB2
+    ``local`` key (the entity's own content hash)."""
+    register_layer(
+        DerivedLayerSpec(name="cc_local", produce=_Complexity(), entity_kinds=("function",), key_locality="local")
+    )
+    register_layer(DerivedLayerSpec(name="cc_traced", produce=_Complexity(), entity_kinds=("function",)))  # → traced
+    proj = _make_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        did = s.id_for("m.py", 1, 5)
+        dag = s._get_derivation()
+        L_local = dag.layer("cc_local")
+        L_traced = dag.layer("cc_traced")
+        assert not L_local.is_traced and L_traced.is_traced
+
+        v_local = s.derived("cc_local", did)
+        v_traced = s.derived("cc_traced", did)
+        assert v_local.status == "fresh" and v_traced.status == "fresh"
+        assert v_local.artifact == v_traced.artifact, "same generator ⇒ same artifact"
+
+        # The whole point: a {durable_id} read-set degenerates to the `local` key.
+        local_key = L_local.binding(did)
+        traced_key = L_traced.binding(did)
+        assert local_key == traced_key, "the traced {durable_id} key is byte-identical to local"
+        with s.snapshot() as snap:
+            content_hash = snap.graph().symbol(did).content_hashes["structure"]
+        assert local_key == content_hash, "and that key IS the pre-AB2 local key (own content hash)"
+
+
+def test_ab2_legacy_adapter_no_recompute_on_dependency_change(tmp_path):
+    """No regression: a ``{durable_id}`` read-set (legacy adapter) does **not**
+    recompute when only a *dependency* changes — it keys exactly like ``local``."""
+    prod = _CountingComplexity()
+    register_layer(DerivedLayerSpec(name="cc", produce=prod, entity_kinds=("function",)))  # → traced, {durable_id}
+    proj = _make_caller_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        s.sync_all()
+        cid = s.id_for("app.py", 4, 5)  # the caller
+        prod.calls.clear()
+        s.derived("cc", cid)
+        assert prod.calls == [cid], "cold read produces once"
+
+        # Edit the caller's *dependency* (the callee body). The caller's own
+        # content is unchanged ⇒ a {durable_id}-keyed layer must reuse.
+        s.edit("lib.py", _CALLER_LIB.replace("return x + 1", "return x + 2"))
+        cid2 = s.id_for("app.py", 4, 5)
+        assert cid2 == cid
+        prod.calls.clear()
+        s.derived("cc", cid2)
+        assert prod.calls == [], "a dependency-only change does NOT recompute a {durable_id} layer"
+
+
+def test_ab2_reverse_semantic_override_recomputes_on_caller_change(tmp_path):
+    """The ``reverse-semantic`` opt-out override keys on *direct* reverse edges, so
+    a changed caller moves the callee's key — recompute at read, no traced
+    read-set needed."""
+    prod = _CountingComplexity()
+    register_layer(
+        DerivedLayerSpec(name="rs", produce=prod, entity_kinds=("function",), key_locality="reverse-semantic")
+    )
+    proj = _make_caller_project(tmp_path)
+
+    with TyO3Session(str(proj)) as s:
+        s.sync_all()
+        tid = s.id_for("lib.py", 1, 5)
+        L = s._get_derivation().layer("rs")
+        assert not L.is_traced and L.key_locality == "reverse-semantic"
+
+        prod.calls.clear()
+        s.derived("rs", tid)
+        assert prod.calls == [tid], "cold read produces once"
+
+        # A changed caller moves the direct-reverse fingerprint ⇒ key miss ⇒ read
+        # self-heals (even though commit-time invalidation never saw the callee).
+        s.edit("app.py", _CALLER_APP.replace("return target(5)", "return target(5) + target(6)"))
+        tid2 = s.id_for("lib.py", 1, 5)
+        prod.calls.clear()
+        s.derived("rs", tid2)
+        assert tid in prod.calls, "reverse-semantic recomputes when a direct caller changes"
+
+
+def test_ab2_producer_lifecycle_setup_teardown(tmp_path):
+    """``Producer.setup()`` runs once at DAG build; ``teardown()`` at session
+    close."""
+    events: list[str] = []
+
+    class _Lifecycle:
+        def setup(self):
+            events.append("setup")
+
+        def teardown(self):
+            events.append("teardown")
+
+        def produce(self, ctxs):
+            return [b"{}" for _ in ctxs]
+
+    register_layer(DerivedLayerSpec(name="life", produce=_Lifecycle(), entity_kinds=("function",)))
+    proj = _make_project(tmp_path)
+    with TyO3Session(str(proj)) as s:
+        did = s.id_for("m.py", 1, 5)
+        s.derived("life", did)  # forces the DAG to build (setup)
+        assert events == ["setup"], "setup ran once at DAG build"
+    assert events == ["setup", "teardown"], "teardown ran at session close"

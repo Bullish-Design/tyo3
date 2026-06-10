@@ -86,10 +86,10 @@ class RecomputeScheduler:
                     continue
                 try:
                     gen_input, _ = dag.resolve_input(layer, snapshot, item.durable_id)
-                    artifacts = layer.generator.generate([gen_input])
-                    if artifacts:
+                    artifact = dag.produce_artifact(layer, snapshot, item.durable_id, gen_input)
+                    if artifact is not None:
                         cache_key = layer.keys_for(item.input_hash)
-                        layer.cache.put(cache_key, artifacts[0])
+                        layer.cache.put(cache_key, artifact)
                         layer.bind(
                             item.durable_id,
                             item.input_hash,
@@ -123,14 +123,14 @@ class RecomputeScheduler:
         key = (layer.name, input_hash)
 
         try:
-            artifacts = layer.generator.generate([gen_input])
-            if artifacts:
+            artifact = dag.produce_artifact(layer, snapshot, durable_id, gen_input)
+            if artifact is not None:
                 cache_key = layer.keys_for(input_hash)
-                layer.cache.put(cache_key, artifacts[0])
+                layer.cache.put(cache_key, artifact)
                 layer.bind(durable_id, input_hash, cache_key.to_store_key())
                 layer.mark_clear(durable_id)
                 self._done.add(key)
-                return artifacts[0]
+                return artifact
         except GeneratorFailed:
             layer.mark_failed(durable_id)
         except Exception:

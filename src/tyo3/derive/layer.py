@@ -34,9 +34,18 @@ class DerivedLayer:
     hash_profile: str
     serving: Literal["stale", "block"]
     recompute: Literal["lazy", "eager"]
-    key_locality: Literal["local", "semantic"]
+    # ``traced`` (AB2 default for the recording ``Producer`` protocol) keys on the
+    # producer's actual read-set; ``local``/``semantic``/``reverse-semantic`` are
+    # fast-path overrides that key without running the producer.
+    key_locality: Literal["local", "semantic", "reverse-semantic", "traced"]
     entity_kinds: frozenset[str] | None  # None = all
     cache: ArtifactCache
+
+    # The AB2 recording producer (``tyo3.extend.Producer``). Set by the DAG at
+    # build time — a registered ``Producer`` object directly, or a legacy
+    # ``Generator`` wrapped in ``_GeneratorProducer``. ``None`` for layer-derived
+    # layers, which still ride the upstream-artifact ``generator`` path.
+    producer: object | None = None
 
     # Per-entity binding: durable_id -> last-served input_hash.
     # Populated/maintained by invalidation and recompute (Steps 5–7).
@@ -45,6 +54,10 @@ class DerivedLayer:
     _last_good: dict[str, str] = field(default_factory=dict, repr=False)
     # Per-entity failure state.
     _failed: set[str] = field(default_factory=set, repr=False)
+    # AB2 traced layers: durable_id -> the read-set fingerprinted into its key.
+    # Lets a read cheaply re-fingerprint the *previously read* ids without
+    # re-running the producer (the lazy self-heal check).
+    _read_sets: dict[str, set[str]] = field(default_factory=dict, repr=False)
 
     @classmethod
     def from_config(
@@ -78,6 +91,14 @@ class DerivedLayer:
         """True when this layer derives directly from code entities."""
         return self.depends_on == ("code",)
 
+    @property
+    def is_traced(self) -> bool:
+        """True when this layer keys on the producer's traced read-set (AB2).
+
+        Only code-derived layers can be traced — a layer-derived layer keys on
+        its upstream artifact bytes, not a snapshot read-set."""
+        return self.key_locality == "traced" and self.is_code_derived
+
     def keys_for(self, input_hash: str) -> CacheKey:
         """Build the cache key for an input_hash under this layer's version."""
         return CacheKey(input_hash=input_hash, generator_version=self.generator_version)
@@ -102,6 +123,18 @@ class DerivedLayer:
         """The last-served input_hash for *durable_id*, or None."""
         return self._bindings.get(durable_id)
 
+    def bind_traced(self, durable_id: str, input_hash: str, read_set: set[str], store_key: str) -> None:
+        """Record a traced binding: the served input_hash plus the read-set it was
+        fingerprinted from (so a later read can re-check it cheaply, AB2)."""
+        self._bindings[durable_id] = input_hash
+        self._read_sets[durable_id] = set(read_set)
+        self._last_good[durable_id] = store_key
+        self._failed.discard(durable_id)
+
+    def traced_read_set(self, durable_id: str) -> set[str] | None:
+        """The read-set last fingerprinted for *durable_id*, or None."""
+        return self._read_sets.get(durable_id)
+
     def last_good_store_key(self, durable_id: str) -> str | None:
         """The store key of the last-good artifact for *durable_id*."""
         return self._last_good.get(durable_id)
@@ -121,4 +154,5 @@ class DerivedLayer:
         """Drop all state for *durable_id* (entity deleted)."""
         self._bindings.pop(durable_id, None)
         self._last_good.pop(durable_id, None)
+        self._read_sets.pop(durable_id, None)
         self._failed.discard(durable_id)

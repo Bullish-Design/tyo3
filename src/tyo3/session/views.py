@@ -20,6 +20,96 @@ from tyo3.models.derived import DerivedValue
 from tyo3.session.read_ops import _ReadOps
 
 
+class _RecordingContext:
+    """A recording read handle to a pinned snapshot (AB2 ``ProduceContext``).
+
+    Wraps a frozen :class:`Snapshot` and the entity being produced. Every id the
+    producer touches through the typed read methods (``find_references`` /
+    ``symbol`` / ``dependents`` / ``dependencies`` / ``upstream``) is appended to
+    :attr:`read_set`; the framework then fingerprints *exactly that set* into the
+    cache key (``DerivationDAG``), so a lazy read self-heals whenever any traced
+    id changes — forward, reverse, sibling, or mixed — by construction (salsa's
+    dependency model; API_DESIGN §2.4).
+
+    It reads the **frozen snapshot only** (golden rule #2) — never the live head.
+    The raw :attr:`snapshot` is the escape hatch: reads done directly off it are
+    *not* auto-traced, so the producer must call :meth:`note_read` to record them.
+
+    The read-set is seeded with the entity's own ``durable_id`` at construction:
+    a producer always depends on the entity it is producing for (its ``source``).
+    A producer that touches nothing else therefore keys identically to ``local``.
+    """
+
+    def __init__(self, snapshot: Any, durable_id: str) -> None:
+        self.snapshot = snapshot
+        self.durable_id = durable_id
+        self.read_set: set[str] = {durable_id}
+        self._graph = snapshot.graph()
+        node = self._graph.symbol(durable_id)
+        self._node = node
+        self.kind = node.kind.value if node is not None else ""
+        self.location = f"{node.file}::{node.qualified_name}" if node is not None else ""
+        self._source: str | None = None
+
+    @property
+    def source(self) -> str:
+        """The entity's own source text (lazily read off the frozen snapshot)."""
+        if self._source is None:
+            from tyo3.derive.dag import _entity_source
+
+            try:
+                self._source = _entity_source(self.snapshot, self.durable_id)
+            except Exception:
+                self._source = ""
+        return self._source
+
+    def find_references(self) -> list[Any]:
+        """References to this entity. Records every referencing id (its direct
+        reverse/dependent edges) into the read-set, then returns the LSP
+        references for the producer's value. Adding a caller changes the recorded
+        set (or a caller's body), so a lazy read self-heals."""
+        self.read_set |= self._graph.dependents(self.durable_id)
+        node = self._node
+        if node is None:
+            return []
+        # Resolve at the *name* position (selection_range), not the def-keyword
+        # start, so the LSP reference search anchors on the symbol.
+        pos = (node.selection_range or node.range).start
+        try:
+            return self.snapshot.find_references(str(node.file), pos.line, pos.column)
+        except Exception:
+            return []
+
+    def symbol(self, durable_id: str) -> Any | None:
+        """Look up a symbol by id, recording it as a read."""
+        self.read_set.add(durable_id)
+        return self._graph.symbol(durable_id)
+
+    def dependents(self, durable_id: str | None = None) -> list[str]:
+        """Direct reverse edges (who depends on me). Records them as reads."""
+        target = durable_id or self.durable_id
+        ids = self._graph.dependents(target)
+        self.read_set |= ids
+        return sorted(ids)
+
+    def dependencies(self, durable_id: str | None = None) -> list[str]:
+        """Direct forward edges (what I depend on). Records them as reads."""
+        target = durable_id or self.durable_id
+        ids = self._graph.dependencies(target)
+        self.read_set |= ids
+        return sorted(ids)
+
+    def upstream(self, layer: str) -> Any:
+        """The value of a ``depends_on`` layer for this entity. The upstream id is
+        recorded; the upstream layer's own traced read-set keys it transitively."""
+        self.read_set.add(self.durable_id)
+        return self.snapshot.derived(layer, self.durable_id)
+
+    def note_read(self, ids: Any) -> None:
+        """Record ids read through the raw :attr:`snapshot` escape hatch."""
+        self.read_set |= set(ids)
+
+
 class _OwnedView:
     """A convenience layer view (``session.code`` / ``session.layer(...)``) that
     **owns** the head snapshot it reads over.
@@ -227,6 +317,12 @@ class Snapshot(_ReadOps):
         if dag.is_empty:
             return DerivedValue(artifact=None, status="absent", revision=self.revision, layer=layer)
         L = dag.layer(layer)
+        # Traced layers (AB2 default) key on the producer's read-set, which is only
+        # known by running it — so they invert key-then-fetch into produce-then-key
+        # with a cheap self-heal check. The override strategies below stay on the
+        # key-then-fetch fast path.
+        if L.is_traced:
+            return dag.derived_traced(L, self, durable_id)
         try:
             gen_input, input_hash = dag.resolve_input(L, self, durable_id)
         except (KeyError, AttributeError):

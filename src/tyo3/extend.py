@@ -112,8 +112,11 @@ class DerivedLayerSpec:
     generator_version: str = "v1"
     hash_profile: str = "structure"
     store: StoreFactory | str = "fs"
-    # Cache-key strategy. None projects to ``local`` for AB1 (the traced
-    # read-set default is AB2; ``DerivedLayer`` only supports local/semantic).
+    # Cache-key strategy. ``None`` projects to the AB2 **traced** read-set: the
+    # framework fingerprints exactly the ids the producer reads through its
+    # recording context, so the layer self-heals on forward/reverse/sibling
+    # changes by construction. ``local``/``semantic``/``reverse-semantic`` are
+    # explicit fast-path overrides that key without running the producer.
     key_locality: KeyLocality | None = None
     serving: Serving = "stale"
     recompute: Recompute = "lazy"
@@ -128,7 +131,7 @@ class DerivedLayerSpec:
         ``generator``/``store`` are ``None`` here: a registered layer resolves
         its producer/store from this spec's *objects* (or the registries), not
         from ``config.generators``/``config.stores`` (``AB1_DESIGN_NOTE.md`` §4).
-        ``key_locality=None`` ⇒ ``local`` for AB1.
+        ``key_locality=None`` ⇒ ``traced`` (the AB2 recording-read-set default).
         """
         return LayerConfig(
             origin="derived",
@@ -142,7 +145,7 @@ class DerivedLayerSpec:
             entity_kinds=tuple(self.entity_kinds),
             history=True,
             review_on_change=False,
-            key_locality=self.key_locality or "local",
+            key_locality=self.key_locality or "traced",
         )
 
 

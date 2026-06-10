@@ -47,6 +47,45 @@ class Generator(Protocol):
         ...
 
 
+# ── Legacy → Producer adapter (AB2) ──────────────────────────────────────
+#
+# The AB2 produce path runs every code-derived layer through the recording
+# ``Producer`` protocol (``tyo3.extend``). A layer declared with a legacy
+# ``Generator`` (the ``python``/``command``/``http`` built-ins, or any object
+# exposing ``generate(inputs)``) rides this thin adapter unchanged: it builds the
+# ``GenInput`` batch from each recording context and notes ``{durable_id}`` as the
+# read-set, so a traced layer wrapping a legacy generator keys **byte-identically
+# to ``local``** (the degenerate single-own-id read-set, ``dag.py``). The lifecycle
+# hooks are no-ops — a dotted-string callable has no client to open or close.
+
+
+class _GeneratorProducer:
+    """Adapt a legacy :class:`Generator` to the AB2 ``Producer`` contract.
+
+    ``produce(ctxs)`` rebuilds the batched ``Generator.generate(inputs)`` call
+    from the recording contexts and records each context's read-set as exactly
+    ``{durable_id}`` — the legacy generator only ever saw the entity's own text
+    (``GenInput.source``), so its data dependency is its own content and nothing
+    else. That makes a traced layer wrapping it recompute on its own-body change
+    only, identical to ``local``."""
+
+    def __init__(self, generator: Generator) -> None:
+        self._generator = generator
+
+    def produce(self, ctxs: list) -> list[bytes]:
+        inputs = [GenInput(durable_id=c.durable_id, source=c.source, kind=c.kind) for c in ctxs]
+        for c in ctxs:
+            # Record the read-set as the entity itself — keys like `local`.
+            c.note_read([c.durable_id])
+        return self._generator.generate(inputs)
+
+    def setup(self) -> None:
+        """No-op: a legacy generator has no client to open."""
+
+    def teardown(self) -> None:
+        """No-op: a legacy generator has no client to close."""
+
+
 # ── Dispatcher ───────────────────────────────────────────────────────────
 
 
