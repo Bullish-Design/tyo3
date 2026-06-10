@@ -9,9 +9,11 @@ local daemon = require("tyo3.daemon")
 
 local M = {}
 
--- bufnr -> root (cached); bufnr -> uv timer for debounce.
+-- bufnr -> root (cached); bufnr -> uv timer for debounce;
+-- bufnr -> sha256 of the last-synced overlay text (double-commit dedup).
 M._root_by_buf = {}
 M._debounce = {}
+M._last_synced = {}
 M._setup_done = false
 
 local function buf_path(bufnr)
@@ -83,9 +85,12 @@ function M.on_buf_enter(bufnr)
     return
   end
   local path = buf_path(bufnr)
+  local text = buffer_text(bufnr)
   M.with_client(bufnr, function(client)
     client:request("open", { root = root }, function()
-      client:request("sync_buffer", { path = path, text = buffer_text(bufnr) }, function()
+      client:request("sync_buffer", { path = path, text = text }, function()
+        -- Seed the dedup hash so the first `:w` of an unedited buffer is a no-op.
+        M._last_synced[bufnr] = vim.fn.sha256(text)
         require("tyo3.decorate").apply(bufnr)
       end)
     end)
@@ -133,13 +138,24 @@ function M.on_text_changed(bufnr)
 end
 
 --- Force a sync of *bufnr* now (BufWritePost, or after the debounce fires).
+--
+-- The editor commits twice per save: the debounced TextChanged sync, then the
+-- BufWritePost sync of identical bytes. A redundant re-commit re-reconciles the
+-- file and would clear durable level state (e.g. needs_review) on the engine.
+-- Dedup on a per-buffer content hash so an unchanged buffer is never re-synced.
 function M.sync_now(bufnr)
   local path = buf_path(bufnr)
   if not path then
     return
   end
-  M.rpc(bufnr, "sync_buffer", { path = path, text = buffer_text(bufnr) }, function(err, _delta)
+  local text = buffer_text(bufnr)
+  local h = vim.fn.sha256(text)
+  if h == M._last_synced[bufnr] then
+    return
+  end
+  M.rpc(bufnr, "sync_buffer", { path = path, text = text }, function(err, _delta)
     if not err then
+      M._last_synced[bufnr] = h
       require("tyo3.decorate").apply(bufnr)
     end
   end)
