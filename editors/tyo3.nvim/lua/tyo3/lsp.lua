@@ -538,11 +538,18 @@ function M.toggle()
   cfg.lsp = not cfg.lsp
   if cfg.lsp then
     local tyo3 = require("tyo3")
+    local layer_on = require("tyo3.config").layer_diagnostics_enabled()
     for _, b in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == "python" then
         local root = tyo3.root_for_buf(b)
         if root then
           M.attach(b, root)
+          -- Seed layer-state diagnostics so enabling reflects current state
+          -- immediately (don't wait for the next bus delta to surface a
+          -- pre-existing needs_review / orphaned).
+          if layer_on then
+            M.refresh_layer_diagnostics(b, root)
+          end
         end
       end
     end

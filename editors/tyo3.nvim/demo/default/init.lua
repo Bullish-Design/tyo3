@@ -28,7 +28,9 @@ require("tyo3").setup({
   -- Use the module form so no console-script install is required for the demo.
   daemon_cmd = { "python", "-m", "tyo3.daemon" },
   auto_start = true,
-  debounce_ms = 200,
+  -- A touch above the typing speed so a multi-keystroke edit (ciwprice) commits
+  -- once, after typing settles — one overlay sync, not a partial then a full one.
+  debounce_ms = 400,
   virtual_text = true,
   panel = "always",
 })

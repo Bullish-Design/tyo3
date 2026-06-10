@@ -51,7 +51,34 @@ ACTIONS: list[tuple[float, str]] = [
     (0.7, ":w\r"),                  # debounced commit fires
     (5.0, ":TyO3Affected\r"),       # Scene 6: navigate the affected set
     (2.0, "1\r"),
-    (2.5, ":qa!\r"),
+    # Scene 7: opt in to the native LSP bridge (same engine, now over LSP).
+    (2.5, ":e store.py\r"),
+    (1.5, ":TyO3Lsp\r"),
+    # Scene 8: native hover (K) + goto-definition (<C-]>=\x1d) + back (<C-o>=\x0f).
+    (3.0, "/Item().label\r"),
+    (0.8, "K"),
+    (2.5, "\x1d"),
+    (2.5, "\x0f"),
+    # Scene 9: project-wide references (grr → quickfix).
+    (1.5, "grr"),
+    (3.0, ":cclose\r"),
+    # Scene 10: the headline — review-state drift + a type error, unified in ]d.
+    (0.8, "/def show_label\r"),
+    (0.6, ":TyO3Note keep this label stable\r"),
+    (2.0, "/\\.label\r"),           # land on the .label() call (not show_label)
+    (0.4, "l"),
+    (0.4, "ciwprice\x1b"),          # body drifts → needs_review; -> str now broken
+    # One commit only (debounced overlay sync); NO :w — an identical re-commit
+    # would re-settle the body and clear needs_review.
+    (4.0, ":lua local b=vim.api.nvim_get_current_buf(); require('tyo3.lsp').refresh_layer_diagnostics(b, require('tyo3').root_for_buf(b))\r"),
+    (2.5, "gg"),
+    (0.4, "]d"),                    # walk to the first diagnostic
+    (2.5, ":lua vim.diagnostic.open_float()\r"),
+    (3.0, "\x1b"),
+    (0.4, "]d"),                    # …and the next (the other kind)
+    (2.5, ":lua vim.diagnostic.open_float()\r"),
+    (3.0, "\x1b"),
+    (0.6, ":qa!\r"),
     (1.5, ""),                      # let it exit
 ]
 

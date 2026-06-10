@@ -2,9 +2,13 @@
 #   devenv shell -- demo-record   (or: vhs editors/tyo3.nvim/demo/default/tour.tape)
 #
 # Drives a real terminal Neovim through the plugin's verbs against the synthetic
-# "shop" project. Sleeps are generous and deliberate — we wait past every async
-# beat (daemon open, debounced commit, precision refinement) so the recording is
-# deterministic. Determinism over speed.
+# "shop" project. Scenes 1-6 are tyo3's bespoke UI (inspect / note / move /
+# affected panel); scenes 7-10 flip on the opt-in native LSP bridge (:TyO3Lsp) and
+# drive Neovim's own K / <C-]> / grr / ]d through tyo3 — ending on the headline:
+# a durable note's drift (needs_review) and a type-checker error riding the *same*
+# ]d diagnostic stream. Sleeps are generous and deliberate — we wait past every
+# async beat (daemon open, debounced commit, precision refinement, pushed
+# diagnostics) so the recording is deterministic. Determinism over speed.
 
 Output editors/tyo3.nvim/demo/default/tour.gif
 Output editors/tyo3.nvim/demo/default/tour.txt
@@ -66,6 +70,70 @@ Type ":TyO3Affected" Enter
 Sleep 2s
 Type "1" Enter
 Sleep 2500ms
+
+# ── Scene 7: opt in to the native LSP bridge (:TyO3Lsp) ──
+# Everything so far is tyo3's *bespoke* UI. The same engine also speaks LSP: flip
+# it on and tyo3 drives your own K / <C-]> / grr / ]d — one in-process server, no
+# extra config. The bespoke panel keeps working alongside it.
+Type ":e store.py" Enter
+Sleep 1500ms
+Type ":TyO3Lsp" Enter
+Sleep 3s
+
+# ── Scene 8: native hover (K) + goto-definition (<C-]>), served by tyo3 ──
+# Land on the `Item` usage inside show_label; K shows the type, <C-]> jumps to the
+# class in catalog.py, <C-o> comes back. These are Neovim's own defaults — tyo3 is
+# just the language server behind them.
+Type "/Item().label" Enter
+Sleep 800ms
+Type "K"
+Sleep 2500ms
+Ctrl+]
+Sleep 2500ms
+Ctrl+O
+Sleep 1500ms
+
+# ── Scene 9: project-wide references (grr → quickfix) ──
+Type "grr"
+Sleep 3s
+Type ":cclose" Enter
+Sleep 800ms
+
+# ── Scene 10: the headline — bespoke review-state AND type errors, unified in ]d ──
+# Author durable intent on show_label, then make one edit that both *drifts* the
+# note (Item().label → Item().price changes the body) and breaks the return type
+# (price() is int, show_label is -> str). tyo3 surfaces the drift as a native
+# `needs_review` diagnostic and the type error rides the same stream — ]d walks
+# both. The type-checker diagnostics are *pushed* live on :w, no polling.
+Type "/def show_label" Enter
+Sleep 600ms
+Type ":TyO3Note keep this label stable" Enter
+Sleep 2000ms
+Type "/\.label" Enter
+Type "l"
+Type "ciwprice"
+Escape
+# One commit only: the debounced TextChanged sync overlays the edit (sync_buffer
+# is overlay-only — no disk write). We deliberately do NOT `:w` — an identical
+# re-commit would re-settle the body and clear the needs_review flag.
+Sleep 4s
+# The bus refreshes layer-state diagnostics asynchronously; force it here so the
+# WARN is deterministically on-screen for the recording (demos wait past async
+# beats — this makes that beat explicit).
+Type ":lua local b=vim.api.nvim_get_current_buf(); require('tyo3.lsp').refresh_layer_diagnostics(b, require('tyo3').root_for_buf(b))" Enter
+Sleep 2500ms
+Type "gg"
+Sleep 400ms
+Type "]d"
+Sleep 2500ms
+Type ":lua vim.diagnostic.open_float()" Enter
+Sleep 3s
+Escape
+Type "]d"
+Sleep 2500ms
+Type ":lua vim.diagnostic.open_float()" Enter
+Sleep 3s
+Escape
 
 Type ":qa!" Enter
 Sleep 1s
