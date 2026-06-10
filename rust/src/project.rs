@@ -32,7 +32,7 @@ pub(crate) use crate::content::{is_project_relevant, ContentStore, Generation, R
 pub(crate) use crate::content::Document;
 pub(crate) use crate::config::{self, RawConfig, ValidatedConfig};
 pub(crate) use crate::entity::{extract_entities, extract_entities_for};
-pub(crate) use crate::hash::HashPolicy;
+pub(crate) use crate::hash::{ContentHash, HashPolicy};
 pub(crate) use crate::identity::{reconcile, reconcile_scoped, DurableId, FormatError, IdentityRegistry, IdentityStatus};
 pub(crate) use crate::overlay::OverlaySystem;
 pub(crate) use crate::sidecar::Sidecar;

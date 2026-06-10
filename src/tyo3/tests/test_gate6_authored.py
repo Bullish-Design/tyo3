@@ -496,7 +496,11 @@ review_on_change = true
 
 
 def test_newer_format_rejected(tmp_path):
-    """A record with format_version=2 → reopen raises FormatVersionError."""
+    """A record with a *newer* format_version (3) → reopen raises FormatVersionError.
+
+    (v2 is the current format — it adds AuthoredVersion.reviewed_hash — so this
+    uses v3 to exercise the "newer than supported" rejection path.)
+    """
     from tyo3 import TyO3Session
     from tyo3.exceptions import FormatVersionError
 
@@ -525,11 +529,11 @@ review_on_change = true
         assert foo_id is not None
         session.author("intent", foo_id, {"note": "v1"})
 
-    # Hand-write a record with format_version=2.
+    # Hand-write a record with a newer-than-supported format_version (3).
     record_path = proj / ".tyo3" / "authored" / "intent" / f"{foo_id}.json"
     with open(record_path) as f:
         doc = json.load(f)
-    doc["format_version"] = 2
+    doc["format_version"] = 3
     with open(record_path, "w") as f:
         json.dump(doc, f, indent=2)
 

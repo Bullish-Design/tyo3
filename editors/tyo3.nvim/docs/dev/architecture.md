@@ -40,12 +40,30 @@ nothing). It replies `{"ok": true}`.
 
 **Navigation / analysis** (the `convert/` read surface — reads only, served live
 over the frozen snapshot; cheap-reverse data like references/diagnostics is never
-cached as a layer): `references`, `document_highlights`, `hover`,
+cached as a layer): `references`, `definition`, `document_highlights`, `hover`,
 `type_hierarchy`, `can_rename`, `rename`, `diagnostics_at`. All take 1-based
-`(path, line, col)`. `references` powers the sidebar's "Find callers" action
+`(path, line, col)`. `references`/`definition` (navigation verbs) hand back
+**absolute** paths; `references` powers the sidebar's "Find callers" action
 (results → quickfix list); `rename` returns `{new_name, changes}` where `changes`
 is `{path: [{range, new_text}]}` (edit computation only — it does **not** rebind
 durable identity; that is AB8).
+
+**Layer state** (durable-identity review concepts, no LSP vocabulary):
+`review_state {path?}` joins the live-registry `needs_review` / `orphaned` ids
+with their pinned-snapshot node ranges (one snapshot for the join), returning
+`{items:[{durable_id, name, path, range, state}]}`. The native LSP bridge
+surfaces these in a dedicated `vim.diagnostic` namespace (`tyo3-layer`) rather
+than an LSP method, so `]d` / Trouble / lualine navigate them.
+
+`needs_review` here is the engine's durable **level** signal: an entity is
+flagged when its current body hash differs from the hash captured when its note
+was authored (`AuthoredVersion.reviewed_hash`, stamped from the registry anchor
+at author time). It survives saves, same-file edits, and restart; it clears on
+revert (body restored to the reviewed bytes) and on re-author (the acknowledge
+action that re-stamps the baseline). Do **not** conflate it with
+`CommitDelta.needs_review`, the per-commit **edge** signal on the bus ("a noted
+entity changed in *this* commit") — the plugin uses that only as a refresh
+trigger and always re-queries `review_state` for the authoritative set.
 
 **Layer discovery:** `layers` describes every layer in the **effective table**
 (native config ∪ layers registered programmatically via `tyo3.extend`) — `name`,

@@ -27,9 +27,21 @@ local M = {}
 local CAPS = {
   positionEncoding = "utf-32", -- daemon columns are Unicode codepoints
   hoverProvider = true,
+  definitionProvider = true,
   referencesProvider = true,
   documentHighlightProvider = true,
+  typeHierarchyProvider = true,
+  -- nvim 0.12's capability map gates the type-hierarchy follow-up requests on
+  -- capability keys *literally named* "typeHierarchy/supertypes" / "…/subtypes"
+  -- (not the documented typeHierarchyProvider). Advertise both so the client's
+  -- supports_method() lets the requests through.
+  ["typeHierarchy/supertypes"] = true,
+  ["typeHierarchy/subtypes"] = true,
   renameProvider = { prepareProvider = true },
+  -- Pull diagnostics stay advertised so `vim.diagnostic` on-demand pulls work;
+  -- Phase 2 also *pushes* via dispatchers.notification on bus deltas. Pull is
+  -- on-demand, push is event-driven — in practice nvim 0.12 doesn't fire both
+  -- for the same edit (nothing auto-pulls), so they don't double-count.
   diagnosticProvider = {
     interFileDependencies = false,
     workspaceDiagnostics = false,
@@ -56,6 +68,24 @@ local DH_KIND = { read = 2, write = 3, other = 1 }
 
 -- DiagnosticSeverity (StrEnum string) → LSP DiagnosticSeverity.
 local DIAG_SEVERITY = { fatal = 1, error = 1, warning = 2, information = 3, hint = 4 }
+
+-- Map the daemon `check` diagnostics list to LSP `Diagnostic[]`. Shared by the
+-- pull handler (textDocument/diagnostic) and the push path (publishDiagnostics).
+local function daemon_diags_to_lsp(diags)
+  local items = {}
+  for _, d in ipairs(diags or {}) do
+    if d.range then
+      table.insert(items, {
+        range = daemon_range_to_lsp(d.range),
+        severity = DIAG_SEVERITY[d.severity] or 1,
+        code = d.code,
+        message = d.message,
+        source = "tyo3",
+      })
+    end
+  end
+  return items
+end
 
 -- ── URI <-> path translation ─────────────────────────────────────────────────
 
@@ -172,6 +202,95 @@ handlers["textDocument/references"] = function(root, params, reply)
   end)
 end
 
+handlers["textDocument/definition"] = function(root, params, reply)
+  local p = lsp_pos_to_daemon(params.position)
+  daemon_request(root, "definition", {
+    path = uri_to_path(params.textDocument.uri),
+    line = p.line,
+    col = p.col,
+  }, function(err, res)
+    if err then
+      reply(lsp_error(err))
+      return
+    end
+    local out = {}
+    for _, t in ipairs((res and res.definitions) or {}) do
+      -- Prefer selection_range so the cursor lands on the name token, not the
+      -- `def`/`class` keyword (decorate-style full range starts at col 1).
+      local rng = t.selection_range or t.range
+      table.insert(out, { uri = path_to_uri(root, t.path), range = daemon_range_to_lsp(rng) })
+    end
+    reply(nil, out)
+  end)
+end
+
+-- ── Type hierarchy ───────────────────────────────────────────────────────────
+--
+-- The daemon `type_hierarchy` verb returns the *whole* thing at once
+-- ({item, supertypes, subtypes}); LSP splits it across prepare / supertypes /
+-- subtypes. The daemon is stateless and cheap, so we re-query rather than cache:
+-- the LSP item we emit round-trips its uri + selectionRange back to us, which we
+-- convert to a daemon position to re-run the query.
+
+-- daemon TypeHierarchyItem → LSP TypeHierarchyItem (SymbolKind.Class = 5).
+local function lsp_type_item(root, t)
+  return {
+    name = t.name,
+    kind = 5,
+    detail = t.detail,
+    uri = path_to_uri(root, t.path),
+    range = daemon_range_to_lsp(t.full_range),
+    selectionRange = daemon_range_to_lsp(t.selection_range),
+  }
+end
+
+handlers["textDocument/prepareTypeHierarchy"] = function(root, params, reply)
+  local p = lsp_pos_to_daemon(params.position)
+  daemon_request(root, "type_hierarchy", {
+    path = uri_to_path(params.textDocument.uri),
+    line = p.line,
+    col = p.col,
+  }, function(err, res)
+    if err then
+      reply(lsp_error(err))
+    elseif not res or not res.item then
+      reply(nil, nil)
+    else
+      reply(nil, { lsp_type_item(root, res.item) })
+    end
+  end)
+end
+
+-- supertypes / subtypes share a re-query off the incoming item's selectionRange.
+local function type_hierarchy_relatives(field)
+  return function(root, params, reply)
+    local item = params.item
+    if not item or not item.selectionRange then
+      reply(nil, {})
+      return
+    end
+    local p = lsp_pos_to_daemon(item.selectionRange.start)
+    daemon_request(root, "type_hierarchy", {
+      path = uri_to_path(item.uri),
+      line = p.line,
+      col = p.col,
+    }, function(err, res)
+      if err then
+        reply(lsp_error(err))
+        return
+      end
+      local out = {}
+      for _, t in ipairs((res and res[field]) or {}) do
+        table.insert(out, lsp_type_item(root, t))
+      end
+      reply(nil, out)
+    end)
+  end
+end
+
+handlers["typeHierarchy/supertypes"] = type_hierarchy_relatives("supertypes")
+handlers["typeHierarchy/subtypes"] = type_hierarchy_relatives("subtypes")
+
 handlers["textDocument/documentHighlight"] = function(root, params, reply)
   local p = lsp_pos_to_daemon(params.position)
   daemon_request(root, "document_highlights", {
@@ -244,28 +363,21 @@ handlers["textDocument/diagnostic"] = function(root, params, reply)
       reply(lsp_error(err))
       return
     end
-    local items = {}
-    for _, d in ipairs((res and res.diagnostics) or {}) do
-      if d.range then
-        table.insert(items, {
-          range = daemon_range_to_lsp(d.range),
-          severity = DIAG_SEVERITY[d.severity] or 1,
-          code = d.code,
-          message = d.message,
-          source = "tyo3",
-        })
-      end
-    end
-    reply(nil, { kind = "full", items = items })
+    reply(nil, { kind = "full", items = daemon_diags_to_lsp(res and res.diagnostics) })
   end)
 end
 
 -- ── In-process server object (the vim.lsp.rpc.PublicClient contract) ──────────
 
+-- Per-root sink for server→client notifications (push diagnostics). Stashed by
+-- the server `cmd` so `M.publish_diagnostics` can reach the live client.
+M._dispatchers_by_root = M._dispatchers_by_root or {}
+
 -- Build the server object `vim.lsp.start{ cmd = fn }` expects. `dispatchers` is
--- the client's notification/server-request sink; the prototype sends nothing
--- server→client, so it goes unused.
-function M._server(root, _dispatchers)
+-- the client's notification/server-request sink; we stash it so the push path
+-- (publishDiagnostics) can deliver server→client notifications.
+function M._server(root, dispatchers)
+  M._dispatchers_by_root[root] = dispatchers
   local closed = false
   local next_id = 0
 
@@ -310,6 +422,7 @@ function M._server(root, _dispatchers)
       -- text to the daemon on BufEnter and debounced TextChanged. `exit` closes.
       if method == "exit" then
         closed = true
+        M._dispatchers_by_root[root] = nil
       end
       return true
     end,
@@ -320,8 +433,86 @@ function M._server(root, _dispatchers)
 
     terminate = function()
       closed = true
+      M._dispatchers_by_root[root] = nil
     end,
   }
+end
+
+-- ── Push diagnostics (server→client publishDiagnostics) ──────────────────────
+
+--- Push type-checker diagnostics for *relpaths* to the client, off the bus.
+--- Driven by `delta` notifications (init.lua), so check diagnostics refresh on
+--- edit without the editor polling. Runs `check` per file (the ty type-checker
+--- is ~hundreds of ms — pass only the touched files, not the whole project).
+function M.publish_diagnostics(root, relpaths)
+  local dispatchers = M._dispatchers_by_root[root]
+  if not dispatchers or not dispatchers.notification then
+    return -- no live tyo3 client for this root
+  end
+  for _, path in ipairs(relpaths or {}) do
+    daemon_request(root, "check", { path = path }, function(err, res)
+      if err then
+        return
+      end
+      dispatchers.notification("textDocument/publishDiagnostics", {
+        uri = path_to_uri(root, path),
+        diagnostics = daemon_diags_to_lsp(res and res.diagnostics),
+      })
+    end)
+  end
+end
+
+-- ── Layer-state diagnostics (the bespoke-half "go native" piece) ─────────────
+--
+-- needs_review / orphaned are durable-identity concepts with no LSP vocabulary,
+-- so they ride a *dedicated* `vim.diagnostic` namespace (not an LSP method).
+-- That gives `]d`/`[d`, setqflist, Trouble and lualine for free.
+
+local LAYER_NS = vim.api.nvim_create_namespace("tyo3-layer")
+
+-- needs_review → WARN (intent drifted, human review needed); orphaned → HINT.
+local LAYER_SEVERITY = {
+  needs_review = vim.diagnostic.severity.WARN,
+  orphaned = vim.diagnostic.severity.HINT,
+}
+local LAYER_MESSAGE = {
+  needs_review = "needs review (intent changed)",
+  orphaned = "orphaned derived artifact",
+}
+
+--- The namespace layer diagnostics live in (exposed for tests/introspection).
+function M.layer_namespace()
+  return LAYER_NS
+end
+
+--- Refresh the tyo3-layer diagnostics for *bufnr* (project *root*) from
+--- `review_state`. Default-off: only call this when the flag is on.
+function M.refresh_layer_diagnostics(bufnr, root)
+  local path = vim.api.nvim_buf_get_name(bufnr)
+  if path == nil or path == "" then
+    return
+  end
+  daemon_request(root, "review_state", { path = path }, function(err, res)
+    if err or not res then
+      return
+    end
+    local diags = {}
+    for _, it in ipairs(res.items or {}) do
+      local r = daemon_range_to_lsp(it.range) -- 0-based, uniform -1 rule
+      table.insert(diags, {
+        lnum = r.start.line,
+        col = r.start.character,
+        end_lnum = r["end"].line,
+        end_col = r["end"].character,
+        severity = LAYER_SEVERITY[it.state] or vim.diagnostic.severity.INFO,
+        source = "tyo3",
+        message = LAYER_MESSAGE[it.state] or it.state,
+      })
+    end
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      vim.diagnostic.set(LAYER_NS, bufnr, diags)
+    end
+  end)
 end
 
 -- ── Attach ────────────────────────────────────────────────────────────────────
@@ -347,11 +538,18 @@ function M.toggle()
   cfg.lsp = not cfg.lsp
   if cfg.lsp then
     local tyo3 = require("tyo3")
+    local layer_on = require("tyo3.config").layer_diagnostics_enabled()
     for _, b in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == "python" then
         local root = tyo3.root_for_buf(b)
         if root then
           M.attach(b, root)
+          -- Seed layer-state diagnostics so enabling reflects current state
+          -- immediately (don't wait for the next bus delta to surface a
+          -- pre-existing needs_review / orphaned).
+          if layer_on then
+            M.refresh_layer_diagnostics(b, root)
+          end
         end
       end
     end

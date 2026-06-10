@@ -25,6 +25,11 @@ M.defaults = {
   -- daemon, so the user's own `K`/`grr`/`]d`/Trouble/pickers drive tyo3. Default
   -- off; the bespoke UI is unchanged either way. See lua/tyo3/lsp.lua.
   lsp = false,
+  -- Surface spine layer state (needs_review / orphaned) as a dedicated
+  -- `vim.diagnostic` namespace so `]d`/`[d`/Trouble/lualine navigate it. This is
+  -- the durable-identity half that has no LSP vocabulary. `nil` ⇒ follow `lsp`
+  -- (on when the bridge is on); set `true`/`false` to decouple it from the bridge.
+  layer_diagnostics = nil,
   -- Debounce (ms) before the cursor-context lookup fires.
   context_debounce_ms = 150,
   -- Command used to launch the daemon. nil ⇒ auto-detect `tyo3-daemon`, else
@@ -47,6 +52,16 @@ end
 
 function M.get()
   return M.options
+end
+
+--- Whether layer-state diagnostics are enabled: the explicit `layer_diagnostics`
+--- flag if set, else it follows `lsp`.
+function M.layer_diagnostics_enabled()
+  local o = M.options
+  if o.layer_diagnostics ~= nil then
+    return o.layer_diagnostics
+  end
+  return o.lsp
 end
 
 return M

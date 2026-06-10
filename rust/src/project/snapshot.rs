@@ -513,6 +513,7 @@ impl PySnapshot {
                             registry,
                             layer,
                             id,
+                            version.reviewed_hash,
                         );
                         (Some(version.value.clone()), rev, status_str)
                     }
