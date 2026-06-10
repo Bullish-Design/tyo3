@@ -243,25 +243,28 @@ pub(crate) fn compute_authored_lifecycle(
     (authored_nr, authored_orph)
 }
 
-/// Derive the authored record status for `(layer, id)` at a snapshot revision.
+/// Derive the authored record status for `(layer, id)` — a durable **level**
+/// comparison against the body as it was when the note was authored.
 ///
-/// Status is derived, not stored — the registry (captured per snapshot) is
-/// the single source of truth.  The key decision table:
+/// Status is derived, not stored. Review-state is decoupled from the transient
+/// registry `NeedsReview` status (an *edge* signal that auto-clears on the next
+/// reconcile); it is the comparison `reviewed_hash != current_anchor_hash`.
+/// Orphaned remains registry-driven (retire logic) and takes precedence.
 ///
 /// ```text
-/// status_at(layer, id, R) =
-///     absent                       if no authored record for (layer, id) with rev ≤ R
-///     present                      if layer.review_on_change == false
-///     map(registry@R .anchor(id).status)
-///         Active      → present
-///         NeedsReview → needs_review
-///         Orphaned    → orphaned
+/// status(layer, id) =
+///     absent        — caller's job (no authored record)
+///     present       if layer.review_on_change == false
+///     orphaned      if registry anchor status == Orphaned
+///     needs_review  if reviewed_hash.is_some() && reviewed_hash != current_anchor_hash
+///     present       otherwise (incl. reviewed_hash == None — a v1/legacy record)
 /// ```
 pub(crate) fn derive_authored_status(
     config: &ValidatedConfig,
     registry: Option<&IdentityRegistry>,
     layer: &str,
     id: &str,
+    reviewed_hash: Option<ContentHash>,
 ) -> String {
     // If review_on_change is false, always present.
     let review_on_change = config
@@ -274,14 +277,72 @@ pub(crate) fn derive_authored_status(
         return "present".to_string();
     }
 
-    // Map registry status.
     let durable = DurableId(id.to_string());
-    match registry.and_then(|r| r.status_of(&durable)) {
-        Some(IdentityStatus::Active) => "present".to_string(),
-        Some(IdentityStatus::NeedsReview) => "needs_review".to_string(),
-        Some(IdentityStatus::Orphaned) => "orphaned".to_string(),
-        None => "present".to_string(),  // unknown id → treat as present (no lifecycle to surface)
+    // Orphaned stays registry-driven and takes precedence over needs_review.
+    if matches!(
+        registry.and_then(|r| r.status_of(&durable)),
+        Some(IdentityStatus::Orphaned)
+    ) {
+        return "orphaned".to_string();
     }
+    // Level comparison: stale iff the body differs from the author-time hash.
+    let current_hash = registry.and_then(|r| r.get(&durable)).map(|a| a.content_hash);
+    match (reviewed_hash, current_hash) {
+        (Some(rh), Some(ch)) if rh != ch => "needs_review".to_string(),
+        _ => "present".to_string(),
+    }
+}
+
+/// The durable **level** `needs_review` set: every durable id whose committed
+/// body now differs from the hash captured when its note was authored, across
+/// all `review_on_change = true` authored layers.
+///
+/// This is the trustworthy state the editor's layer diagnostic, `authored()
+/// .status`, and the daemon `review_state` read — it survives saves, same-file
+/// edits, restart, and unflags correctly on revert. Distinct from
+/// `CommitDelta.needs_review`, the per-commit *edge* signal (ids that changed
+/// in *this* commit and carry a note), which stays for the bus notification.
+///
+/// Orphaned anchors are excluded (orphaned is surfaced separately and takes
+/// precedence); records with `reviewed_hash == None` (v1/legacy) are not
+/// flagged until re-authored. Returns sorted, de-duplicated ids.
+pub(crate) fn needs_review_ids(
+    config: &ValidatedConfig,
+    authored: &AuthoredStore,
+    registry: &IdentityRegistry,
+) -> Vec<String> {
+    let mut flagged: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for name in &config.topo_order {
+        let Some(layer_cfg) = config.raw.layers.get(name) else {
+            continue;
+        };
+        if !matches!(layer_cfg.origin, config::LayerOrigin::Authored) {
+            continue;
+        }
+        if !layer_cfg.review_on_change {
+            continue;
+        }
+        for id in authored.ids_in_layer(name) {
+            let Some(rec) = authored.records_get(name, id) else {
+                continue;
+            };
+            let Some(reviewed) = rec.current.reviewed_hash else {
+                continue;
+            };
+            let durable = DurableId(id.to_string());
+            let Some(anchor) = registry.get(&durable) else {
+                continue;
+            };
+            // Orphaned takes precedence; not a needs_review.
+            if matches!(anchor.status, IdentityStatus::Orphaned) {
+                continue;
+            }
+            if reviewed != anchor.content_hash {
+                flagged.insert(id.to_string());
+            }
+        }
+    }
+    flagged.into_iter().collect()
 }
 
 /// Shared identity reconciliation: extract entities, reconcile against
@@ -641,11 +702,18 @@ pub(crate) fn build_plan(head: &mut HeadState, mutation: Mutation) -> PyResult<O
                     "durable id '{id}' is not known to the identity registry"
                 )));
             }
+            // Stamp the entity's *current* committed body hash from the registry
+            // anchor (never recompute it — it must match `Anchor.content_hash`
+            // exactly). This is the durable review-state baseline: a later body
+            // change makes `reviewed_hash != current_anchor_hash` → needs_review;
+            // re-authoring re-stamps `= current`, which is the acknowledge path.
+            let reviewed_hash = head.registry.get(&durable_id).map(|a| a.content_hash);
             // Stage the copy-on-write authored store and serialise the record —
             // do NOT swap it into head yet (that is the publish tail, §5.3).
             let version = crate::authored::AuthoredVersion {
                 value,
                 revision: head.store.next_revision().0,
+                reviewed_hash,
             };
             let new_map = head.authored.put(&layer, &id, version, history);
             let next_store = AuthoredStore::new(new_map);

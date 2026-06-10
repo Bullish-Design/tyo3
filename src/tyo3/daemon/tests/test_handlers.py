@@ -486,6 +486,41 @@ def test_review_state_flags_needs_review_after_body_edit(handlers, ids):
     assert item["range"]["start"]["line"] >= 1
 
 
+def test_review_state_survives_identical_recommit(handlers, ids):
+    """needs_review is durable LEVEL state, not a per-commit edge signal.
+
+    Author a note, edit the body (flags), then re-commit the BYTE-IDENTICAL text
+    (the editor's debounce + ``:w`` double-commit, or any save). The old engine
+    cleared the flag here — the no-op reconcile re-settled the anchor to Active.
+    The level comparison (current anchor hash vs the author-time ``reviewed_hash``)
+    ignores the transient registry status, so the flag must persist."""
+    legacy_id = ids["legacy_helper"]
+    handlers.author({"layer": "intent", "durable_id": legacy_id, "value": {"note": "watch me"}})
+    edited = "def legacy_helper(x: int) -> int:\n    return x + 100\n"
+    handlers.sync_buffer({"path": "legacy.py", "text": edited})
+    assert any(it["durable_id"] == legacy_id for it in handlers.review_state({})["items"])
+    # Save-equivalent: commit the identical body again. Must stay flagged.
+    handlers.sync_buffer({"path": "legacy.py", "text": edited})
+    still = {it["durable_id"]: it for it in handlers.review_state({})["items"]}
+    assert legacy_id in still, [it["durable_id"] for it in still.values()]
+    assert still[legacy_id]["state"] == "needs_review"
+    # And the authored record reports the same durable status.
+    assert handlers.authored({"layer": "intent", "durable_id": legacy_id})["status"] == "needs_review"
+
+
+def test_review_state_reauthor_acknowledges(handlers, ids):
+    """Re-authoring re-stamps the baseline (acknowledge) → the id unflags."""
+    legacy_id = ids["legacy_helper"]
+    handlers.author({"layer": "intent", "durable_id": legacy_id, "value": {"note": "watch me"}})
+    handlers.sync_buffer(
+        {"path": "legacy.py", "text": "def legacy_helper(x: int) -> int:\n    return x + 100\n"}
+    )
+    assert any(it["durable_id"] == legacy_id for it in handlers.review_state({})["items"])
+    handlers.author({"layer": "intent", "durable_id": legacy_id, "value": {"note": "reviewed"}})
+    assert all(it["durable_id"] != legacy_id for it in handlers.review_state({})["items"])
+    assert handlers.authored({"layer": "intent", "durable_id": legacy_id})["status"] == "present"
+
+
 def test_review_state_scopes_to_path(handlers, ids):
     """The optional ``path`` filter restricts the join to one file."""
     legacy_id = ids["legacy_helper"]
