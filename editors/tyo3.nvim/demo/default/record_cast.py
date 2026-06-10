@@ -62,16 +62,38 @@ ACTIONS: list[tuple[float, str]] = [
     # Scene 9: project-wide references (grr → quickfix).
     (1.5, "grr"),
     (3.0, ":cclose\r"),
-    # Scene 10: the headline — review-state drift + a type error, unified in ]d.
-    (0.8, "/def show_label\r"),
+    # Scene 10: type hierarchy — supertypes (Book→Item) then subtypes (Item→Book),
+    # each listed in the quickfix by vim.lsp.buf.typehierarchy.
+    # typehierarchy is a two-hop async query (prepare → super/subtypes → quickfix).
+    # Run it with the cursor in the CODE buffer (a :copen first steals focus to the
+    # quickfix window, which has no LSP client), wait past the round trip, then open
+    # the now-populated quickfix.
+    (0.8, ":e book.py\r"),
+    (1.5, "/Book(\r"),              # land on the Book identifier (class Book(Item))
+    (0.6, ":lua vim.lsp.buf.typehierarchy('supertypes')\r"),
+    (4.5, ":copen\r"),
+    (2.5, ":cclose\r"),
+    (0.6, ":e catalog.py\r"),
+    (1.2, "/Item\r"),              # land on the Item class (case-sensitive: not "item")
+    (0.6, ":lua vim.lsp.buf.typehierarchy('subtypes')\r"),
+    (4.5, ":copen\r"),
+    (2.5, ":cclose\r"),
+    # Scene 11: cross-file rename — Item → Product across catalog/book/store.
+    (0.8, "/Item\r"),
+    (0.6, ":lua vim.lsp.buf.rename('Product')\r"),
+    (3.0, ":e store.py\r"),
+    (2.0, "/Product().label\r"),    # show the rename landed in show_label's body
+    # Scene 12: the headline — durable review-state drift + a type error in ]d.
+    (2.5, "/def show_label\r"),
     (0.6, ":TyO3Note keep this label stable\r"),
     (2.0, "/\\.label\r"),           # land on the .label() call (not show_label)
     (0.4, "l"),
     (0.4, "ciwprice\x1b"),          # body drifts → needs_review; -> str now broken
-    # One commit only (debounced overlay sync); NO :w — an identical re-commit
-    # would re-settle the body and clear needs_review.
-    (4.0, ":lua local b=vim.api.nvim_get_current_buf(); require('tyo3.lsp').refresh_layer_diagnostics(b, require('tyo3').root_for_buf(b))\r"),
-    (2.5, "gg"),
+    # We :w like any editor would — needs_review is durable (anchored to the
+    # author-time body) and the write path dedups the save's double-commit, so the
+    # flag survives the save. The bus delta refreshes the layer diagnostic.
+    (0.8, ":w\r"),
+    (6.0, "gg"),
     (0.4, "]d"),                    # walk to the first diagnostic
     (2.5, ":lua vim.diagnostic.open_float()\r"),
     (3.0, "\x1b"),
