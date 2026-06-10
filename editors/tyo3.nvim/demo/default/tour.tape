@@ -3,12 +3,15 @@
 #
 # Drives a real terminal Neovim through the plugin's verbs against the synthetic
 # "shop" project. Scenes 1-6 are tyo3's bespoke UI (inspect / note / move /
-# affected panel); scenes 7-10 flip on the opt-in native LSP bridge (:TyO3Lsp) and
-# drive Neovim's own K / <C-]> / grr / ]d through tyo3 — ending on the headline:
-# a durable note's drift (needs_review) and a type-checker error riding the *same*
-# ]d diagnostic stream. Sleeps are generous and deliberate — we wait past every
+# affected panel); scenes 7-12 flip on the opt-in native LSP bridge (:TyO3Lsp) and
+# drive Neovim's own machinery through tyo3 — hover (K) + goto-definition (<C-]>),
+# project references (grr), type hierarchy (super/subtypes → quickfix), a
+# cross-file rename, and the headline: a durable note's drift (needs_review) and a
+# type-checker error riding the *same* ]d stream, surfaced on a normal :w now that
+# review-state is durable. Sleeps are generous and deliberate — we wait past every
 # async beat (daemon open, debounced commit, precision refinement, pushed
-# diagnostics) so the recording is deterministic. Determinism over speed.
+# diagnostics, bus-driven layer refresh) so the recording is deterministic.
+# Determinism over speed.
 
 Output editors/tyo3.nvim/demo/default/tour.gif
 Output editors/tyo3.nvim/demo/default/tour.txt
@@ -99,12 +102,59 @@ Sleep 3s
 Type ":cclose" Enter
 Sleep 800ms
 
-# ── Scene 10: the headline — bespoke review-state AND type errors, unified in ]d ──
+# ── Scene 10: type hierarchy — supertypes & subtypes (→ quickfix) ──
+# A genuinely structural query, not just goto-def: Book extends Item, Item is
+# extended by Book. tyo3 answers textDocument/prepareTypeHierarchy +
+# typeHierarchy/supertypes|subtypes; Neovim's vim.lsp.buf.typehierarchy lists the
+# result in the quickfix. (book.py / catalog.py were indexed on open — no sync.)
+Type ":e book.py" Enter
+Sleep 1500ms
+Type "/Book(" Enter
+Sleep 600ms
+# typehierarchy is a two-hop async query (prepare → supertypes → quickfix). Run it
+# with the cursor in the CODE buffer (a :copen first would steal focus to the
+# quickfix window, which has no LSP client), wait past the round trip, then open
+# the now-populated quickfix.
+Type ":lua vim.lsp.buf.typehierarchy('supertypes')" Enter
+Sleep 4500ms
+Type ":copen" Enter
+Sleep 2500ms
+Type ":cclose" Enter
+Sleep 600ms
+Type ":e catalog.py" Enter
+Sleep 1200ms
+Type "/Item" Enter
+Sleep 600ms
+Type ":lua vim.lsp.buf.typehierarchy('subtypes')" Enter
+Sleep 4500ms
+Type ":copen" Enter
+Sleep 2500ms
+Type ":cclose" Enter
+Sleep 800ms
+
+# ── Scene 11: project-wide rename (grn's engine), cross-file ──
+# Rename the Item class → Product. tyo3's `rename` verb returns a WorkspaceEdit
+# spanning every file that uses it (catalog.py defines it; book.py subclasses it;
+# store.py constructs it) and Neovim applies it. The same identity index behind
+# references drives the rename — one edit, three files.
+Type "/Item" Enter
+Sleep 600ms
+Type ":lua vim.lsp.buf.rename('Product')" Enter
+Sleep 3s
+Type ":e store.py" Enter
+Sleep 2s
+Type "/Product().label" Enter
+Sleep 2500ms
+
+# ── Scene 12: the headline — durable review-state AND a type error, unified in ]d ──
 # Author durable intent on show_label, then make one edit that both *drifts* the
-# note (Item().label → Item().price changes the body) and breaks the return type
-# (price() is int, show_label is -> str). tyo3 surfaces the drift as a native
+# note (Product().label → Product().price changes the body) and breaks the return
+# type (price() is int, show_label is -> str). tyo3 surfaces the drift as a native
 # `needs_review` diagnostic and the type error rides the same stream — ]d walks
-# both. The type-checker diagnostics are *pushed* live on :w, no polling.
+# both. Type-checker diagnostics are *pushed* live on :w; the layer state refreshes
+# off the same bus delta. We `:w` like any editor would — needs_review is durable
+# (anchored to the body at author time) and the write path dedups the save's
+# double-commit, so saving no longer clears the flag.
 Type "/def show_label" Enter
 Sleep 600ms
 Type ":TyO3Note keep this label stable" Enter
@@ -113,15 +163,9 @@ Type "/\.label" Enter
 Type "l"
 Type "ciwprice"
 Escape
-# One commit only: the debounced TextChanged sync overlays the edit (sync_buffer
-# is overlay-only — no disk write). We deliberately do NOT `:w` — an identical
-# re-commit would re-settle the body and clear the needs_review flag.
-Sleep 4s
-# The bus refreshes layer-state diagnostics asynchronously; force it here so the
-# WARN is deterministically on-screen for the recording (demos wait past async
-# beats — this makes that beat explicit).
-Type ":lua local b=vim.api.nvim_get_current_buf(); require('tyo3.lsp').refresh_layer_diagnostics(b, require('tyo3').root_for_buf(b))" Enter
-Sleep 2500ms
+Sleep 800ms
+Type ":w" Enter
+Sleep 6s
 Type "gg"
 Sleep 400ms
 Type "]d"
