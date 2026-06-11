@@ -62,7 +62,12 @@ root.
 
 ## Requirements
 
-- Neovim ≥ 0.10 (`vim.uv`).
+- Neovim ≥ 0.10 for the bespoke UI (`vim.uv`).
+- **Neovim 0.12** for the native LSP bridge (`setup{ lsp = true }`) — it relies
+  on the in-process `vim.lsp` server (`cmd = function`) contract, the
+  type-hierarchy capability keys, and client-command resolution
+  (`vim.lsp.commands` + `client:exec_cmd`) as verified against 0.12. The
+  bespoke UI works on 0.10; the bridge does not.
 - The `tyo3` Python package built and importable (`tyo3-daemon` on `PATH`, or
   `python -m tyo3.daemon` available). In this repo: `devenv shell -- build`.
 - A project with a `.tyo3/config.toml` (or `pyproject.toml`/`.git` to mark the
@@ -174,6 +179,16 @@ existing config and plugins for free:
 | type-hierarchy picker (`:Telescope lsp_*`, Trouble) | `prepareTypeHierarchy` + `typeHierarchy/supertypes`/`subtypes` | `type_hierarchy` |
 | `grn` (rename) | `textDocument/prepareRename` + `textDocument/rename` | `can_rename` + `rename` |
 | `]d` / `[d`, `vim.diagnostic`, lualine, Trouble | `textDocument/diagnostic` (pull) **and** `publishDiagnostics` (push, on bus deltas) | `check` |
+| `gra` / tiny-code-action / `vim.lsp.buf.code_action()` | `textDocument/codeAction` → client commands `tyo3.explain` / `tyo3.run` / `tyo3.ack` | `entity_at` (offer), `explain` / `authored` + `author` (apply) |
+
+Code actions are **entity-gated**: the menu resolves the entity under the
+selection first (`entity_at`), so an off-entity position offers nothing rather
+than actions that fail when picked. Titles name the entity (`tyo3: Explain
+\`checkout\``) and kinds are split — `source.tyo3` (Explain), `refactor.rewrite`
+(Simplify), `quickfix` (the `needs_review` acknowledge) — so tiny-code-action
+icons them distinctly and `context.only` filtering works. When the entity is
+flagged `needs_review`, a preferred **Acknowledge review** quickfix re-authors
+each flagged layer's current value (the engine's acknowledge), clearing the WARN.
 
 Beyond LSP, the bridge also publishes spine **layer state** — the durable-identity
 concepts that have no LSP vocabulary — into a dedicated `vim.diagnostic` namespace
@@ -209,9 +224,10 @@ is enabled and a client is attached.
 **Not yet bridged (follow-ups):** derived `computing` / `stale` state as transient
 diagnostics (the `derived` bus notification carries `(layer, id)` — a later pass can
 map those), call hierarchy (`textDocument/prepareCallHierarchy` — no daemon verb
-yet), workspace/document symbols, code actions (e.g. "author intent note"), inlay
-hints, non-ASCII position-encoding correctness, and debounced/coalesced push
-diagnostics with cancellation of in-flight `check`.
+yet), workspace/document symbols, a `codeAction/resolve` rewrite-preview for
+Simplify (`WorkspaceEdit` diff in tiny-code-action's preview pane), inlay hints,
+non-ASCII position-encoding correctness, and debounced/coalesced push diagnostics
+with cancellation of in-flight `check`.
 
 ## Documentation
 
@@ -248,16 +264,23 @@ Newline-delimited **JSON-RPC 2.0** over a per-root unix socket
 | `locate` | `{durable_id}` | `{location}` (`file::qualified_name`) |
 | `diff` | `{from_rev, to_rev?}` | `{added, removed, changed, moved, …}` |
 | `derived` | `{layer, durable_id}` | `{status, artifact, revision}` |
+| `layers` | `{}` | `{layers:[{name, origin, entity_kinds, review_on_change, serving, display, schema?, …}]}` — declared layers, so the editor authors/renders any layer without hardcoding |
+| `layer_ids` | `{layer, with_values?}` | `{layer, ids, values?}` — the ids with a record in `layer` (one snapshot; picker substrate) |
+| `diagnostics_at` | `{path, line, col}` | `{diagnostics:[{message, severity, code, range}], count}` — `check` diagnostics whose range contains the position |
+| `context_pack` | `{path, line, col, mode?}` | LLM context `{durable_id, qualified_name, source, references, layers, …}` or `null` (pure read — the substrate `explain` runs over) |
+| `explain` | `{path, line, col, mode?}` | `{durable_id, text, mode}` or `null` — runs the LLM seam, stores the result durably on the `explain` layer |
 | `reindex` / `gc` / `check` | `{}` | op result |
 | `references` / `definition` / `document_highlights` | `{path, line, col}` | navigation targets (absolute paths) |
 | `hover` / `type_hierarchy` / `can_rename` / `rename` | `{path, line, col, …}` | analysis result or `null` |
 | `review_state` | `{path?}` | `{items:[{durable_id, name, path, range, state}]}` — `needs_review` / `orphaned` joined with node ranges |
+| `subscribe` | `{files?, ids?, layers?, all?}` | `{ok}` — sets this connection's bus-notification interest (per-connection server state) |
 
 **Notifications** (daemon → editor, from the bus pump):
 
 | Method | Params |
 |---|---|
 | `delta` | `{revision, changed_ids, affected_ids, moved_ids, touched_files, rescan, …}` |
+| `derived` | `{revision, layer, durable_id}` — a `serving="stale"` value the off-actor worker just made fresh; re-pull it (idempotent) |
 | `refinement` | `{revision, narrowed, added}` (only with `precision = "method"`) |
 
 ## Manual verification checklist
