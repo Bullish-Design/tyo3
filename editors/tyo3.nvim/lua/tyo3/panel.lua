@@ -24,6 +24,7 @@ M._entity = nil -- the current entity card (or nil)
 M._source_buf = nil -- the code buffer the card came from (for RPC routing)
 M._affected_lines = {} -- AFFECTED history
 M._rev_index = {} -- revision -> index into _affected_lines
+M._rev_narrowed = {} -- revision -> true once its line is annotated (dedupe)
 M.last_affected_ids = {} -- ids of the most recent non-empty delta (for pickers)
 M._collapsed = {} -- section name -> true when collapsed
 M._line_meta = {} -- 1-based lnum -> { section, action, payload }
@@ -446,11 +447,17 @@ function M.on_derived(_root, params)
 end
 
 --- Handle a `refinement` notification: annotate the matching revision's line.
+--- Multiple refinements can arrive for one revision; annotate the line once so
+--- they don't concatenate (`→ narrowed {…}  → narrowed {…}`).
 function M.on_refinement(_root, params)
   local idx = M._rev_index[params.revision]
   if not idx or not M._affected_lines[idx] then
     return
   end
+  if M._rev_narrowed[params.revision] then
+    return
+  end
+  M._rev_narrowed[params.revision] = true
   local narrowed = names_of(params.narrowed or {}, 6)
   M._affected_lines[idx] = M._affected_lines[idx]
     .. ("  → narrowed {%s}"):format(table.concat(narrowed, ", "))

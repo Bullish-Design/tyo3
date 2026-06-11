@@ -662,26 +662,76 @@ end
 
 -- ── Push diagnostics (server→client publishDiagnostics) ──────────────────────
 
+-- Push-diagnostics debounce state. A burst of edits (rapid `:w` / TextChanged)
+-- would otherwise stack overlapping `check` runs (the ty type-checker is
+-- ~hundreds of ms) on the actor. We accumulate the touched paths across a 150ms
+-- window into one check per file, and a per-(root, path) generation drops the
+-- result of a check superseded by a newer check for the *same* file.
+M._diag_debounce = M._diag_debounce or {} -- root -> uv timer
+M._diag_pending = M._diag_pending or {} -- root -> set of paths awaiting a check
+M._diag_gen = M._diag_gen or {} -- root -> { path -> generation }
+
 --- Push type-checker diagnostics for *relpaths* to the client, off the bus.
 --- Driven by `delta` notifications (init.lua), so check diagnostics refresh on
---- edit without the editor polling. Runs `check` per file (the ty type-checker
---- is ~hundreds of ms — pass only the touched files, not the whole project).
+--- edit without the editor polling. Debounced per root and accumulated across
+--- the window (so a later, differently-targeted call never drops a file an
+--- earlier call queued), one `check` per file, superseded results dropped.
 function M.publish_diagnostics(root, relpaths)
   local dispatchers = M._dispatchers_by_root[root]
   if not dispatchers or not dispatchers.notification then
     return -- no live tyo3 client for this root
   end
+  local pending = M._diag_pending[root] or {}
+  M._diag_pending[root] = pending
   for _, path in ipairs(relpaths or {}) do
-    daemon_request(root, "check", { path = path }, function(err, res)
-      if err then
-        return
-      end
-      dispatchers.notification("textDocument/publishDiagnostics", {
-        uri = path_to_uri(root, path),
-        diagnostics = daemon_diags_to_lsp(res and res.diagnostics),
-      })
+    pending[path] = true
+  end
+  local uv = vim.uv or vim.loop
+  local prev = M._diag_debounce[root]
+  if prev then
+    pcall(function()
+      prev:stop()
+      prev:close()
     end)
   end
+  local timer = uv.new_timer()
+  M._diag_debounce[root] = timer
+  timer:start(
+    150,
+    0,
+    vim.schedule_wrap(function()
+      pcall(function()
+        timer:stop()
+        timer:close()
+      end)
+      if M._diag_debounce[root] == timer then
+        M._diag_debounce[root] = nil
+      end
+      local paths = M._diag_pending[root] or {}
+      M._diag_pending[root] = nil
+      local gens = M._diag_gen[root] or {}
+      M._diag_gen[root] = gens
+      for path in pairs(paths) do
+        local gen = (gens[path] or 0) + 1
+        gens[path] = gen
+        daemon_request(root, "check", { path = path }, function(err, res)
+          -- Drop a superseded check (a newer check for this same file started)
+          -- or a client that went away while the check was in flight.
+          if err or (M._diag_gen[root] or {})[path] ~= gen then
+            return
+          end
+          local d = M._dispatchers_by_root[root]
+          if not d or not d.notification then
+            return
+          end
+          d.notification("textDocument/publishDiagnostics", {
+            uri = path_to_uri(root, path),
+            diagnostics = daemon_diags_to_lsp(res and res.diagnostics),
+          })
+        end)
+      end
+    end)
+  )
 end
 
 -- ── Layer-state diagnostics (the bespoke-half "go native" piece) ─────────────

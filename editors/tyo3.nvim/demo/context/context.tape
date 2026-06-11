@@ -118,6 +118,9 @@ Type "h"
 Sleep 1800ms
 
 # ── Scene 7: the docs link to BOTH user and developer guides ──
+# The "1"/"3" keystrokes assume the DEFAULT vim.ui.select picker. With
+# dressing.nvim / snacks / telescope-ui-select installed, selection is driven
+# differently (fuzzy prompt or numbered differently) — adapt the keys to taste.
 Type ":TyO3Docs" Enter
 Sleep 2200ms
 Type "1" Enter
