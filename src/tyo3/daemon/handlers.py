@@ -606,20 +606,37 @@ class Handlers:
         the explanation rides edits/moves and flips to ``needs_review`` when the
         body later drifts (clearing on a re-run = re-author). ``mode`` is
         ``"explain"`` (default) or ``"simplify"`` (also pulls caller bodies).
-        Returns ``null`` if nothing resolves at the position. All of context
-        gather + LLM + author runs in one actor hop (golden rules #2/#3)."""
+        Returns ``null`` if nothing resolves at the position. The LLM call runs
+        **off the actor** in three hops (gather → LLM → author): a multi-second
+        real-API round-trip would otherwise hold the one session thread and
+        freeze every other request for the project. The two actor hops are both
+        cheap; a racing edit between them is benign — the explain is keyed by
+        durable id, so it still lands on the right entity (worst case the stamped
+        reviewed-hash reflects the body at author time, the documented behavior).
+        """
         path = _require(params, "path", str)
         line = _require(params, "line", int)
         col = _require(params, "col", int)
         mode = self._explain_mode(params)
         rel = self._relpath(path)
 
-        def work(s: TyO3Session) -> dict[str, Any] | None:
+        # 1) Gather context on the actor (cheap, snapshot reads).
+        def gather(s: TyO3Session) -> dict[str, Any] | None:
             did = s.id_for(rel, line, col)
             if did is None:
                 return None
-            ctx = self._gather_context(s, rel, line, col, did, mode=mode)
-            text = _llm(_build_explain_prompt(ctx, mode), system=_EXPLAIN_SYSTEM[mode])
+            return {"did": did, "ctx": self._gather_context(s, rel, line, col, did, mode=mode)}
+
+        prep = self._actor.submit(gather)
+        if prep is None:
+            return None
+        did, ctx = prep["did"], prep["ctx"]
+
+        # 2) Run the LLM OFF the actor — the network round-trip holds no lock.
+        text = _llm(_build_explain_prompt(ctx, mode), system=_EXPLAIN_SYSTEM[mode])
+
+        # 3) Author the result back on the actor (another cheap hop).
+        def store(s: TyO3Session) -> None:
             s.author(
                 "explain",
                 did,
@@ -630,9 +647,9 @@ class Handlers:
                     "generated_at": _utcnow_iso(),
                 },
             )
-            return {"durable_id": did, "text": text, "mode": mode}
 
-        return self._actor.submit(work)
+        self._actor.submit(store)
+        return {"durable_id": did, "text": text, "mode": mode}
 
     @staticmethod
     def _explain_mode(params: dict[str, Any]) -> str:

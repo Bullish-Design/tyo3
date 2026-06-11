@@ -133,7 +133,7 @@ end
 -- Fire a daemon verb for `root`; `cb(err, result)`. The daemon client is shared
 -- with the rest of the plugin (one per project root); `ensure` returns the ready
 -- client immediately if it already exists, else connects/spawns first.
-local function daemon_request(root, method, params, cb)
+local function daemon_request(root, method, params, cb, opts)
   daemon.ensure(root, function(err, client)
     if err then
       cb(err, nil)
@@ -147,9 +147,13 @@ local function daemon_request(root, method, params, cb)
         res = nil
       end
       cb(rerr, res)
-    end)
+    end, opts)
   end)
 end
+
+-- A real LLM-backed explain/simplify (or a cold `check`) legitimately runs past
+-- the default per-request timeout, so those paths pass a longer ceiling.
+local SLOW_VERB_OPTS = { timeout_ms = 60000 }
 
 local function lsp_error(err)
   return { code = err.code or -32603, message = err.message or "tyo3 daemon error" }
@@ -764,7 +768,7 @@ function M.run_verb(bufnr, root, verb, params, cb)
     if cb then
       cb(err, res)
     end
-  end)
+  end, SLOW_VERB_OPTS)
 end
 
 --- Run the `explain` daemon verb for *args* (`{uri,line,col,mode}`) on *bufnr*.

@@ -19,6 +19,7 @@ import os
 import socket
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -119,6 +120,14 @@ class DaemonServer:
         self._clients_lock = threading.Lock()
         self._shutdown = threading.Event()
         self._handler_threads: list[threading.Thread] = []
+        # Each connection's reader thread reads serially (preserving read order)
+        # but offloads the dispatch+reply to this bounded pool, so one slow
+        # request — e.g. ``explain`` hitting a real LLM — doesn't serialise the
+        # connection's other requests. The actor stays the single mutation/
+        # serialisation point, so revision ordering is unaffected by which pool
+        # thread submits; replies are id-matched on the client, so out-of-order
+        # replies are fine. ``max_workers`` bounds thread growth under a burst.
+        self._dispatch_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tyo3-rpc")
 
     @property
     def socket_path(self) -> Path:
@@ -284,6 +293,18 @@ class DaemonServer:
             )
             client.send(encode_response(req.id, {"ok": True}))
             return
+        # Offload the (possibly slow) handler so a slow request doesn't serialise
+        # this connection's other requests. Replies are id-matched on the client.
+        if self._shutdown.is_set():
+            return
+        try:
+            self._dispatch_pool.submit(self._dispatch_and_reply, client, req)
+        except RuntimeError:
+            # Pool already shut down (race with teardown) — drop the request.
+            pass
+
+    def _dispatch_and_reply(self, client: _Client, req) -> None:
+        """Run one request's handler on a pool thread and write its reply."""
         try:
             result = self._handlers.dispatch(req.method, req.params)
             client.send(encode_response(req.id, result))
@@ -312,6 +333,10 @@ class DaemonServer:
             self._clients.clear()
         for c in clients:
             c.close()
+        # Stop accepting new dispatch work; in-flight handlers may still be
+        # running on pool threads (e.g. a slow explain), but their replies go to
+        # already-closed clients and are dropped harmlessly.
+        self._dispatch_pool.shutdown(wait=False, cancel_futures=True)
         # Stop the pump, then the actor (closes the session).
         try:
             self._pump.stop()

@@ -109,9 +109,11 @@ class _SocketClient:
             pass
 
 
-def _spawn_daemon(root: Path, socket_path: Path) -> subprocess.Popen:
+def _spawn_daemon(root: Path, socket_path: Path, *, env_extra: dict[str, str] | None = None) -> subprocess.Popen:
     env = dict(os.environ)
     env["PYTHONPATH"] = _SRC + os.pathsep + env.get("PYTHONPATH", "")
+    if env_extra:
+        env.update(env_extra)
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -270,6 +272,82 @@ def test_per_connection_subscription_filters_deltas(shop_project: Path, tmp_path
     finally:
         for cl in clients:
             cl.close()
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def test_slow_request_does_not_serialize_the_connection(shop_project: Path, tmp_path: Path):
+    """Phase 5: a slow request (LLM-backed ``explain``) must not block the other
+    requests on the same connection.
+
+    The reader thread reads serially but offloads dispatch to a bounded pool, so
+    a ``ping`` issued while a 2s ``explain`` is in flight returns immediately —
+    not after the explain completes (as it would if dispatch were inline on the
+    reader thread, or if the LLM were called while holding the session actor).
+    """
+    sleep_s = 2.0
+    socket_path = tmp_path / "slow.sock"
+    proc = _spawn_daemon(
+        shop_project,
+        socket_path,
+        env_extra={
+            "TYO3_LLM": "callable",
+            "TYO3_LLM_CALLABLE": "tyo3.daemon.tests._slow_llm:slow_explain",
+            "TYO3_TEST_LLM_SLEEP": str(sleep_s),
+        },
+    )
+    client = None
+    try:
+        client = _SocketClient(_connect(socket_path))
+        client.request("open", {"root": "."})
+
+        # Resolve checkout's position so explain has an entity to run over.
+        deco = client.request("decorate", {"path": "store.py"})
+        checkout = next(d for d in deco if d["name"] == "checkout")
+        pos = checkout["range"]["start"]
+
+        # Fire the slow explain on a background thread; record when it finishes.
+        explain_done = threading.Event()
+        explain_state: dict[str, Any] = {}
+
+        def run_explain() -> None:
+            t0 = time.monotonic()
+            try:
+                explain_state["res"] = client.request(
+                    "explain",
+                    {"path": "store.py", "line": pos["line"], "col": pos["column"]},
+                    timeout=30.0,
+                )
+            except Exception as e:  # noqa: BLE001 — surface in the assertion
+                explain_state["err"] = e
+            explain_state["elapsed"] = time.monotonic() - t0
+            explain_done.set()
+
+        th = threading.Thread(target=run_explain, daemon=True)
+        th.start()
+        # Let the explain frame land + start sleeping before we write ping (also
+        # serialises the two writes on the shared socket so frames don't interleave).
+        time.sleep(0.3)
+
+        t0 = time.monotonic()
+        health = client.request("ping", timeout=10.0)
+        ping_elapsed = time.monotonic() - t0
+
+        assert health["ok"] is True
+        # The decisive checks: ping returned while explain was still sleeping.
+        assert not explain_done.is_set(), "ping should return before the slow explain finishes"
+        assert ping_elapsed < sleep_s, f"ping took {ping_elapsed:.2f}s — it was serialized behind explain"
+
+        th.join(timeout=30.0)
+        assert "err" not in explain_state, explain_state.get("err")
+        assert explain_state["res"]["text"].startswith("slow explanation")
+        assert explain_state["elapsed"] >= sleep_s * 0.8, "explain should have actually run the slow LLM"
+    finally:
+        if client is not None:
+            client.close()
         proc.terminate()
         try:
             proc.wait(timeout=10)
