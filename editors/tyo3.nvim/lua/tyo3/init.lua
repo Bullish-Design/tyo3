@@ -99,6 +99,9 @@ function M.on_buf_enter(bufnr)
   -- of the open/sync chain above — the in-process server resolves the daemon
   -- client lazily on its first request.
   require("tyo3.lsp").attach(bufnr, root)
+  -- AST navigation keymaps (Phase D): textobject select + treewalker motion,
+  -- buffer-local, from config.keymaps (no-op under `manage = false`).
+  require("tyo3.deps").bind_ast_keymaps(bufnr)
   -- Seed layer-state diagnostics once on open (refreshed thereafter off the bus).
   require("tyo3.lsp").refresh_layer_diagnostics(bufnr, root)
 end

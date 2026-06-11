@@ -12,13 +12,33 @@ M.defaults = {
   -- See lua/tyo3/deps.lua.
   manage = true,
   -- Buffer-local, project-scoped keymaps for the curated navigate/observe/act
-  -- loop. Set a key to a string to rebind, or `false` to opt out. AST motion
-  -- keys (Phase D) are filled in later.
+  -- loop. Set a key to a string to rebind, or `false` to opt out; a whole
+  -- sub-table set to `false` opts the feature out.
   keymaps = {
     -- Open the tiny-code-action buffer picker — the "act on the entity" surface
     -- (Author / Write doc / Move / Explain·Simplify / Acknowledge). Overrides
     -- nvim's native `gra` on project python buffers with the curated picker.
     code_action = "gra",
+    -- AST node SELECTIONS (treesitter-textobjects, operator-pending + visual).
+    -- `vif` selects a function body; feeds straight into the entity-resolving
+    -- code-action path, so `vif` then `gra` acts on exactly that function.
+    textobjects = {
+      function_outer = "af",
+      function_inner = "if",
+      class_outer = "ac",
+      class_inner = "ic",
+      parameter_outer = "aa",
+      parameter_inner = "ia",
+    },
+    -- AST MOTION (treewalker, normal + visual): prev/next neighbour and
+    -- ancestor/into-child. NOTE: the defaults shadow `<C-hjkl>` window moves on
+    -- project python buffers only (buffer-local); rebind here or set `false`.
+    treewalker = {
+      up = "<C-k>",
+      down = "<C-j>",
+      parent = "<C-h>",
+      child = "<C-l>",
+    },
   },
   -- Debounce window (ms) before a TextChanged commit fires. One commit per pause.
   debounce_ms = 300,
@@ -31,8 +51,10 @@ M.defaults = {
   -- flag: they appear only when the project declares the `explain` layer, and
   -- the LLM backend stays optional (anthropic → callable → stub). There is no
   -- `ai`/`explain` toggle here — declare the layer in the project to enable them.
-  -- Debounce (ms) before the cursor-context lookup fires.
-  context_debounce_ms = 150,
+  -- Debounce (ms) before the cursor-context lookup fires. Kept snappy (Phase D)
+  -- so the dock tracks you through the tree as AST motion moves the cursor; the
+  -- resolve is one actor hop, so don't drop much below this.
+  context_debounce_ms = 100,
   -- Per-request timeout (ms) for daemon RPCs. A stalled request errors its
   -- callback instead of hanging the UI forever. Slow verbs (explain/check) can
   -- override per-call. Set 0 to disable.
