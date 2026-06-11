@@ -149,28 +149,34 @@ local ca = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", ca_params,
 local actions = ca and ca[client.id] and ca[client.id].result
 check("codeAction returns 2 tyo3 actions", type(actions) == "table" and #actions == 2, actions and #actions or nil)
 
+-- Explain runs as a client command (prose float); Simplify carries resolve
+-- `data` and no command (lazily resolved to a WorkspaceEdit, Phase 6).
 local explain_action, simplify_action
 for _, a in ipairs(actions or {}) do
-  check(
-    "action carries the tyo3.explain command",
-    a.command and a.command.command == "tyo3.explain",
-    a.command and a.command.command or nil
-  )
-  local mode = a.command and a.command.arguments and a.command.arguments[1] and a.command.arguments[1].mode
-  if mode == "explain" then
-    explain_action = a
-  elseif mode == "simplify" then
+  if a.command and a.command.command == "tyo3.explain" then
+    local mode = a.command.arguments and a.command.arguments[1] and a.command.arguments[1].mode
+    if mode == "explain" then
+      explain_action = a
+    end
+  elseif a.data and a.data.kind == "simplify" then
     simplify_action = a
   end
 end
-check("an explain-mode action is present", explain_action ~= nil)
-check("a simplify-mode action is present", simplify_action ~= nil)
+check("an explain action carries the tyo3.explain command", explain_action ~= nil)
+check("a simplify action carries resolve data", simplify_action ~= nil and simplify_action.data ~= nil)
 check(
   "explain action argument carries uri + 1-based position",
   explain_action
     and explain_action.command.arguments[1].uri == store_uri
     and explain_action.command.arguments[1].line == checkout_pos.line
     and explain_action.command.arguments[1].col == checkout_pos.column
+)
+check(
+  "simplify action data carries uri + 1-based position",
+  simplify_action
+    and simplify_action.data.uri == store_uri
+    and simplify_action.data.line == checkout_pos.line
+    and simplify_action.data.col == checkout_pos.column
 )
 
 -- Kinds are split so tiny-code-action icons + `context.only` filtering work:
@@ -302,17 +308,34 @@ check("explain record is present on the durable layer", authored and authored.st
 check("explain record value matches the returned text", authored and authored.value and authored.value.text == ex_res.text)
 check("explain record stamped the offline model", authored and authored.value and authored.value.model == "stub")
 
--- ── Part 3: simplify mode updates the same id's record ──────────────────────
+-- ── Part 3: the explain verb's simplify mode updates the same id's record ───
+-- (Driven directly: the code action's Simplify is now a resolve-to-edit, but
+-- the `explain` verb still supports mode=simplify for the prose path.)
 local simplified, smpl_done
-if simplify_action then
-  require("tyo3.lsp").run_explain(bufnr, proj, simplify_action.command.arguments[1], function(_, res)
+require("tyo3.lsp").run_explain(
+  bufnr,
+  proj,
+  { uri = store_uri, line = checkout_pos.line, col = checkout_pos.column, mode = "simplify" },
+  function(_, res)
     simplified, smpl_done = res, true
-  end)
-  vim.wait(15000, function()
-    return smpl_done
-  end, 50)
-end
+  end
+)
+vim.wait(15000, function()
+  return smpl_done
+end, 50)
 check("simplify mode returns text", simplified and simplified.mode == "simplify" and #simplified.text > 0)
+
+-- ── Part 3b: codeAction/resolve degrades gracefully under the offline stub ──
+-- The offline stub returns prose (not parseable source), so simplify_edit
+-- returns no changes and resolve hands back the action unchanged — no edit, no
+-- preview, still selectable. (A real model returning parseable source yields a
+-- WorkspaceEdit; that path is covered by the daemon's e2e test.)
+if simplify_action then
+  local rs = vim.lsp.buf_request_sync(bufnr, "codeAction/resolve", simplify_action, 60000)
+  local resolved = rs and rs[client.id] and rs[client.id].result
+  check("resolve returns the action", type(resolved) == "table")
+  check("resolve degrades to no edit under the offline stub", resolved and resolved.edit == nil)
+end
 
 local au2, au2_done
 require("tyo3").with_client(bufnr, function(c)

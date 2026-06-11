@@ -603,6 +603,56 @@ def test_explain_off_entity_is_null(handlers):
     assert handlers.explain({"path": "store.py", "line": 4, "col": 1}) is None
 
 
+def test_simplify_edit_returns_a_rewrite_edit(handlers, ids, monkeypatch):
+    """``simplify_edit`` maps a parseable model rewrite to a full-line
+    WorkspaceEdit over the entity's range (mirrors ``rename``'s ``changes``)."""
+    import ast
+
+    import tyo3.daemon.handlers as H
+
+    monkeypatch.setattr(
+        H, "_llm", lambda prompt, *, system=None: "def usd(cents: int) -> str:\n    return f'${cents / 100:.2f}'\n"
+    )
+    res = handlers.simplify_edit({"path": "money.py", "line": 1, "col": 5})
+    assert res is not None
+    assert res["durable_id"] == ids["usd"]
+    assert "money.py" in res["changes"]
+    edits = res["changes"]["money.py"]
+    assert len(edits) == 1
+    edit = edits[0]
+    assert edit["range"]["start"]["column"] == 1, "full-line replacement starts at column 1"
+    assert edit["new_text"].startswith("def usd")
+    ast.parse(edit["new_text"])  # the replacement is valid Python
+
+
+def test_coerce_rewrite_strips_fences_reindents_and_parse_guards():
+    """The rewrite coercion: strip markdown fences, parse-guard, and re-indent to
+    a target column (so an indented entity's replacement stays valid in place)."""
+    from tyo3.daemon.handlers import _coerce_rewrite
+
+    fenced = "```python\ndef price(self) -> int:\n    return 100\n```"
+    out = _coerce_rewrite(fenced, base_indent=4)
+    assert out.startswith("    def price"), out
+    assert "        return 100" in out, "the body is re-indented relative to the def"
+    # Unparseable / prose → None, so the caller degrades to the prose float.
+    assert _coerce_rewrite("This converts cents to a dollar string.", base_indent=0) is None
+    assert _coerce_rewrite("def broken(:\n", base_indent=0) is None
+    assert _coerce_rewrite("   \n  ", base_indent=0) is None
+
+
+def test_simplify_edit_degrades_on_unparseable(handlers, monkeypatch):
+    """Prose (or any non-source) output → ``None``, so the editor falls back to
+    the explain float instead of applying garbage."""
+    import tyo3.daemon.handlers as H
+
+    monkeypatch.setattr(H, "_llm", lambda prompt, *, system=None: "This converts cents to a dollar string.")
+    assert handlers.simplify_edit({"path": "money.py", "line": 1, "col": 5}) is None
+
+
+def test_simplify_edit_off_entity_is_null(handlers):
+    assert handlers.simplify_edit({"path": "store.py", "line": 4, "col": 1}) is None
+
+
 def test_explain_flips_needs_review_on_drift_and_clears_on_rerun(handlers, ids):
     """The durability tie-in (proj 25): an explanation is durable level state.
 

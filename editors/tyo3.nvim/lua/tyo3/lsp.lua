@@ -45,6 +45,10 @@ local CAPS = {
   -- `context.only` filter: Simplify is a refactor.rewrite, Explain an
   -- informational source.tyo3, the review-ack a quickfix.
   codeActionProvider = {
+    -- Simplify carries `data` and no `edit`, resolved lazily via
+    -- `codeAction/resolve` into a WorkspaceEdit — so the menu stays instant (no
+    -- LLM per keystroke) and tiny-code-action shows the rewrite diff on focus.
+    resolveProvider = true,
     codeActionKinds = { "refactor.rewrite", "quickfix", "source.tyo3" },
   },
   executeCommandProvider = { commands = { "tyo3.explain", "tyo3.run", "tyo3.ack" } },
@@ -358,22 +362,59 @@ M.register_code_action(function(ctx)
     return {} -- nothing under the cursor → no noise in the menu
   end
   local who = ctx.entity.qualified_name or ctx.entity.name or "entity"
-  local function action(title, mode, kind)
-    return {
-      title = title,
-      kind = kind,
-      command = {
-        title = title,
-        command = "tyo3.explain",
-        arguments = { { uri = ctx.uri, line = ctx.line, col = ctx.col, mode = mode, root = ctx.root } },
-      },
-    }
-  end
   return {
-    action(("tyo3: Explain `%s`"):format(who), "explain", "source.tyo3"),
-    action(("tyo3: Simplify `%s`"):format(who), "simplify", "refactor.rewrite"),
+    -- Explain is informational (prose → a float), so it runs as a client
+    -- command — there is no edit to preview.
+    {
+      title = ("tyo3: Explain `%s`"):format(who),
+      kind = "source.tyo3",
+      command = {
+        title = "tyo3: Explain",
+        command = "tyo3.explain",
+        arguments = { { uri = ctx.uri, line = ctx.line, col = ctx.col, mode = "explain", root = ctx.root } },
+      },
+    },
+    -- Simplify is a rewrite: carry `data` and no `edit`, resolved lazily into a
+    -- WorkspaceEdit by `codeAction/resolve` so the menu stays instant and a
+    -- resolve-capable client (tiny-code-action) previews the diff on focus.
+    {
+      title = ("tyo3: Simplify `%s`"):format(who),
+      kind = "refactor.rewrite",
+      data = { uri = ctx.uri, line = ctx.line, col = ctx.col, root = ctx.root, kind = "simplify" },
+    },
   }
 end)
+
+-- Resolve a Simplify action's `data` into a WorkspaceEdit (the daemon rewrites
+-- the entity body). Degrades gracefully: if the rewrite is absent/unparseable
+-- (the daemon returns no changes), return the action unchanged — no edit, no
+-- preview, still selectable (the explain float remains the prose path).
+handlers["codeAction/resolve"] = function(root, action, reply)
+  local d = action.data or {}
+  if d.kind ~= "simplify" then
+    return reply(nil, action)
+  end
+  daemon_request(d.root or root, "simplify_edit", {
+    path = uri_to_path(d.uri),
+    line = d.line,
+    col = d.col,
+  }, function(err, res)
+    if err or not res or not res.changes then
+      return reply(nil, action)
+    end
+    local changes = {}
+    for relpath, edits in pairs(res.changes) do
+      local uri = path_to_uri(d.root or root, relpath)
+      local text_edits = {}
+      for _, e in ipairs(edits) do
+        table.insert(text_edits, { range = daemon_range_to_lsp(e.range), newText = e.new_text })
+      end
+      changes[uri] = text_edits
+    end
+    action.edit = { changes = changes }
+    reply(nil, action)
+  end, SLOW_VERB_OPTS)
+end
 
 -- Offer an acknowledge quickfix when the entity under the cursor is flagged
 -- needs_review on any authored layer. Re-authoring the note IS the engine's
