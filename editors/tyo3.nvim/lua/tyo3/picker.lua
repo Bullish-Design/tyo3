@@ -122,8 +122,8 @@ end
 
 --- The affected set of the most recent edit (from the panel's last delta).
 function M.affected()
-  local panel = require("tyo3.panel")
-  local ids = panel.last_affected_ids or {}
+  local sidebar = require("tyo3.sidebar")
+  local ids = sidebar.last_affected_ids or {}
   local decorate = require("tyo3.decorate")
   local entries = {}
   for _, id in ipairs(ids) do

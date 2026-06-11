@@ -65,17 +65,40 @@ function M.setup_tiny_code_action(_opts)
   })
 end
 
--- ── edgy — stub (wired in Phase E) ────────────────────────────────────────────
+-- ── edgy.nvim — accordion sidebar (Phase E) ──────────────────────────────────
 --
--- A hard dep of the full experience, recorded as missing now (single path —
--- `:checkhealth` tells the user to install the stack) until Phase E fills the body.
+-- edgy manages the window/layout for five vertically stacked, right-edge section
+-- views (IDENTITY / NOTES / DOCS / SUMMARY / AFFECTED). Each view is a persistent
+-- scratch buffer joined by filetype; a content-driven accordion expands sections
+-- that have data for the current entity. edgy is a global window manager — it
+-- sets laststatus=3 / splitkeep=screen for the whole editor, which is the
+-- opinionated-distribution tradeoff (gated by manage).
 
 function M.setup_edgy(_opts)
-  if not pcall(require, "edgy") then
-    record_missing("edgy.nvim", "accordion sidebar (Phase E)")
+  local ok, edgy = pcall(require, "edgy")
+  if not ok then
+    record_missing("edgy.nvim", "accordion sidebar (observe surface)")
     return
   end
-  -- TODO(Phase E): register the right-edge section views (IDENTITY/NOTES/…).
+  -- edgy can only fully collapse views to title height with the GLOBAL
+  -- statusline; splitkeep avoids scroll jumps as views resize (README §setup).
+  vim.opt.laststatus = 3
+  vim.opt.splitkeep = "screen"
+
+  -- sidebar.setup creates buffers + registers views (handles both pre-setup
+  -- and post-setup edgy scenarios).
+  require("tyo3.sidebar").setup(edgy)
+
+  -- If edgy hasn't been set up yet (test/demo path), call edgy.setup now
+  -- so it picks up the view specs we merged into edgy.config.opts.
+  -- If already set up (lazy.nvim path, did_setup guard), this is a no-op.
+  if not pcall(function() return require("edgy.config").did_setup end) then
+    return -- can't access config at all
+  end
+  if not require("edgy.config").did_setup then
+    local opts = require("edgy.config").opts or {}
+    edgy.setup(opts)
+  end
 end
 
 -- ── treesitter-textobjects — AST node selections (Phase D) ────────────────────

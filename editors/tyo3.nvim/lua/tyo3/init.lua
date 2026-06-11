@@ -175,7 +175,7 @@ end
 
 function M.handle_notification(root, method, params)
   if method == "delta" then
-    require("tyo3.panel").on_delta(root, params)
+    require("tyo3.sidebar").on_delta(root, params)
     -- Re-anchor decorations on every loaded buffer of this project: identity is
     -- the truth; never trust drifted extmarks across a structural edit.
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
@@ -193,7 +193,7 @@ function M.handle_notification(root, method, params)
     -- A slow `serving="stale"` layer's value became fresh off the actor (AB3):
     -- re-pull the card (if the panel is on that entity) and re-decorate every
     -- loaded buffer of this project so an inline summary swaps stale → fresh.
-    require("tyo3.panel").on_derived(root, params)
+    require("tyo3.sidebar").on_derived(root, params)
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_loaded(bufnr) and M.root_for_buf(bufnr) == root then
         require("tyo3.decorate").apply(bufnr)
@@ -201,7 +201,7 @@ function M.handle_notification(root, method, params)
     end
     refresh_layer_diags_for_root(root)
   elseif method == "refinement" then
-    require("tyo3.panel").on_refinement(root, params)
+    require("tyo3.sidebar").on_refinement(root, params)
     refresh_layer_diags_for_root(root)
   end
 end

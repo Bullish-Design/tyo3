@@ -66,7 +66,7 @@ local function open_editor(src_buf, durable_id, title, existing)
           end
           vim.notify("[tyo3] doc saved — glued to the entity", vim.log.levels.INFO)
           require("tyo3.decorate").apply(src_buf)
-          require("tyo3.panel").reload()
+          require("tyo3.sidebar").reload()
         end
       )
     end,

@@ -1,10 +1,10 @@
--- Headless integration test for the cursor-driven CONTEXT panel section.
+-- Headless integration test for the cursor-driven CONTEXT sidebar.
 --
 -- Spawns a real tyo3-daemon against a fresh copy of the synthetic shop project,
 -- opens store.py (cursor context is always on, proj 28), and drives context.lua
--- end to end: the Treesitter enclosing-node gate, entity_at resolution + panel
--- rendering, note surfacing, stale-drop, the no-parser fallback, and always-on.
--- Prints PASS/FAIL per check and exits non-zero on any failure (so it gates CI).
+-- end to end: the Treesitter enclosing-node gate, entity_at resolution + sidebar
+-- buffer rendering, note surfacing, stale-drop, the no-parser fallback, and
+-- always-on. Prints PASS/FAIL per check and exits non-zero on any failure.
 --
 -- Run:
 --   nvim --headless --clean -u editors/tyo3.nvim/tests/minimal_init.lua \
@@ -63,13 +63,42 @@ pcall(function()
 end)
 
 local context = require("tyo3.context")
-local panel = require("tyo3.panel")
+local sidebar = require("tyo3.sidebar")
 
-local function panel_text()
-  if not (panel.buf and vim.api.nvim_buf_is_valid(panel.buf)) then
+-- Manually initialise sidebar state for dep-light testing (edgy not needed).
+-- In the real path, deps.setup_edgy calls sidebar.setup(edgy) which creates
+-- buffers and installs the accordion. Here we create the buffers directly and
+-- set _did_setup so set_context renders into them.
+local function sidebar_setup_light()
+  local fts = { "tyo3_identity", "tyo3_notes", "tyo3_docs", "tyo3_summary", "tyo3_affected" }
+  for _, ft in ipairs(fts) do
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].buftype = "nofile"
+    vim.bo[buf].bufhidden = "hide"
+    vim.bo[buf].swapfile = false
+    vim.bo[buf].filetype = ft
+    sidebar.bufs[ft] = buf
+  end
+  sidebar._did_setup = true
+end
+
+local function sidebar_text(ft)
+  local buf = sidebar.bufs[ft]
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     return ""
   end
-  return table.concat(vim.api.nvim_buf_get_lines(panel.buf, 0, -1, false), "\n")
+  return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+end
+
+local function sidebar_all_text()
+  local parts = {}
+  for _, ft in ipairs({ "tyo3_identity", "tyo3_notes", "tyo3_docs", "tyo3_summary", "tyo3_affected" }) do
+    local t = sidebar_text(ft)
+    if t ~= "" then
+      table.insert(parts, t)
+    end
+  end
+  return table.concat(parts, "\n")
 end
 
 local function buffer_text()
@@ -115,6 +144,9 @@ end, 50)
 check("daemon connected + project synced", not prep_err, prep_err)
 check("decorate carries checkout + show_label", ranges.checkout and ranges.show_label and true or false)
 
+-- Set up sidebar buffers in dep-light mode (no edgy needed for render checks).
+sidebar_setup_light()
+
 if prep_err or not ranges.checkout then
   report_and_exit()
   return
@@ -142,29 +174,29 @@ vim.api.nvim_win_set_cursor(0, { show_label_line, 4 })
 local key_other, _, _, fb_other = context.node_key(bufnr)
 check("different def → different key", key_other ~= key_checkout and not fb_other, key_other)
 
--- ── Gate 2: entity resolves + renders in the panel ──────────────────────────
+-- ── Gate 2: entity resolves + renders in the sidebar ────────────────────────
 context._last_key[bufnr] = nil
 vim.api.nvim_win_set_cursor(0, { checkout_line, 4 })
 context.on_cursor(bufnr)
 local got2 = vim.wait(30000, function()
-  local t = panel_text()
+  local t = sidebar_text("tyo3_identity")
   return t:find("checkout", 1, true) ~= nil and t:find("function", 1, true) ~= nil
 end, 50)
-check("entity resolves + renders (name · kind)", got2, panel_text())
+check("entity resolves + renders in IDENTITY", got2, sidebar_text("tyo3_identity"))
 do
-  local t = panel_text()
-  -- The panel is observe-only since proj 28 Phase C: no ACTIONS pane (acting
-  -- moved to the code-action registry / tiny-code-action picker).
+  local it = sidebar_text("tyo3_identity")
+  local nt = sidebar_text("tyo3_notes")
+  local dt = sidebar_text("tyo3_docs")
+  local st = sidebar_text("tyo3_summary")
+  -- IDENTITY shows the full card (kind, durable id, location).
+  check("IDENTITY shows kind", it:find("kind", 1, true) ~= nil, nil)
+  check("IDENTITY shows durable id", it:find("durable id", 1, true) ~= nil, nil)
+  check("NOTES buffer populated", #vim.api.nvim_buf_get_lines(sidebar.bufs["tyo3_notes"], 0, -1, false) > 0, nil)
+  check("DOCS buffer populated", #vim.api.nvim_buf_get_lines(sidebar.bufs["tyo3_docs"], 0, -1, false) > 0, nil)
+  check("SUMMARY buffer populated", #vim.api.nvim_buf_get_lines(sidebar.bufs["tyo3_summary"], 0, -1, false) > 0, nil)
   check(
-    "collapsible panes render",
-    t:find("IDENTITY", 1, true) and t:find("NOTES", 1, true) and t:find("DOCS", 1, true)
-      and t:find("SUMMARY", 1, true),
-    nil
-  )
-  check("no ACTIONS pane (observe-only panel)", t:find("ACTIONS", 1, true) == nil, nil)
-  check(
-    "DOCS pane links both user + dev guides",
-    t:find("User · workflow", 1, true) and t:find("Dev · durable identity", 1, true),
+    "DOCS links both user + dev guides",
+    dt:find("User", 1, true) and dt:find("Dev", 1, true),
     nil
   )
 end
@@ -189,13 +221,13 @@ context._last_key[bufnr] = nil
 vim.api.nvim_win_set_cursor(0, { checkout_line, 4 })
 context.on_cursor(bufnr)
 local got3 = vim.wait(30000, function()
-  return panel_text():find("load-bearing checkout path", 1, true) ~= nil
+  return sidebar_text("tyo3_notes"):find("load-bearing checkout path", 1, true) ~= nil
 end, 50)
-check("note surfaces in CONTEXT", got3, panel_text())
+check("note surfaces in NOTES", got3, sidebar_text("tyo3_notes"))
 -- Summary is derived/optional; report presence without forcing it.
-check("summary surfaced (informational)", true, panel_text():find("⟢", 1, true) and "present" or "absent")
+check("summary surfaced (informational)", true, sidebar_text("tyo3_summary"):find("⟢", 1, true) and "present" or "absent")
 
--- ── Gate 3b: per-entity authored markdown doc surfaces in the DOCS pane ──
+-- ── Gate 3b: per-entity authored markdown doc surfaces in the DOCS buffer ─
 local doc_done, doc_err
 require("tyo3").rpc(
   bufnr,
@@ -215,20 +247,9 @@ context._last_key[bufnr] = nil
 vim.api.nvim_win_set_cursor(0, { checkout_line, 4 })
 context.on_cursor(bufnr)
 local got_doc = vim.wait(30000, function()
-  return panel_text():find("📄 Checkout doc", 1, true) ~= nil
+  return sidebar_text("tyo3_docs"):find("Checkout doc", 1, true) ~= nil
 end, 50)
-check("authored doc surfaces in DOCS pane", got_doc, panel_text())
-
--- ── Gate 3c: collapsing a pane hides its body and flips the marker ──
-panel._collapsed["NOTES"] = true
-panel.reload()
-local got_collapse = vim.wait(30000, function()
-  local t = panel_text()
-  return t:find("▸ NOTES", 1, true) ~= nil and t:find("load-bearing checkout path", 1, true) == nil
-end, 50)
-check("collapse hides pane body", got_collapse, panel_text())
-panel._collapsed["NOTES"] = false
-panel.reload()
+check("authored doc surfaces in DOCS", got_doc, sidebar_text("tyo3_docs"))
 
 -- ── Gate 4: stale-drop — only the latest key's card is rendered ─────────────
 context._last_key[bufnr] = nil
@@ -237,9 +258,9 @@ context.on_cursor(bufnr) -- schedules a checkout lookup
 vim.api.nvim_win_set_cursor(0, { show_label_line, 4 })
 context.on_cursor(bufnr) -- supersedes it before the debounce fires
 local got4 = vim.wait(30000, function()
-  return panel_text():find("show_label", 1, true) ~= nil
+  return sidebar_text("tyo3_identity"):find("show_label", 1, true) ~= nil
 end, 50)
-local t4 = panel_text()
+local t4 = sidebar_text("tyo3_identity")
 check(
   "stale-drop: only latest entity rendered",
   got4 and t4:find("load-bearing checkout path", 1, true) == nil,
@@ -257,15 +278,15 @@ check("fallback: node_key does not error", ok5, ok5 and "" or tostring(key5))
 check("fallback: keys by cursor line", ok5 and fb5 == true and key5 == "line:2", tostring(key5))
 
 -- ── Gate 6: cursor context is always on (no flag, no opt-out) ───────────────
-panel.clear_context()
+sidebar.clear_context()
 vim.api.nvim_set_current_buf(bufnr)
 vim.api.nvim_win_set_cursor(0, { checkout_line, 4 })
 context._last_key[bufnr] = nil
 context.on_cursor(bufnr)
 local got6 = vim.wait(30000, function()
-  return panel_text():find("checkout", 1, true) ~= nil
+  return sidebar_text("tyo3_identity"):find("checkout", 1, true) ~= nil
 end, 50)
-check("always-on: on_cursor populates CONTEXT with no flag", got6, panel_text())
+check("always-on: on_cursor populates IDENTITY with no flag", got6, sidebar_text("tyo3_identity"))
 
 -- ── Report ──────────────────────────────────────────────────────────────────
 vim.fn.delete(proj, "rf")

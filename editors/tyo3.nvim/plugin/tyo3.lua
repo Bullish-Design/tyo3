@@ -12,8 +12,8 @@ end
 -- ── Commands ────────────────────────────────────────────────────────────────
 
 cmd("TyO3Inspect", function()
-  require("tyo3.inspect").inspect()
-end, { desc = "Inspect the entity under the cursor" })
+  require("tyo3.sidebar").focus_identity()
+end, { desc = "Open the sidebar and focus the IDENTITY view" })
 
 cmd("TyO3Note", function(a)
   require("tyo3.notes").note(a.args)
@@ -48,9 +48,9 @@ cmd("TyO3Move", function(a)
   require("tyo3.move").move(name, dest)
 end, { nargs = "+", desc = "Atomic entity move: :TyO3Move <name> <dest_path>" })
 
-cmd("TyO3Panel", function()
-  require("tyo3.panel").toggle()
-end, { desc = "Toggle the affected-set panel" })
+cmd("TyO3Sidebar", function()
+  require("tyo3.sidebar").toggle()
+end, { desc = "Toggle the edgy accordion sidebar" })
 
 cmd("TyO3Start", function()
   local bufnr = vim.api.nvim_get_current_buf()

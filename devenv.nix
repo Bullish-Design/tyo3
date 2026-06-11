@@ -393,6 +393,18 @@ in
     echo "═══ Wrote editors/tyo3.nvim/demo/astnav/astnav.gif ═══"
   '';
 
+  # Render the edgy accordion sidebar demo (Phase E).
+  scripts.demo-record-sidebar.exec = ''
+    echo "═══ Recording tyo3.nvim EDGY SIDEBAR demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/sidebar/sidebar.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/sidebar/sidebar.gif ═══"
+  '';
+
   # ── Utility scripts ──────────────────────────────────────────
 
   scripts.clean.exec = ''
