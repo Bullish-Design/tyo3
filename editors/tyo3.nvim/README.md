@@ -5,10 +5,17 @@
 > reformat**, plus a live, id-level affected-set as you type. Powered by the
 > [TyO3](../../README.md) incremental engine via a small daemon.
 
-![tyo3.nvim demo](demo/default/tour.gif)
+![tyo3.nvim](demo/hero/hero.gif)
 
-*(asciinema cast: [`demo/default/tour.cast`](demo/default/tour.cast) — regenerate
-both with `devenv shell -- demo-record`.)*
+*Note an entity, atomically move it — the note rides the move — then walk a
+durable `needs_review` flag and a type error in one `]d` stream and acknowledge
+the review from the code-action menu. Regenerate with
+`devenv shell -- demo-record-hero`.*
+
+*Longer walkthroughs: the [**full tour**](demo/default/tour.gif) (every feature)
+and the [**cursor-context tour**](demo/context/context.gif) (the rich sidebar) —
+regenerate with `devenv shell -- demo-record` / `demo-record-context`; asciinema
+cast at [`demo/default/tour.cast`](demo/default/tour.cast).*
 
 ---
 
