@@ -392,6 +392,88 @@ def test_type_hierarchy_reports_supertype(handlers):
     assert "Item" in supers
 
 
+# ── symbols (workspace/symbol) ────────────────────────────────────────────────
+
+
+def test_symbols_lists_entities_across_files(handlers):
+    """``symbols`` walks the head graph for entities across files — ``checkout``
+    (store.py) and ``Item.price`` (catalog.py) both appear."""
+    res = handlers.symbols({})
+    by_qname = {s["qualified_name"]: s for s in res["symbols"]}
+    assert "checkout" in by_qname
+    assert "Item.price" in by_qname
+    assert by_qname["checkout"]["path"].endswith("store.py")
+    assert by_qname["Item.price"]["path"].endswith("catalog.py")
+    # No module / external nodes; each carries a 1-based range + kind.
+    for s in res["symbols"]:
+        assert s["kind"] != "module"
+        assert s["range"]["start"]["line"] >= 1
+
+
+def test_symbols_query_filters_by_substring(handlers):
+    """``query`` is a case-insensitive substring filter on ``qualified_name``."""
+    res = handlers.symbols({"query": "CHECK"})
+    qnames = {s["qualified_name"] for s in res["symbols"]}
+    assert "checkout" in qnames
+    assert "Item.price" not in qnames
+
+
+def test_symbols_rejects_bad_query(handlers):
+    with pytest.raises(ProtocolError) as e:
+        handlers.symbols({"query": 5})
+    assert e.value.code == INVALID_PARAMS
+
+
+def test_symbols_registered(handlers):
+    assert "symbols" in handlers.methods
+
+
+# ── call_hierarchy ────────────────────────────────────────────────────────────
+
+
+def test_call_hierarchy_incoming_lists_caller(handlers):
+    """``call_hierarchy`` on ``usd`` (money.py) reports ``checkout`` as an
+    incoming caller, with the call-site range."""
+    res = handlers.call_hierarchy({"path": "money.py", "line": 1, "col": 5})
+    assert res is not None
+    assert res["item"]["name"] == "usd"
+    callers = {c["from"]["name"]: c for c in res["incoming"]}
+    assert "checkout" in callers, list(callers)
+    checkout_call = callers["checkout"]
+    assert checkout_call["ranges"], "the call site range is reported"
+    assert checkout_call["ranges"][0]["start"]["line"] >= 1
+
+
+def test_call_hierarchy_outgoing_lists_callees(handlers):
+    """``checkout`` calls ``usd`` and instantiates ``Book`` — both are outgoing."""
+    _, line, col = _checkout_position(handlers)
+    res = handlers.call_hierarchy({"path": "store.py", "line": line, "col": col})
+    assert res is not None
+    assert res["item"]["name"] == "checkout"
+    out_names = {c["to"]["name"] for c in res["outgoing"]}
+    assert "usd" in out_names, out_names
+    assert "Book" in out_names, out_names
+    # Each callee carries at least one call-site range (in checkout's body),
+    # so editors that render call hierarchy per call site list every callee.
+    for c in res["outgoing"]:
+        assert c["ranges"], f"{c['to']['name']} has no call-site range"
+        assert c["ranges"][0]["start"]["line"] >= 1
+
+
+def test_call_hierarchy_off_entity_is_null(handlers):
+    assert handlers.call_hierarchy({"path": "store.py", "line": 4, "col": 1}) is None
+
+
+def test_call_hierarchy_requires_position(handlers):
+    with pytest.raises(ProtocolError) as e:
+        handlers.call_hierarchy({"path": "money.py", "line": 1})
+    assert e.value.code == INVALID_PARAMS
+
+
+def test_call_hierarchy_registered(handlers):
+    assert "call_hierarchy" in handlers.methods
+
+
 def test_can_rename_reports_range(handlers):
     res = handlers.can_rename({"path": "money.py", "line": 1, "col": 5})
     assert res["can_rename"] is True

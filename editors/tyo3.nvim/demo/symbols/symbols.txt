@@ -1,0 +1,1785 @@
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-zYYe3S/shop
+tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:lua vim.lsp.buf.document_symbol()
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:lua vim.lsp.buf.document_symbol()
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+    1 store.py|6-7 col 1-31| [Function] checkout
+    2 store.py|10-11 col 1-26| [Function] show_label
+~
+~
+~
+~
+~
+~
+~
+~
+[Location List] Symbols in store.py                                                                   1,1             All
+:lua vim.lsp.buf.document_symbol()
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+    1 store.py|6-7 col 1-31| [Function] checkout
+    2 store.py|10-11 col 1-26| [Function] show_label
+~
+~
+~
+~
+~
+~
+~
+~
+[Location List] Symbols in store.py                                                                   1,1             All
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:lua vim.lsp.buf.workspace_symbol('label')
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:lua vim.lsp.buf.workspace_symbol('label')
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+    1 catalog.py|5-6 col 1-22| [Method] Item.label
+    2 store.py|10-11 col 1-26| [Function] show_label
+~
+~
+~
+~
+~
+~
+~
+~
+[Quickfix List] Symbols matching 'label'                                                              1,1             All
+:lua vim.lsp.buf.workspace_symbol('label')
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+    1 catalog.py|5-6 col 1-22| [Method] Item.label
+    2 store.py|10-11 col 1-26| [Function] show_label
+~
+~
+~
+~
+~
+~
+~
+~
+[Quickfix List] Symbols matching 'label'                                                              1,1             All
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  1:1
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+/checkout
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+/checkout                                                                                              [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+/checkout                                                                                              [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+:lua vim.lsp.buf.outgoing_calls()
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+:lua vim.lsp.buf.outgoing_calls()
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+    1 book.py|7 col 16| Book
+    2 money.py|7 col 12| usd
+    3 catalog.py|7 col 23| price
+~
+~
+~
+~
+~
+~
+~
+[Quickfix List] LSP call hierarchy                                                                    1,1             All
+:lua vim.lsp.buf.outgoing_calls()
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+    1 book.py|7 col 16| Book
+    2 money.py|7 col 12| usd
+    3 catalog.py|7 col 23| price
+~
+~
+~
+~
+~
+~
+~
+[Quickfix List] LSP call hierarchy                                                                    1,1             All
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+:silent! lclose | silent! cclose
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           store.py  6:5
+:e money.py
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:1
+:e money.py
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:1
+:e money.py
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:5
+/usd
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:5
+/usd                                                                                                   [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:5
+/usd                                                                                                   [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:5
+:lua vim.lsp.buf.incoming_calls()
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:5
+:lua vim.lsp.buf.incoming_calls()
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:5
+    1 store.py|7 col 12| checkout
+~
+~
+~
+~
+~
+~
+~
+~
+~
+[Quickfix List] LSP call hierarchy                                                                    1,1             All
+:lua vim.lsp.buf.incoming_calls()
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:5
+    1 store.py|7 col 12| checkout
+~
+~
+~
+~
+~
+~
+~
+~
+~
+[Quickfix List] LSP call hierarchy                                                                    1,1             All
+:qa!
+────────────────────────────────────────────────────────────────────────────────
+    1 def usd(cents: int) -> str:
+    2     return f"${cents / 100:.2f}"
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+  TyO3 ● symbols                                                                                           money.py  1:5
+    1 store.py|7 col 12| checkout
+~
+~
+~
+~
+~
+~
+~
+~
+~
+[Quickfix List] LSP call hierarchy                                                                    1,1             All
+:qa!
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-zYYe3S/shop
+tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
+> $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/symbols/init.lua store.py
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────

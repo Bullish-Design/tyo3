@@ -332,6 +332,20 @@ in
     echo "═══ Wrote editors/tyo3.nvim/demo/hero/hero.gif ═══"
   '';
 
+  # Render the SYMBOLS demo (proj 28, Phase A): the native LSP symbol surfaces —
+  # documentSymbol, workspace symbol, and incoming/outgoing call hierarchy — all
+  # answered from tyo3's durable code graph via stock `vim.lsp.buf.*` commands.
+  scripts.demo-record-symbols.exec = ''
+    echo "═══ Recording tyo3.nvim SYMBOLS demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/symbols/symbols.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/symbols/symbols.gif ═══"
+  '';
+
   # ── Utility scripts ──────────────────────────────────────────
 
   scripts.clean.exec = ''
