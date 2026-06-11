@@ -173,6 +173,31 @@ check(
     and explain_action.command.arguments[1].col == checkout_pos.column
 )
 
+-- Kinds are split so tiny-code-action icons + `context.only` filtering work:
+-- explain is informational (source.tyo3), simplify a refactor.rewrite.
+local kinds = {}
+for _, a in ipairs(actions or {}) do
+  kinds[a.kind or ""] = true
+end
+check("explain action carries the source.tyo3 kind", kinds["source.tyo3"] == true)
+check("simplify action carries the refactor.rewrite kind", kinds["refactor.rewrite"] == true)
+
+-- ── Part 1a: off-entity position offers nothing (entity-gating) ─────────────
+-- Line 0/col 0 is the module's first import — id_for returns nil there, so the
+-- entity providers stay silent and the popup is empty rather than offering
+-- actions that fail when picked. (Only built-ins are registered at this point.)
+local blank_params = {
+  textDocument = { uri = store_uri },
+  range = {
+    start = { line = 0, character = 0 },
+    ["end"] = { line = 0, character = 0 },
+  },
+  context = { diagnostics = {} },
+}
+local ca0 = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", blank_params, 5000)
+local a0 = ca0 and ca0[client.id] and ca0[client.id].result
+check("no code action offered off-entity", type(a0) == "table" and #a0 == 0, a0 and #a0 or nil)
+
 -- ── Part 1b: a third-party plugin contributes actions with no fork ──────────
 -- The extensibility seam: register a raw provider + a register_entity_action,
 -- then re-request codeAction and assert both surface (this is exactly what a
@@ -301,5 +326,84 @@ vim.wait(10000, function()
   return au2_done
 end, 50)
 check("explain record now records simplify mode", au2 and au2.value and au2.value.mode == "simplify")
+
+-- ── Part 4: review-acknowledge quickfix appears + clears needs_review ───────
+-- Author an `intent` note on show_label, edit its body (flips intent →
+-- needs_review), then request codeAction on it: a `tyo3.ack` quickfix appears,
+-- marked isPreferred. Invoking it re-authors the note (re-stamps the reviewed
+-- hash), which clears the flag.
+local ack_ready, ack_err
+require("tyo3").with_client(bufnr, function(c)
+  c:request(
+    "author",
+    { layer = "intent", durable_id = label_id, value = { note = "keep this label stable" } },
+    function(aerr)
+      if aerr then
+        ack_err, ack_ready = aerr.message, true
+        return
+      end
+      -- Edit show_label's body so its content hash drifts from the reviewed one.
+      local orig = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n") .. "\n"
+      local edited = orig:gsub("return Item%(%)%.label%(%)", 'return Item().label() + "!"')
+      c:request("sync_buffer", { path = store, text = edited }, function(serr)
+        ack_err, ack_ready = serr and serr.message or nil, true
+      end)
+    end
+  )
+end, function(msg)
+  ack_err, ack_ready = msg, true
+end)
+vim.wait(15000, function()
+  return ack_ready
+end, 50)
+check("authored intent on show_label + drifted its body", not ack_err, ack_err)
+
+-- needs_review is anchored to the entity id, so the def line hasn't moved.
+local ack_params = {
+  textDocument = { uri = store_uri },
+  range = {
+    start = { line = label_pos.line - 1, character = label_pos.column - 1 },
+    ["end"] = { line = label_pos.line - 1, character = label_pos.column - 1 },
+  },
+  context = { diagnostics = {} },
+}
+local ca_ack = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", ack_params, 5000)
+local ack_actions = ca_ack and ca_ack[client.id] and ca_ack[client.id].result
+local ack_action
+for _, a in ipairs(ack_actions or {}) do
+  if a.command and a.command.command == "tyo3.ack" then
+    ack_action = a
+  end
+end
+check("ack quickfix appears when entity is needs_review", ack_action ~= nil)
+check("ack quickfix is marked isPreferred", ack_action and ack_action.isPreferred == true)
+check("ack quickfix carries the quickfix kind", ack_action and ack_action.kind == "quickfix")
+
+if ack_action then
+  vim.lsp.commands["tyo3.ack"]({
+    command = "tyo3.ack",
+    arguments = ack_action.command.arguments,
+  }, { bufnr = bufnr })
+
+  -- Poll the intent status until it clears (re-author is async over two hops).
+  local cleared = false
+  local deadline = vim.loop.now() + 15000
+  while not cleared and vim.loop.now() < deadline do
+    local got, done
+    require("tyo3").with_client(bufnr, function(c)
+      c:request("authored", { layer = "intent", durable_id = label_id }, function(_, av)
+        got, done = av, true
+      end)
+    end)
+    vim.wait(2000, function()
+      return done
+    end, 25)
+    cleared = got ~= nil and got.status == "present"
+    if not cleared then
+      vim.wait(300)
+    end
+  end
+  check("ack cleared show_label's needs_review", cleared)
+end
 
 report_and_exit(proj)
