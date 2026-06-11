@@ -5,21 +5,25 @@
 
 local M = {}
 
+-- Author shares ONE implementation with the `tyo3.author` code-action command:
+-- both funnel through `lsp.author_note` (the daemon `author` verb + re-decorate +
+-- layer-state refresh), so :TyO3Note and the picker can never diverge.
 local function author(bufnr, durable_id, text, layer)
   layer = layer or "intent"
-  require("tyo3").rpc(
-    bufnr,
-    "author",
-    { layer = layer, durable_id = durable_id, value = { note = text } },
-    function(err)
+  local root = require("tyo3").root_for_buf(bufnr)
+  if not root then
+    vim.notify("[tyo3] not in a TyO3 project", vim.log.levels.WARN)
+    return
+  end
+  require("tyo3.lsp").author_note(bufnr, root, durable_id, layer, { note = text }, function(err)
+    vim.schedule(function()
       if err then
         vim.notify("[tyo3] " .. layer .. " note failed: " .. (err.message or "error"), vim.log.levels.ERROR)
-        return
+      else
+        vim.notify("[tyo3] " .. layer .. " note authored", vim.log.levels.INFO)
       end
-      vim.notify("[tyo3] " .. layer .. " note authored", vim.log.levels.INFO)
-      require("tyo3.decorate").apply(bufnr)
-    end
-  )
+    end)
+  end)
 end
 
 --- :TyO3Note [text] — author a note on the entity under the cursor, in *layer*

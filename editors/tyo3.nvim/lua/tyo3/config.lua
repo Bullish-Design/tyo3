@@ -12,9 +12,14 @@ M.defaults = {
   -- See lua/tyo3/deps.lua.
   manage = true,
   -- Buffer-local, project-scoped keymaps for the curated navigate/observe/act
-  -- loop. Defaults are filled in by Phases C/D (action picker + AST motion);
-  -- empty for now. Set per-feature tables to override or `false` to opt out.
-  keymaps = {},
+  -- loop. Set a key to a string to rebind, or `false` to opt out. AST motion
+  -- keys (Phase D) are filled in later.
+  keymaps = {
+    -- Open the tiny-code-action buffer picker — the "act on the entity" surface
+    -- (Author / Write doc / Move / Explain·Simplify / Acknowledge). Overrides
+    -- nvim's native `gra` on project python buffers with the curated picker.
+    code_action = "gra",
+  },
   -- Debounce window (ms) before a TextChanged commit fires. One commit per pause.
   debounce_ms = 300,
   -- Affected-set precision hint surfaced in :checkhealth (the daemon owns the

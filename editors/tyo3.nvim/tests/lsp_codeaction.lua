@@ -1,12 +1,18 @@
--- Headless integration test for the code-action → LLM → durable layer spike
--- (proj 26, lua/tyo3/lsp.lua). Builds the synthetic shop project, opens store.py
--- with `lsp = true`, attaches the in-process `vim.lsp` server, and:
---   * requests textDocument/codeAction over an entity → the two tyo3 actions,
---     each a client command (tyo3.explain) with {uri,line,col,mode} arguments;
---   * runs the tyo3.explain path (M.run_explain) → the daemon `explain` verb
---     (LLM stub → durable authored layer) and asserts the `explain` record now
---     exists for the entity's id and matches the returned text;
---   * drives mode="simplify" and asserts the record's mode updates.
+-- Headless integration test for the code-action registry — the single "act on
+-- the entity" surface (proj 26 spike, hardened into proj 28 Phase C). Builds the
+-- synthetic shop project, attaches the in-process `vim.lsp` server, and:
+--   * requests textDocument/codeAction over an entity → asserts the menu's
+--     *content* by presence + filtering (never totals): Explain (gated on the
+--     declared `explain` layer), a resolvable Simplify, Write/edit doc, Move, and
+--     Author for exactly the writable layers {intent} — proving explain/docs are
+--     excluded from Author while summary/embed are excluded as derived;
+--   * exercises the extensibility seam (a raw provider + register_entity_action)
+--     and the generic tyo3.run dispatcher end-to-end;
+--   * drives M.author_note directly → the daemon `author` verb writes a durable
+--     intent note (the factored core the tyo3.author command shares);
+--   * runs the tyo3.explain path (M.run_explain) → the `explain` verb (LLM stub →
+--     durable authored layer) and asserts the record, then mode="simplify";
+--   * asserts the needs_review acknowledge quickfix appears + clears the flag.
 -- Hermetic: the daemon's LLM seam defaults to the offline stub (no network).
 --
 -- Run:
@@ -145,23 +151,56 @@ local ca_params = {
 }
 local ca = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", ca_params, 5000)
 local actions = ca and ca[client.id] and ca[client.id].result
-check("codeAction returns 2 tyo3 actions", type(actions) == "table" and #actions == 2, actions and #actions or nil)
+check("codeAction returns a table of actions", type(actions) == "table" and #actions > 0, actions and #actions or nil)
 
--- Explain runs as a client command (prose float); Simplify carries resolve
--- `data` and no command (lazily resolved to a WorkspaceEdit, Phase 6).
+-- Phase C makes the menu the *single* "act on the entity" surface, so it grows
+-- (Author/Doc/Move alongside Explain/Simplify). Assert *presence + filtering*,
+-- never totals. Derive the relevant sets from the returned actions.
+local commands, kinds, data_kinds, author_layers = {}, {}, {}, {}
 local explain_action, simplify_action
 for _, a in ipairs(actions or {}) do
-  if a.command and a.command.command == "tyo3.explain" then
+  if a.kind then
+    kinds[a.kind] = true
+  end
+  if a.data and a.data.kind then
+    data_kinds[a.data.kind] = true
+  end
+  if a.command and a.command.command then
+    commands[a.command.command] = true
+    if a.command.command == "tyo3.author" then
+      local layer = a.command.arguments and a.command.arguments[1] and a.command.arguments[1].layer
+      if layer then
+        author_layers[layer] = true
+      end
+    end
     local mode = a.command.arguments and a.command.arguments[1] and a.command.arguments[1].mode
-    if mode == "explain" then
+    if a.command.command == "tyo3.explain" and mode == "explain" then
       explain_action = a
     end
   elseif a.data and a.data.kind == "simplify" then
     simplify_action = a
   end
 end
-check("an explain action carries the tyo3.explain command", explain_action ~= nil)
-check("a simplify action carries resolve data", simplify_action ~= nil and simplify_action.data ~= nil)
+
+-- Presence: Explain (gated — the shop declares `[layers.explain]`), a resolvable
+-- Simplify, Write/edit doc, and Move are all offered on the entity.
+check("explain action present (explain layer declared)", commands["tyo3.explain"] == true)
+check("a simplify action carries resolve data", simplify_action ~= nil and data_kinds["simplify"] == true)
+check("write/edit doc action present", commands["tyo3.doc"] == true)
+check("move action present", commands["tyo3.move"] == true)
+
+-- The single assertion that proves the whole Author-filtering story: the shop
+-- declares [layers.intent|docs|explain|summary|embed]; Author is offered only for
+-- writable layers (origin==authored) minus docs/explain — so exactly {intent}.
+-- explain/docs are excluded from Author (yet Explain is present); summary/embed
+-- are derived and excluded. No `{"intent"}` fallback could fake this — it comes
+-- from the live `layers` verb via ctx.layers.
+local n_author = 0
+for _ in pairs(author_layers) do
+  n_author = n_author + 1
+end
+check("author offered for exactly the writable layers {intent}", author_layers["intent"] == true and n_author == 1, n_author)
+
 check(
   "explain action argument carries uri + 1-based position",
   explain_action
@@ -178,13 +217,12 @@ check(
 )
 
 -- Kinds are split so tiny-code-action icons + `context.only` filtering work:
--- explain is informational (source.tyo3), simplify a refactor.rewrite.
-local kinds = {}
-for _, a in ipairs(actions or {}) do
-  kinds[a.kind or ""] = true
-end
-check("explain action carries the source.tyo3 kind", kinds["source.tyo3"] == true)
-check("simplify action carries the refactor.rewrite kind", kinds["refactor.rewrite"] == true)
+-- explain/author/doc are informational (source.tyo3), simplify a refactor.rewrite,
+-- move a refactor.move.
+check(
+  "kinds include source.tyo3 + refactor.rewrite + refactor.move",
+  kinds["source.tyo3"] == true and kinds["refactor.rewrite"] == true and kinds["refactor.move"] == true
+)
 
 -- ── Part 1a: off-entity position offers nothing (entity-gating) ─────────────
 -- Line 0/col 0 is the module's first import — id_for returns nil there, so the
@@ -224,7 +262,9 @@ lsp.register_entity_action({
 
 local ca2 = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", ca_params, 5000)
 local actions2 = ca2 and ca2[client.id] and ca2[client.id].result
-check("registered actions surface alongside built-ins", type(actions2) == "table" and #actions2 == 4, actions2 and #actions2 or nil)
+-- Presence, not totals: the registered provider + entity action surface
+-- *alongside* the (growing) built-in menu. (Asserted by title/command below.)
+check("registered actions surface alongside built-ins", type(actions2) == "table" and #actions2 > 0, actions2 and #actions2 or nil)
 local titles = {}
 local run_action
 for _, a in ipairs(actions2 or {}) do
@@ -276,6 +316,36 @@ if label_id and run_action then
   end
   check("tyo3.run dispatcher authored show_label's explain record", label_present)
 end
+
+-- ── Part 1d: the factored author core writes a durable note end-to-end ──────
+-- The `tyo3.author` command splits its prompt from a testable core,
+-- M.author_note, exactly so the spike can drive the durable write without faking
+-- the snacks prompt. Author an `intent` note on checkout, then poll its record.
+local an_done
+require("tyo3.lsp").author_note(bufnr, proj, checkout_id, "intent", { note = "checkout entrypoint" }, function(_err)
+  an_done = true
+end)
+vim.wait(15000, function()
+  return an_done
+end, 50)
+local an_present = false
+local an_deadline = vim.loop.now() + 15000
+while not an_present and vim.loop.now() < an_deadline do
+  local got, done
+  require("tyo3").with_client(bufnr, function(c)
+    c:request("authored", { layer = "intent", durable_id = checkout_id }, function(_, av)
+      got, done = av, true
+    end)
+  end)
+  vim.wait(2000, function()
+    return done
+  end, 25)
+  an_present = got ~= nil and got.status == "present" and got.value and got.value.note == "checkout entrypoint"
+  if not an_present then
+    vim.wait(300)
+  end
+end
+check("author_note wrote a durable intent note on checkout", an_present)
 
 -- ── Part 2: run the explain command → durable record on the explain layer ───
 local explained, ex_err, ex_res

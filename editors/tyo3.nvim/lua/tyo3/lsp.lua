@@ -50,20 +50,24 @@ local CAPS = {
   workspaceSymbolProvider = true,
   callHierarchyProvider = true,
   renameProvider = { prepareProvider = true },
-  -- Code actions are the "act on what's under the cursor" trigger (proj 26).
-  -- We return client-side commands (tyo3.explain / tyo3.ack), resolved through
-  -- `vim.lsp.commands`, so tiny-code-action / `gra` / vim.lsp.buf.code_action()
-  -- all drive them. Distinct kinds give tiny-code-action distinct icons and let
-  -- `context.only` filter: Simplify is a refactor.rewrite, Explain an
-  -- informational source.tyo3, the review-ack a quickfix.
+  -- Code actions are the "act on what's under the cursor" trigger (proj 26) and,
+  -- since proj 28 Phase C, the *single* "act on the entity" surface. We return
+  -- client-side commands (tyo3.explain / tyo3.author / tyo3.doc / tyo3.move /
+  -- tyo3.ack), resolved through `vim.lsp.commands`, so tiny-code-action / `gra` /
+  -- vim.lsp.buf.code_action() all drive them. Distinct kinds give tiny-code-action
+  -- distinct icons and let `context.only` filter: Simplify is a refactor.rewrite,
+  -- Move a refactor.move, Explain/Author/Doc informational source.tyo3, the
+  -- review-ack a quickfix.
   codeActionProvider = {
     -- Simplify carries `data` and no `edit`, resolved lazily via
     -- `codeAction/resolve` into a WorkspaceEdit — so the menu stays instant (no
     -- LLM per keystroke) and tiny-code-action shows the rewrite diff on focus.
     resolveProvider = true,
-    codeActionKinds = { "refactor.rewrite", "quickfix", "source.tyo3" },
+    codeActionKinds = { "refactor.rewrite", "refactor.move", "quickfix", "source.tyo3" },
   },
-  executeCommandProvider = { commands = { "tyo3.explain", "tyo3.run", "tyo3.ack" } },
+  executeCommandProvider = {
+    commands = { "tyo3.explain", "tyo3.run", "tyo3.ack", "tyo3.author", "tyo3.doc", "tyo3.move" },
+  },
   -- Pull diagnostics stay advertised so `vim.diagnostic` on-demand pulls work;
   -- Phase 2 also *pushes* via dispatchers.notification on bus deltas. Pull is
   -- on-demand, push is event-driven — in practice nvim 0.12 doesn't fire both
@@ -92,7 +96,7 @@ end
 -- The code-action kinds we emit. `context.only` is prefix-matched per LSP: a
 -- request for "refactor" matches "refactor.rewrite". Return true if any tyo3
 -- kind satisfies the filter (so a kind-scoped invocation still reaches us).
-local TYO3_KINDS = { "refactor.rewrite", "quickfix", "source.tyo3" }
+local TYO3_KINDS = { "refactor.rewrite", "refactor.move", "quickfix", "source.tyo3" }
 local function has_tyo3_kind(only)
   for _, want in ipairs(only or {}) do
     for _, k in ipairs(TYO3_KINDS) do
@@ -354,46 +358,98 @@ handlers["textDocument/codeAction"] = function(root, params, reply)
     line = p.line,
     col = p.col,
   }, function(_err, card)
-    local ctx = {
-      uri = uri,
-      line = p.line,
-      col = p.col,
-      bufnr = vim.fn.bufnr(uri_to_path(uri)),
-      root = root,
-      entity = card or nil,
-      diagnostics = pctx.diagnostics or {},
-    }
-    local actions = {}
-    for _, provider in ipairs(M._code_action_providers) do
-      local ok, contributed = pcall(provider, ctx)
-      if ok and type(contributed) == "table" then
-        vim.list_extend(actions, contributed)
-      elseif not ok then
-        vim.schedule(function()
-          vim.notify("[tyo3] a code-action provider errored: " .. tostring(contributed), vim.log.levels.WARN)
-        end)
+    -- Run every provider over a single, resolve-once ctx, then sort + reply.
+    local function run(layers)
+      local ctx = {
+        uri = uri,
+        line = p.line,
+        col = p.col,
+        bufnr = vim.fn.bufnr(uri_to_path(uri)),
+        root = root,
+        entity = card or nil,
+        layers = layers,
+        diagnostics = pctx.diagnostics or {},
+      }
+      local actions = {}
+      for _, provider in ipairs(M._code_action_providers) do
+        local ok, contributed = pcall(provider, ctx)
+        if ok and type(contributed) == "table" then
+          vim.list_extend(actions, contributed)
+        elseif not ok then
+          vim.schedule(function()
+            vim.notify("[tyo3] a code-action provider errored: " .. tostring(contributed), vim.log.levels.WARN)
+          end)
+        end
       end
+      -- Deterministic order (stable across recordings): preferred first, then title.
+      table.sort(actions, function(a, b)
+        local ap, bp = a.isPreferred and true or false, b.isPreferred and true or false
+        if ap ~= bp then
+          return ap
+        end
+        return (a.title or "") < (b.title or "")
+      end)
+      reply(nil, actions)
     end
-    -- Deterministic order (stable across recordings): preferred first, then title.
-    table.sort(actions, function(a, b)
-      local ap, bp = a.isPreferred and true or false, b.isPreferred and true or false
-      if ap ~= bp then
-        return ap
+
+    -- Layer discovery is exposed as `ctx.layers` (name → descriptor) so providers
+    -- stay pure functions of ctx: it gates Explain/Simplify on the declared
+    -- `explain` layer AND drives the per-layer Author actions, always-fresh (no
+    -- cache to go stale when config / `tyo3.extend` registrations change). Every
+    -- provider is entity-gated, so OFF an entity the layers fetch would be wasted
+    -- — skip it and run with an empty table. ON an entity, one extra cheap actor
+    -- hop on an explicit, user-initiated menu-open is imperceptible.
+    if not card then
+      return run({})
+    end
+    daemon_request(root, "layers", {}, function(_lerr, lres)
+      local layers = {}
+      for _, lyr in ipairs((lres and lres.layers) or {}) do
+        layers[lyr.name] = lyr
       end
-      return (a.title or "") < (b.title or "")
+      run(layers)
     end)
-    reply(nil, actions)
   end)
+end
+
+-- Authored layers with a dedicated, richer action of their own, so the generic
+-- Author provider doesn't *also* offer them: `docs` has Write/edit doc; `explain`
+-- is LLM-generated (never hand-typed), surfaced as Explain instead.
+local SPECIAL_AUTHORED = { docs = true, explain = true }
+
+-- Is `name` a declared authored (writable) layer in this project? Sourced from
+-- the codeAction handler's `ctx.layers` fetch — declared layers are config.toml
+-- `[layers.*]` ∪ `tyo3.extend` registrations; `session.author` does NOT validate
+-- declaration, so offering an action for an undeclared layer would write an
+-- orphaned, review-less record. Gating here is correctness, not cosmetics.
+local function declares_authored(ctx, name)
+  local lyr = ctx.layers and ctx.layers[name]
+  return lyr ~= nil and lyr.origin == "authored"
+end
+
+-- The writable layers to offer a generic Author entry for: declared authored
+-- layers minus the special-cased ones (docs/explain).
+local function author_layers(ctx)
+  local out = {}
+  for name, lyr in pairs(ctx.layers or {}) do
+    if lyr.origin == "authored" and not SPECIAL_AUTHORED[name] then
+      table.insert(out, name)
+    end
+  end
+  table.sort(out)
+  return out
 end
 
 -- Built-in: the proj-26 explain / simplify actions — also the reference example
 -- of a registered provider. Entity-gated (silent when nothing is under the
--- cursor) and named after the entity, so the popup reads `tyo3: Explain
--- \`checkout\`` rather than a generic label. Distinct kinds (informational
--- vs. refactor.rewrite) get distinct tiny-code-action icons.
+-- cursor) and gated on the project declaring the `explain` layer (DECIDED, proj
+-- 28 Phase C: an undeclared layer would orphan the record). Named after the
+-- entity, so the popup reads `tyo3: Explain \`checkout\`` rather than a generic
+-- label. Distinct kinds (informational vs. refactor.rewrite) get distinct
+-- tiny-code-action icons.
 M.register_code_action(function(ctx)
-  if not ctx.entity then
-    return {} -- nothing under the cursor → no noise in the menu
+  if not ctx.entity or not declares_authored(ctx, "explain") then
+    return {} -- nothing under the cursor, or no durable `explain` sink → silent
   end
   local who = ctx.entity.qualified_name or ctx.entity.name or "entity"
   return {
@@ -475,6 +531,74 @@ M.register_code_action(function(ctx)
         title = "tyo3: Acknowledge review",
         command = "tyo3.ack",
         arguments = { { uri = ctx.uri, root = ctx.root, did = ctx.entity.durable_id, layers = flagged } },
+      },
+    },
+  }
+end)
+
+-- ── Entity actions: Author / Write doc / Move (proj 28 Phase C) ───────────────
+--
+-- The old `actions.lua` ACTIONS pane folded into the registry: the code-action
+-- menu is now the single "act on the entity" surface. Each is a client command
+-- (resolved through `vim.lsp.commands`), so it flows through tiny-code-action /
+-- `gra` / vim.lsp.buf.code_action like the explain/ack built-ins.
+
+-- Author `<layer>` — one action per *writable* layer (declared authored, minus
+-- docs/explain). No `{"intent"}` fallback: a layer absent from `ctx.layers` is
+-- undeclared, and authoring it would orphan the record (DECIDED, GUIDE §3.1).
+M.register_code_action(function(ctx)
+  if not ctx.entity then
+    return {}
+  end
+  local who = ctx.entity.qualified_name or ctx.entity.name or "entity"
+  local out = {}
+  for _, layer in ipairs(author_layers(ctx)) do
+    table.insert(out, {
+      title = ("tyo3: Author `%s` (%s)"):format(who, layer),
+      kind = "source.tyo3",
+      command = {
+        title = "tyo3: Author",
+        command = "tyo3.author",
+        arguments = { { uri = ctx.uri, root = ctx.root, did = ctx.entity.durable_id, layer = layer } },
+      },
+    })
+  end
+  return out
+end)
+
+-- Write/edit the entity's markdown doc (the `docs` layer). Re-resolves the card
+-- via entity_at at apply time, then opens entitydoc's own editor.
+M.register_code_action(function(ctx)
+  if not ctx.entity then
+    return {}
+  end
+  return {
+    {
+      title = "tyo3: Write/edit doc",
+      kind = "source.tyo3",
+      command = {
+        title = "tyo3: Write/edit doc",
+        command = "tyo3.doc",
+        arguments = { { uri = ctx.uri, root = ctx.root, line = ctx.line, col = ctx.col } },
+      },
+    },
+  }
+end)
+
+-- Move the entity to another file (atomic move → Moved bind, id + notes follow).
+M.register_code_action(function(ctx)
+  if not ctx.entity or not ctx.entity.name then
+    return {}
+  end
+  local who = ctx.entity.name
+  return {
+    {
+      title = ("tyo3: Move `%s` to…"):format(who),
+      kind = "refactor.move",
+      command = {
+        title = "tyo3: Move",
+        command = "tyo3.move",
+        arguments = { { uri = ctx.uri, root = ctx.root, name = who } },
       },
     },
   }
@@ -974,17 +1098,42 @@ end
 
 -- ── Attach ────────────────────────────────────────────────────────────────────
 
+-- Bind the buffer-local code-action keymap (proj 28 Phase C): the curated "act
+-- on the entity" surface is the tiny-code-action buffer picker. Single-path —
+-- we `require` it and let `:checkhealth tyo3` flag absence; only a missing-plugin
+-- safety net falls back to native `vim.lsp.buf.code_action`. The picker reads
+-- code actions from the attached LSP clients, so our providers flow in for free.
+-- Buffer-local, so re-binding on re-enter is idempotent. `config.keymaps.code_action`
+-- defaults to "gra"; a string rebinds, `false` opts out.
+local function bind_code_action_keymap(bufnr)
+  local keymaps = require("tyo3.config").get().keymaps or {}
+  local key = keymaps.code_action
+  if key == false or key == nil or key == "" then
+    return
+  end
+  vim.keymap.set("n", key, function()
+    local ok, tca = pcall(require, "tiny-code-action")
+    if ok then
+      tca.code_action()
+    else
+      vim.lsp.buf.code_action()
+    end
+  end, { buffer = bufnr, nowait = true, desc = "tyo3: act on the entity (code actions)" })
+end
+
 --- Attach the in-process tyo3 LSP server to *bufnr* for project *root*.
 --- Idempotent: `vim.lsp.start` dedupes by `{name, root_dir}`, so one server is
 --- reused across every buffer of the same project.
 function M.attach(bufnr, root)
-  return vim.lsp.start({
+  local client_id = vim.lsp.start({
     name = "tyo3",
     root_dir = root,
     cmd = function(dispatchers)
       return M._server(root, dispatchers)
     end,
   }, { bufnr = bufnr })
+  bind_code_action_keymap(bufnr)
+  return client_id
 end
 
 -- ── tyo3.explain client command (proj 26) ────────────────────────────────────
@@ -1095,6 +1244,82 @@ M.register_command("tyo3.ack", function(command, cmd_ctx)
       end
     end)
   end
+end)
+
+-- ── tyo3.author / tyo3.doc / tyo3.move client commands (proj 28 Phase C) ──────
+
+--- Author *value* on *layer* for the entity *did* (project *root*, buffer
+--- *bufnr*), then re-decorate + refresh layer-state diagnostics (the same
+--- post-actions as run_verb), then `cb(err, res)`. The testable core split out
+--- from the `tyo3.author` command — like run_explain vs the explain command — so
+--- a headless spec drives the durable write without faking the snacks prompt.
+function M.author_note(bufnr, root, did, layer, value, cb)
+  M.run_verb(bufnr, root, "author", { layer = layer, durable_id = did, value = value }, cb)
+end
+
+-- tyo3.author — prompt for a note, then write it via the M.author_note core.
+M.register_command("tyo3.author", function(command, cmd_ctx)
+  local args = (command.arguments or {})[1] or {}
+  local bufnr = (cmd_ctx and cmd_ctx.bufnr) or vim.api.nvim_get_current_buf()
+  local root = args.root or require("tyo3").root_for_buf(bufnr)
+  if not root or not args.did or not args.layer then
+    return
+  end
+  vim.ui.input({ prompt = args.layer .. " note: " }, function(text)
+    if not text or text == "" then
+      return
+    end
+    M.author_note(bufnr, root, args.did, args.layer, { note = text }, function(err)
+      vim.schedule(function()
+        if err then
+          vim.notify(
+            "[tyo3] " .. args.layer .. " author failed: " .. (err.message or "daemon error"),
+            vim.log.levels.ERROR
+          )
+        else
+          vim.notify("[tyo3] " .. args.layer .. " authored", vim.log.levels.INFO)
+        end
+      end)
+    end)
+  end)
+end)
+
+-- tyo3.doc — re-resolve the entity card under the action's position, then open
+-- entitydoc's markdown editor (it owns its own :w → author into the docs layer).
+M.register_command("tyo3.doc", function(command, cmd_ctx)
+  local args = (command.arguments or {})[1] or {}
+  local bufnr = (cmd_ctx and cmd_ctx.bufnr) or vim.api.nvim_get_current_buf()
+  local root = args.root or require("tyo3").root_for_buf(bufnr)
+  if not root then
+    return
+  end
+  local path = (args.uri and uri_to_path(args.uri)) or vim.api.nvim_buf_get_name(bufnr)
+  daemon_request(root, "entity_at", { path = path, line = args.line, col = args.col }, function(err, card)
+    vim.schedule(function()
+      if err or not card then
+        vim.notify("[tyo3] no entity under the cursor to document", vim.log.levels.WARN)
+        return
+      end
+      require("tyo3.entitydoc").edit_card(card, bufnr)
+    end)
+  end)
+end)
+
+-- tyo3.move — prompt for a destination, then run the atomic move (move.move
+-- resolves the entity in the current buffer + binds the Moved delta). Keep its
+-- existing safety/notify; the command only adds the prompt + name plumbing.
+M.register_command("tyo3.move", function(command, _cmd_ctx)
+  local args = (command.arguments or {})[1] or {}
+  local name = args.name
+  if not name then
+    return
+  end
+  vim.ui.input({ prompt = ("Move %s to (dest path): "):format(name) }, function(dest)
+    if not dest or dest == "" then
+      return
+    end
+    require("tyo3.move").move(name, dest)
+  end)
 end)
 
 -- ── register_entity_action: the one-call seam for spine plugins ───────────────

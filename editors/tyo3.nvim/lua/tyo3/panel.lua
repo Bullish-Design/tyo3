@@ -8,11 +8,12 @@
 --   NOTES     authored intent (notes), keyed by identity
 --   DOCS      the entity's authored markdown doc + links to the tool's guides
 --   SUMMARY   derived artifacts (auto summaries / embeddings)
---   ACTIONS   the tools you can run right now, in this context
 --   AFFECTED  the id-level blast radius of the last edit, then its refinement
 --
--- Each pane header toggles with <Tab>; <CR> activates a line (toggle a header,
--- run an action, open/edit a doc); `gd` opens the static doc for a pane.
+-- The panel is *observe* only (proj 28 Phase C): acting on the entity moved to
+-- the code-action registry / tiny-code-action picker, so there is no ACTIONS
+-- pane. Each pane header toggles with <Tab>; <CR> activates a line (toggle a
+-- header, open/edit a doc); `gd` opens the static doc for a pane.
 
 local decorate = require("tyo3.decorate")
 
@@ -174,7 +175,7 @@ local function note_rows(card)
     end
   end
   if #rows == 0 then
-    table.insert(rows, { text = "  (none — see ACTIONS)" })
+    table.insert(rows, { text = "  (none — author one via the code-action menu)" })
   end
   return rows
 end
@@ -208,14 +209,6 @@ local function summary_rows(card)
   end
   if #rows == 0 then
     table.insert(rows, { text = "  (none)" })
-  end
-  return rows
-end
-
-local function action_rows(card)
-  local rows = {}
-  for _, a in ipairs(require("tyo3.actions").list(card)) do
-    table.insert(rows, { text = "  " .. a.label, meta = { action = "run_action", payload = a } })
   end
   return rows
 end
@@ -280,7 +273,6 @@ render = function()
     pane("NOTES", note_rows(M._entity))
     pane("DOCS", doc_rows(M._entity))
     pane("SUMMARY", summary_rows(M._entity))
-    pane("ACTIONS", action_rows(M._entity))
   end
 
   if #M._affected_lines > 0 then
@@ -332,8 +324,6 @@ function M.activate_at()
     require("tyo3.entitydoc").edit_card(M._entity, M._source_buf)
   elseif m.action == "open_doc" then
     require("tyo3.docs").open(m.payload)
-  elseif m.action == "run_action" and m.payload and m.payload.run then
-    m.payload.run(M._entity, M._source_buf)
   end
 end
 
@@ -357,14 +347,6 @@ function M.set_context(card, src_buf)
   else
     M._entity = card
     M._source_buf = src_buf or M._source_buf
-    -- Discover authored layers once (QW3) so the ACTIONS author menu reflects
-    -- config instead of a hardcoded "intent" entry; re-render when it lands.
-    local actions = require("tyo3.actions")
-    if actions._authored_layers == nil and M._source_buf then
-      actions.refresh_layers(M._source_buf, function()
-        render()
-      end)
-    end
   end
   render()
   -- Always-on (proj 28): the cursor-context dock opens on the first entity so it

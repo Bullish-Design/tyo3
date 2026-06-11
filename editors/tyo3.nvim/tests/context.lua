@@ -153,12 +153,15 @@ end, 50)
 check("entity resolves + renders (name · kind)", got2, panel_text())
 do
   local t = panel_text()
+  -- The panel is observe-only since proj 28 Phase C: no ACTIONS pane (acting
+  -- moved to the code-action registry / tiny-code-action picker).
   check(
     "collapsible panes render",
     t:find("IDENTITY", 1, true) and t:find("NOTES", 1, true) and t:find("DOCS", 1, true)
-      and t:find("SUMMARY", 1, true) and t:find("ACTIONS", 1, true),
+      and t:find("SUMMARY", 1, true),
     nil
   )
+  check("no ACTIONS pane (observe-only panel)", t:find("ACTIONS", 1, true) == nil, nil)
   check(
     "DOCS pane links both user + dev guides",
     t:find("User · workflow", 1, true) and t:find("Dev · durable identity", 1, true),
