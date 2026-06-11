@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from tyo3.daemon.llm import _llm, llm_model
 from tyo3.daemon.protocol import INVALID_PARAMS, METHOD_NOT_FOUND, ProtocolError
 from tyo3.graph.identity import is_entity_durable_id
+from tyo3.graph.queries import DEPENDENCY_EDGE_KINDS
 
 if TYPE_CHECKING:
     from tyo3 import TyO3Session
@@ -500,13 +501,27 @@ class Handlers:
                     )
                     entry["ranges"].append(_range_dict(r.range))
                 # Outgoing: this entity's direct dependency entities (its own
-                # calls/uses), resolved to in-project entity nodes.
-                outgoing: list[dict[str, Any]] = []
-                for dep_id in sorted(g.dependencies(did)):
-                    dep = _node_by_id(g, dep_id)
-                    if dep is None or dep.external or not is_entity_durable_id(dep_id):
+                # calls/uses), each with the call-site ranges *in this entity's
+                # body* (carried on the dependency edges). Editors that render
+                # call hierarchy per call site — e.g. nvim's quickfix — drop a
+                # callee with no ranges, so a callee whose edges carry no range
+                # (IMPORTS/INHERITS) falls back to this entity's name range.
+                sel_range = _range_dict(sel)
+                outgoing_by_id: dict[str, dict[str, Any]] = {}
+                for tgt_idx, edata in g._edges_of_kind(did, set(DEPENDENCY_EDGE_KINDS)):
+                    dep = g._graph[tgt_idx]
+                    dep_id = dep.durable_id
+                    if dep.external or not is_entity_durable_id(dep_id):
                         continue
-                    outgoing.append({"to": self._call_item(dep), "ranges": []})
+                    entry = outgoing_by_id.setdefault(dep_id, {"to": self._call_item(dep), "ranges": []})
+                    if edata.range is not None:
+                        entry["ranges"].append(_range_dict(edata.range))
+                outgoing: list[dict[str, Any]] = []
+                for dep_id in sorted(outgoing_by_id):
+                    entry = outgoing_by_id[dep_id]
+                    if not entry["ranges"]:
+                        entry["ranges"].append(sel_range)
+                    outgoing.append(entry)
                 return {
                     "item": self._call_item(node),
                     "incoming": list(incoming.values()),

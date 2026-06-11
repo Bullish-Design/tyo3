@@ -453,6 +453,11 @@ def test_call_hierarchy_outgoing_lists_callees(handlers):
     out_names = {c["to"]["name"] for c in res["outgoing"]}
     assert "usd" in out_names, out_names
     assert "Book" in out_names, out_names
+    # Each callee carries at least one call-site range (in checkout's body),
+    # so editors that render call hierarchy per call site list every callee.
+    for c in res["outgoing"]:
+        assert c["ranges"], f"{c['to']['name']} has no call-site range"
+        assert c["ranges"][0]["start"]["line"] >= 1
 
 
 def test_call_hierarchy_off_entity_is_null(handlers):
