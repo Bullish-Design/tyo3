@@ -124,6 +124,14 @@ vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
   end,
 })
 
+vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+  group = group,
+  pattern = "*.py",
+  callback = function(ev)
+    require("tyo3").on_buf_cleanup(ev.buf)
+  end,
+})
+
 vim.api.nvim_create_autocmd("VimLeavePre", {
   group = group,
   callback = function()

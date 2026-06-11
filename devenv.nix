@@ -319,6 +319,19 @@ in
     echo "═══ Wrote editors/tyo3.nvim/demo/context/context.gif ═══"
   '';
 
+  # Render the short, looping HERO demo (the README advertisement): money shot
+  # + one LSP wow + the Phase-2 review-ack code action, sidebar on throughout.
+  scripts.demo-record-hero.exec = ''
+    echo "═══ Recording tyo3.nvim HERO demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/hero/hero.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/hero/hero.gif ═══"
+  '';
+
   # ── Utility scripts ──────────────────────────────────────────
 
   scripts.clean.exec = ''

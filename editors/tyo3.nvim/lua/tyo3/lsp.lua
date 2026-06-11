@@ -39,10 +39,19 @@ local CAPS = {
   ["typeHierarchy/subtypes"] = true,
   renameProvider = { prepareProvider = true },
   -- Code actions are the "act on what's under the cursor" trigger (proj 26).
-  -- We return client-side commands (tyo3.explain), so tiny-code-actions / `gra`
-  -- / vim.lsp.buf.code_action() all drive them with no server round-trip.
-  codeActionProvider = true,
-  executeCommandProvider = { commands = { "tyo3.explain", "tyo3.run" } },
+  -- We return client-side commands (tyo3.explain / tyo3.ack), resolved through
+  -- `vim.lsp.commands`, so tiny-code-action / `gra` / vim.lsp.buf.code_action()
+  -- all drive them. Distinct kinds give tiny-code-action distinct icons and let
+  -- `context.only` filter: Simplify is a refactor.rewrite, Explain an
+  -- informational source.tyo3, the review-ack a quickfix.
+  codeActionProvider = {
+    -- Simplify carries `data` and no `edit`, resolved lazily via
+    -- `codeAction/resolve` into a WorkspaceEdit — so the menu stays instant (no
+    -- LLM per keystroke) and tiny-code-action shows the rewrite diff on focus.
+    resolveProvider = true,
+    codeActionKinds = { "refactor.rewrite", "quickfix", "source.tyo3" },
+  },
+  executeCommandProvider = { commands = { "tyo3.explain", "tyo3.run", "tyo3.ack" } },
   -- Pull diagnostics stay advertised so `vim.diagnostic` on-demand pulls work;
   -- Phase 2 also *pushes* via dispatchers.notification on bus deltas. Pull is
   -- on-demand, push is event-driven — in practice nvim 0.12 doesn't fire both
@@ -66,6 +75,21 @@ local function daemon_range_to_lsp(r)
     start = { line = r.start.line - 1, character = r.start.column - 1 },
     ["end"] = { line = r["end"].line - 1, character = r["end"].column - 1 },
   }
+end
+
+-- The code-action kinds we emit. `context.only` is prefix-matched per LSP: a
+-- request for "refactor" matches "refactor.rewrite". Return true if any tyo3
+-- kind satisfies the filter (so a kind-scoped invocation still reaches us).
+local TYO3_KINDS = { "refactor.rewrite", "quickfix", "source.tyo3" }
+local function has_tyo3_kind(only)
+  for _, want in ipairs(only or {}) do
+    for _, k in ipairs(TYO3_KINDS) do
+      if k == want or k:sub(1, #want + 1) == want .. "." then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 -- ReferenceKind → LSP DocumentHighlightKind.
@@ -113,7 +137,7 @@ end
 -- Fire a daemon verb for `root`; `cb(err, result)`. The daemon client is shared
 -- with the rest of the plugin (one per project root); `ensure` returns the ready
 -- client immediately if it already exists, else connects/spawns first.
-local function daemon_request(root, method, params, cb)
+local function daemon_request(root, method, params, cb, opts)
   daemon.ensure(root, function(err, client)
     if err then
       cb(err, nil)
@@ -127,9 +151,13 @@ local function daemon_request(root, method, params, cb)
         res = nil
       end
       cb(rerr, res)
-    end)
+    end, opts)
   end)
 end
+
+-- A real LLM-backed explain/simplify (or a cold `check`) legitimately runs past
+-- the default per-request timeout, so those paths pass a longer ceiling.
+local SLOW_VERB_OPTS = { timeout_ms = 60000 }
 
 local function lsp_error(err)
   return { code = err.code or -32603, message = err.message or "tyo3 daemon error" }
@@ -245,7 +273,11 @@ end
 -- id_for, so a sub-expression selection still lands on the function/class.
 
 -- Each provider is `function(ctx) -> CodeAction[]` where
--- ctx = { uri, line, col, bufnr } (line/col are 1-based daemon positions).
+-- ctx = { uri, line, col, bufnr, root, entity, diagnostics }: line/col are
+-- 1-based daemon positions; `entity` is the resolved entity card under the
+-- selection (nil ⇒ nothing there, so entity providers return {}); `diagnostics`
+-- is the LSP context's diagnostics list. Old providers that only read
+-- uri/line/col/bufnr keep working — the new fields are purely additive.
 M._code_action_providers = M._code_action_providers or {}
 
 --- Register a code-action provider — the raw extensibility seam. The provider
@@ -265,42 +297,152 @@ function M.register_command(name, fn)
   vim.lsp.commands[name] = fn
 end
 
-handlers["textDocument/codeAction"] = function(_root, params, reply)
+handlers["textDocument/codeAction"] = function(root, params, reply)
+  local pctx = params.context or {}
+  -- Respect an explicit kind filter (kind-scoped invocations / pickers).
+  if pctx.only and not has_tyo3_kind(pctx.only) then
+    return reply(nil, {})
+  end
+  -- Don't run daemon work for automatic (lightbulb / cursorhold) triggers.
+  if pctx.triggerKind == 2 then
+    return reply(nil, {})
+  end
+
   local uri = params.textDocument.uri
   local start = (params.range and params.range.start) or { line = 0, character = 0 }
   local p = lsp_pos_to_daemon(start)
-  local ctx = { uri = uri, line = p.line, col = p.col, bufnr = vim.fn.bufnr(uri_to_path(uri)) }
-  local actions = {}
-  for _, provider in ipairs(M._code_action_providers) do
-    local ok, contributed = pcall(provider, ctx)
-    if ok and type(contributed) == "table" then
-      vim.list_extend(actions, contributed)
-    elseif not ok then
-      vim.schedule(function()
-        vim.notify("[tyo3] a code-action provider errored: " .. tostring(contributed), vim.log.levels.WARN)
-      end)
+
+  -- Resolve the entity under the selection ONCE; entity providers key off
+  -- ctx.entity (and stay silent when nothing is there), so the popup no longer
+  -- offers actions that fail when picked. `reply` is already async-safe.
+  daemon_request(root, "entity_at", {
+    path = uri_to_path(uri),
+    line = p.line,
+    col = p.col,
+  }, function(_err, card)
+    local ctx = {
+      uri = uri,
+      line = p.line,
+      col = p.col,
+      bufnr = vim.fn.bufnr(uri_to_path(uri)),
+      root = root,
+      entity = card or nil,
+      diagnostics = pctx.diagnostics or {},
+    }
+    local actions = {}
+    for _, provider in ipairs(M._code_action_providers) do
+      local ok, contributed = pcall(provider, ctx)
+      if ok and type(contributed) == "table" then
+        vim.list_extend(actions, contributed)
+      elseif not ok then
+        vim.schedule(function()
+          vim.notify("[tyo3] a code-action provider errored: " .. tostring(contributed), vim.log.levels.WARN)
+        end)
+      end
     end
-  end
-  reply(nil, actions)
+    -- Deterministic order (stable across recordings): preferred first, then title.
+    table.sort(actions, function(a, b)
+      local ap, bp = a.isPreferred and true or false, b.isPreferred and true or false
+      if ap ~= bp then
+        return ap
+      end
+      return (a.title or "") < (b.title or "")
+    end)
+    reply(nil, actions)
+  end)
 end
 
 -- Built-in: the proj-26 explain / simplify actions — also the reference example
--- of a registered provider. A custom plugin's provider looks exactly like this.
+-- of a registered provider. Entity-gated (silent when nothing is under the
+-- cursor) and named after the entity, so the popup reads `tyo3: Explain
+-- \`checkout\`` rather than a generic label. Distinct kinds (informational
+-- vs. refactor.rewrite) get distinct tiny-code-action icons.
 M.register_code_action(function(ctx)
-  local function action(title, mode)
-    return {
-      title = title,
-      kind = "refactor",
+  if not ctx.entity then
+    return {} -- nothing under the cursor → no noise in the menu
+  end
+  local who = ctx.entity.qualified_name or ctx.entity.name or "entity"
+  return {
+    -- Explain is informational (prose → a float), so it runs as a client
+    -- command — there is no edit to preview.
+    {
+      title = ("tyo3: Explain `%s`"):format(who),
+      kind = "source.tyo3",
       command = {
-        title = title,
+        title = "tyo3: Explain",
         command = "tyo3.explain",
-        arguments = { { uri = ctx.uri, line = ctx.line, col = ctx.col, mode = mode } },
+        arguments = { { uri = ctx.uri, line = ctx.line, col = ctx.col, mode = "explain", root = ctx.root } },
       },
-    }
+    },
+    -- Simplify is a rewrite: carry `data` and no `edit`, resolved lazily into a
+    -- WorkspaceEdit by `codeAction/resolve` so the menu stays instant and a
+    -- resolve-capable client (tiny-code-action) previews the diff on focus.
+    {
+      title = ("tyo3: Simplify `%s`"):format(who),
+      kind = "refactor.rewrite",
+      data = { uri = ctx.uri, line = ctx.line, col = ctx.col, root = ctx.root, kind = "simplify" },
+    },
+  }
+end)
+
+-- Resolve a Simplify action's `data` into a WorkspaceEdit (the daemon rewrites
+-- the entity body). Degrades gracefully: if the rewrite is absent/unparseable
+-- (the daemon returns no changes), return the action unchanged — no edit, no
+-- preview, still selectable (the explain float remains the prose path).
+handlers["codeAction/resolve"] = function(root, action, reply)
+  local d = action.data or {}
+  if d.kind ~= "simplify" then
+    return reply(nil, action)
+  end
+  daemon_request(d.root or root, "simplify_edit", {
+    path = uri_to_path(d.uri),
+    line = d.line,
+    col = d.col,
+  }, function(err, res)
+    if err or not res or not res.changes then
+      return reply(nil, action)
+    end
+    local changes = {}
+    for relpath, edits in pairs(res.changes) do
+      local uri = path_to_uri(d.root or root, relpath)
+      local text_edits = {}
+      for _, e in ipairs(edits) do
+        table.insert(text_edits, { range = daemon_range_to_lsp(e.range), newText = e.new_text })
+      end
+      changes[uri] = text_edits
+    end
+    action.edit = { changes = changes }
+    reply(nil, action)
+  end, SLOW_VERB_OPTS)
+end
+
+-- Offer an acknowledge quickfix when the entity under the cursor is flagged
+-- needs_review on any authored layer. Re-authoring the note IS the engine's
+-- acknowledge (it re-stamps the reviewed body hash), so this clears the WARN.
+M.register_code_action(function(ctx)
+  if not ctx.entity then
+    return {}
+  end
+  local flagged = {}
+  for layer, rec in pairs(ctx.entity.authored or {}) do
+    if rec.status == "needs_review" then
+      table.insert(flagged, layer)
+    end
+  end
+  if #flagged == 0 then
+    return {}
   end
   return {
-    action("tyo3: Explain this entity", "explain"),
-    action("tyo3: Suggest a simplification", "simplify"),
+    {
+      title = "tyo3: Acknowledge review (re-author)",
+      kind = "quickfix",
+      isPreferred = true,
+      command = {
+        title = "tyo3: Acknowledge review",
+        command = "tyo3.ack",
+        arguments = { { uri = ctx.uri, root = ctx.root, did = ctx.entity.durable_id, layers = flagged } },
+      },
+    },
   }
 end)
 
@@ -520,26 +662,76 @@ end
 
 -- ── Push diagnostics (server→client publishDiagnostics) ──────────────────────
 
+-- Push-diagnostics debounce state. A burst of edits (rapid `:w` / TextChanged)
+-- would otherwise stack overlapping `check` runs (the ty type-checker is
+-- ~hundreds of ms) on the actor. We accumulate the touched paths across a 150ms
+-- window into one check per file, and a per-(root, path) generation drops the
+-- result of a check superseded by a newer check for the *same* file.
+M._diag_debounce = M._diag_debounce or {} -- root -> uv timer
+M._diag_pending = M._diag_pending or {} -- root -> set of paths awaiting a check
+M._diag_gen = M._diag_gen or {} -- root -> { path -> generation }
+
 --- Push type-checker diagnostics for *relpaths* to the client, off the bus.
 --- Driven by `delta` notifications (init.lua), so check diagnostics refresh on
---- edit without the editor polling. Runs `check` per file (the ty type-checker
---- is ~hundreds of ms — pass only the touched files, not the whole project).
+--- edit without the editor polling. Debounced per root and accumulated across
+--- the window (so a later, differently-targeted call never drops a file an
+--- earlier call queued), one `check` per file, superseded results dropped.
 function M.publish_diagnostics(root, relpaths)
   local dispatchers = M._dispatchers_by_root[root]
   if not dispatchers or not dispatchers.notification then
     return -- no live tyo3 client for this root
   end
+  local pending = M._diag_pending[root] or {}
+  M._diag_pending[root] = pending
   for _, path in ipairs(relpaths or {}) do
-    daemon_request(root, "check", { path = path }, function(err, res)
-      if err then
-        return
-      end
-      dispatchers.notification("textDocument/publishDiagnostics", {
-        uri = path_to_uri(root, path),
-        diagnostics = daemon_diags_to_lsp(res and res.diagnostics),
-      })
+    pending[path] = true
+  end
+  local uv = vim.uv or vim.loop
+  local prev = M._diag_debounce[root]
+  if prev then
+    pcall(function()
+      prev:stop()
+      prev:close()
     end)
   end
+  local timer = uv.new_timer()
+  M._diag_debounce[root] = timer
+  timer:start(
+    150,
+    0,
+    vim.schedule_wrap(function()
+      pcall(function()
+        timer:stop()
+        timer:close()
+      end)
+      if M._diag_debounce[root] == timer then
+        M._diag_debounce[root] = nil
+      end
+      local paths = M._diag_pending[root] or {}
+      M._diag_pending[root] = nil
+      local gens = M._diag_gen[root] or {}
+      M._diag_gen[root] = gens
+      for path in pairs(paths) do
+        local gen = (gens[path] or 0) + 1
+        gens[path] = gen
+        daemon_request(root, "check", { path = path }, function(err, res)
+          -- Drop a superseded check (a newer check for this same file started)
+          -- or a client that went away while the check was in flight.
+          if err or (M._diag_gen[root] or {})[path] ~= gen then
+            return
+          end
+          local d = M._dispatchers_by_root[root]
+          if not d or not d.notification then
+            return
+          end
+          d.notification("textDocument/publishDiagnostics", {
+            uri = path_to_uri(root, path),
+            diagnostics = daemon_diags_to_lsp(res and res.diagnostics),
+          })
+        end)
+      end
+    end)
+  )
 end
 
 -- ── Layer-state diagnostics (the bespoke-half "go native" piece) ─────────────
@@ -667,7 +859,7 @@ function M.run_verb(bufnr, root, verb, params, cb)
     if cb then
       cb(err, res)
     end
-  end)
+  end, SLOW_VERB_OPTS)
 end
 
 --- Run the `explain` daemon verb for *args* (`{uri,line,col,mode}`) on *bufnr*.
@@ -688,6 +880,9 @@ M.register_command("tyo3.explain", function(command, ctx)
   if not root then
     return
   end
+  -- Surface a "thinking" beat so the popup → float gap isn't silent (a real
+  -- LLM can take a few seconds; Phase 5 keeps the rest of the editor responsive).
+  vim.notify("[tyo3] " .. (args.mode or "explain") .. " …", vim.log.levels.INFO)
   M.run_explain(bufnr, root, args, function(err, res)
     vim.schedule(function()
       if err then
@@ -703,6 +898,54 @@ M.register_command("tyo3.explain", function(command, ctx)
       end
     end)
   end)
+end)
+
+-- ── tyo3.ack client command — acknowledge needs_review ───────────────────────
+--
+-- Clears the needs_review WARN by re-authoring each flagged layer's CURRENT
+-- value (re-read fresh at apply time via `authored`, not the menu-time snapshot,
+-- so a racing edit can't stamp a stale body). Re-authoring is the engine's
+-- acknowledge — it re-stamps the reviewed body hash. No engine change needed.
+M.register_command("tyo3.ack", function(command, cmd_ctx)
+  local args = (command.arguments or {})[1] or {}
+  local bufnr = (cmd_ctx and cmd_ctx.bufnr) or vim.api.nvim_get_current_buf()
+  local root = args.root or require("tyo3").root_for_buf(bufnr)
+  if not root or not args.did then
+    return
+  end
+  local layers = args.layers or {}
+  local pending = #layers
+  if pending == 0 then
+    return
+  end
+  local function done_one()
+    pending = pending - 1
+    if pending > 0 then
+      return
+    end
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_loaded(bufnr) then
+        pcall(function()
+          require("tyo3.decorate").apply(bufnr)
+        end)
+        if require("tyo3.config").layer_diagnostics_enabled() then
+          M.refresh_layer_diagnostics(bufnr, root)
+        end
+      end
+      vim.notify("[tyo3] review acknowledged", vim.log.levels.INFO)
+    end)
+  end
+  for _, layer in ipairs(layers) do
+    daemon_request(root, "authored", { layer = layer, durable_id = args.did }, function(err, av)
+      if not err and av and av.value ~= nil then
+        daemon_request(root, "author", { layer = layer, durable_id = args.did, value = av.value }, function()
+          done_one()
+        end)
+      else
+        done_one()
+      end
+    end)
+  end
 end)
 
 -- ── register_entity_action: the one-call seam for spine plugins ───────────────
@@ -742,6 +985,9 @@ function M.register_entity_action(spec)
   local id = spec.id or spec.title
   M._entity_actions[id] = spec
   M.register_code_action(function(ctx)
+    if not ctx.entity then
+      return {} -- act-on-the-entity actions stay silent off-entity
+    end
     return {
       {
         title = spec.title,

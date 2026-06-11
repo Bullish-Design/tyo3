@@ -32,6 +32,10 @@ M.defaults = {
   layer_diagnostics = nil,
   -- Debounce (ms) before the cursor-context lookup fires.
   context_debounce_ms = 150,
+  -- Per-request timeout (ms) for daemon RPCs. A stalled request errors its
+  -- callback instead of hanging the UI forever. Slow verbs (explain/check) can
+  -- override per-call. Set 0 to disable.
+  request_timeout_ms = 20000,
   -- Command used to launch the daemon. nil ⇒ auto-detect `tyo3-daemon`, else
   -- fall back to `python -m tyo3.daemon`. Override e.g. {"uv","run","tyo3-daemon"}.
   daemon_cmd = nil,

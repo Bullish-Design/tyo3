@@ -47,6 +47,17 @@ end
 
 require("tyo3").with_client(bufnr, function(client)
   check("daemon connected", true)
+
+  -- 0) per-request timeout: a 1ms override on a real verb errors the callback
+  --    with the timeout sentinel rather than hanging forever.
+  client:request("ping", {}, function(terr)
+    check(
+      "1ms timeout errors the callback",
+      terr and terr.code == -32099 and tostring(terr.message):match("timed out"),
+      terr and terr.message
+    )
+  end, { timeout_ms = 1 })
+
   -- 1) ping
   client:request("ping", {}, function(err, res)
     check("ping ok", not err and res and res.ok == true, err and err.message)

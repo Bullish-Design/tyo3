@@ -14,7 +14,9 @@ layer.
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -606,20 +608,37 @@ class Handlers:
         the explanation rides edits/moves and flips to ``needs_review`` when the
         body later drifts (clearing on a re-run = re-author). ``mode`` is
         ``"explain"`` (default) or ``"simplify"`` (also pulls caller bodies).
-        Returns ``null`` if nothing resolves at the position. All of context
-        gather + LLM + author runs in one actor hop (golden rules #2/#3)."""
+        Returns ``null`` if nothing resolves at the position. The LLM call runs
+        **off the actor** in three hops (gather → LLM → author): a multi-second
+        real-API round-trip would otherwise hold the one session thread and
+        freeze every other request for the project. The two actor hops are both
+        cheap; a racing edit between them is benign — the explain is keyed by
+        durable id, so it still lands on the right entity (worst case the stamped
+        reviewed-hash reflects the body at author time, the documented behavior).
+        """
         path = _require(params, "path", str)
         line = _require(params, "line", int)
         col = _require(params, "col", int)
         mode = self._explain_mode(params)
         rel = self._relpath(path)
 
-        def work(s: TyO3Session) -> dict[str, Any] | None:
+        # 1) Gather context on the actor (cheap, snapshot reads).
+        def gather(s: TyO3Session) -> dict[str, Any] | None:
             did = s.id_for(rel, line, col)
             if did is None:
                 return None
-            ctx = self._gather_context(s, rel, line, col, did, mode=mode)
-            text = _llm(_build_explain_prompt(ctx, mode), system=_EXPLAIN_SYSTEM[mode])
+            return {"did": did, "ctx": self._gather_context(s, rel, line, col, did, mode=mode)}
+
+        prep = self._actor.submit(gather)
+        if prep is None:
+            return None
+        did, ctx = prep["did"], prep["ctx"]
+
+        # 2) Run the LLM OFF the actor — the network round-trip holds no lock.
+        text = _llm(_build_explain_prompt(ctx, mode), system=_EXPLAIN_SYSTEM[mode])
+
+        # 3) Author the result back on the actor (another cheap hop).
+        def store(s: TyO3Session) -> None:
             s.author(
                 "explain",
                 did,
@@ -630,9 +649,64 @@ class Handlers:
                     "generated_at": _utcnow_iso(),
                 },
             )
-            return {"durable_id": did, "text": text, "mode": mode}
 
-        return self._actor.submit(work)
+        self._actor.submit(store)
+        return {"durable_id": did, "text": text, "mode": mode}
+
+    def simplify_edit(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Like ``explain`` mode=simplify, but return a **rewrite edit** rather
+        than prose, so an editor can preview a before/after diff and apply it.
+
+        Gathers context (actor) → asks the model for the rewritten source (off
+        actor) → maps it to a single full-line replacement over the entity's
+        range. The result mirrors ``rename``'s ``changes`` shape:
+        ``{durable_id, changes: {relpath: [{range, new_text}]}}``. Returns
+        ``null`` when nothing resolves, or when the model output doesn't parse as
+        Python — the caller then degrades to the prose ``explain`` float. The
+        model is constrained to emit only source; ``_coerce_rewrite`` strips any
+        markdown fences, parse-guards, and re-indents to the entity's column."""
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        # 1) Gather context + the entity's range/file on the actor.
+        def gather(s: TyO3Session) -> dict[str, Any] | None:
+            did = s.id_for(rel, line, col)
+            if did is None:
+                return None
+            with s.snapshot() as snap:
+                node = _node_by_id(snap.graph(), did)
+                if node is None:
+                    return None
+                return {
+                    "did": did,
+                    "ctx": self._gather_context(s, rel, line, col, did, mode="simplify"),
+                    "range": _range_dict(node.range),
+                    "file": node.file,
+                }
+
+        prep = self._actor.submit(gather)
+        if prep is None:
+            return None
+
+        # 2) Ask the model for the rewritten source OFF the actor.
+        raw = _llm(_build_rewrite_prompt(prep["ctx"]), system=_REWRITE_SYSTEM)
+        rng = prep["range"]
+        new_text = _coerce_rewrite(raw, base_indent=rng["start"]["column"] - 1)
+        if new_text is None:
+            return None  # unparseable rewrite → degrade to the prose float
+
+        # 3) Replace the entity's full lines (column 1 → its end column) so the
+        #    re-indented first line keeps the original leading indentation.
+        edit_range = {
+            "start": {"line": rng["start"]["line"], "column": 1},
+            "end": {"line": rng["end"]["line"], "column": rng["end"]["column"]},
+        }
+        return {
+            "durable_id": prep["did"],
+            "changes": {prep["file"]: [{"range": edit_range, "new_text": new_text}]},
+        }
 
     @staticmethod
     def _explain_mode(params: dict[str, Any]) -> str:
@@ -821,6 +895,14 @@ _EXPLAIN_SYSTEM = {
 }
 
 
+_REWRITE_SYSTEM = (
+    "You are a refactoring assistant for a Python codebase. Rewrite the given "
+    "entity to be simpler and clearer while preserving its exact behaviour, "
+    "name, signature, and public contract. Return ONLY the rewritten source for "
+    "that single entity — no prose, no explanation, no markdown fences."
+)
+
+
 def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -848,6 +930,51 @@ def _build_explain_prompt(ctx: dict[str, Any], mode: str) -> str:
     )
     lines += ["", task]
     return "\n".join(lines)
+
+
+def _build_rewrite_prompt(ctx: dict[str, Any]) -> str:
+    """Render the context into a prompt asking for the rewritten *source*.
+
+    Reuses the simplify context (callers/dependents) but the task is a code
+    rewrite, not prose — the answer must be the entity's new source only."""
+    lines = [f"Entity: {ctx['qualified_name']} ({ctx['kind']})", "", "Source:", ctx["source"]]
+    if ctx["layers"]:
+        lines += ["", "Existing notes / annotations to respect:"]
+        lines += [f"- {name}: {value}" for name, value in sorted(ctx["layers"].items())]
+    if ctx["reference_bodies"]:
+        lines += ["", "Bodies of direct callers / dependents (preserve their contract):"]
+        for rb in ctx["reference_bodies"]:
+            lines += [f"# {rb['durable_id']}", rb["source"]]
+    lines += ["", "Rewrite this entity. Output only the new source for it."]
+    return "\n".join(lines)
+
+
+def _strip_code_fences(text: str) -> str:
+    """Drop a surrounding ```/```python markdown fence if the model added one."""
+    s = text.strip()
+    if not s.startswith("```"):
+        return text
+    body = s.splitlines()[1:]  # drop the opening fence line
+    if body and body[-1].strip().startswith("```"):
+        body = body[:-1]
+    return "\n".join(body)
+
+
+def _coerce_rewrite(raw: str, *, base_indent: int) -> str | None:
+    """Turn a model's rewrite into a parseable, correctly-indented replacement.
+
+    Strips any code fence, dedents to module level, parse-guards with ``ast``
+    (degrade to ``None`` on a syntax error), then re-indents every non-blank
+    line by *base_indent* so the replacement sits at the entity's column."""
+    dedented = textwrap.dedent(_strip_code_fences(raw)).strip("\n")
+    if not dedented.strip():
+        return None
+    try:
+        ast.parse(dedented)
+    except SyntaxError:
+        return None
+    pad = " " * base_indent
+    return "\n".join((pad + ln if ln.strip() else ln) for ln in dedented.split("\n"))
 
 
 # ── Serialisation helpers ────────────────────────────────────────────────────
@@ -968,6 +1095,7 @@ _METHODS = {
     "review_state": Handlers.review_state,
     "context_pack": Handlers.context_pack,
     "explain": Handlers.explain,
+    "simplify_edit": Handlers.simplify_edit,
 }
 
 # Verbs handled at the server (DaemonServer._handle_line), not through the shared

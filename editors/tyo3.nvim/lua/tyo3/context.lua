@@ -114,6 +114,20 @@ function M.on_cursor(bufnr)
   )
 end
 
+--- Drop *bufnr*'s context cache/timer (called on buffer wipeout: bufnrs get
+--- reused, so a stale key/timer must not survive onto a recycled buffer).
+function M.forget(bufnr)
+  local t = M._debounce[bufnr]
+  if t then
+    pcall(function()
+      t:stop()
+      t:close()
+    end)
+  end
+  M._debounce[bufnr] = nil
+  M._last_key[bufnr] = nil
+end
+
 --- :TyO3Context — flip `context` between "cursor" and "off" at runtime.
 function M.toggle()
   local cfg = config.get()

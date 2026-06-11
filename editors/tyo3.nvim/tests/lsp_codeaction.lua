@@ -149,22 +149,21 @@ local ca = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", ca_params,
 local actions = ca and ca[client.id] and ca[client.id].result
 check("codeAction returns 2 tyo3 actions", type(actions) == "table" and #actions == 2, actions and #actions or nil)
 
+-- Explain runs as a client command (prose float); Simplify carries resolve
+-- `data` and no command (lazily resolved to a WorkspaceEdit, Phase 6).
 local explain_action, simplify_action
 for _, a in ipairs(actions or {}) do
-  check(
-    "action carries the tyo3.explain command",
-    a.command and a.command.command == "tyo3.explain",
-    a.command and a.command.command or nil
-  )
-  local mode = a.command and a.command.arguments and a.command.arguments[1] and a.command.arguments[1].mode
-  if mode == "explain" then
-    explain_action = a
-  elseif mode == "simplify" then
+  if a.command and a.command.command == "tyo3.explain" then
+    local mode = a.command.arguments and a.command.arguments[1] and a.command.arguments[1].mode
+    if mode == "explain" then
+      explain_action = a
+    end
+  elseif a.data and a.data.kind == "simplify" then
     simplify_action = a
   end
 end
-check("an explain-mode action is present", explain_action ~= nil)
-check("a simplify-mode action is present", simplify_action ~= nil)
+check("an explain action carries the tyo3.explain command", explain_action ~= nil)
+check("a simplify action carries resolve data", simplify_action ~= nil and simplify_action.data ~= nil)
 check(
   "explain action argument carries uri + 1-based position",
   explain_action
@@ -172,6 +171,38 @@ check(
     and explain_action.command.arguments[1].line == checkout_pos.line
     and explain_action.command.arguments[1].col == checkout_pos.column
 )
+check(
+  "simplify action data carries uri + 1-based position",
+  simplify_action
+    and simplify_action.data.uri == store_uri
+    and simplify_action.data.line == checkout_pos.line
+    and simplify_action.data.col == checkout_pos.column
+)
+
+-- Kinds are split so tiny-code-action icons + `context.only` filtering work:
+-- explain is informational (source.tyo3), simplify a refactor.rewrite.
+local kinds = {}
+for _, a in ipairs(actions or {}) do
+  kinds[a.kind or ""] = true
+end
+check("explain action carries the source.tyo3 kind", kinds["source.tyo3"] == true)
+check("simplify action carries the refactor.rewrite kind", kinds["refactor.rewrite"] == true)
+
+-- ── Part 1a: off-entity position offers nothing (entity-gating) ─────────────
+-- Line 0/col 0 is the module's first import — id_for returns nil there, so the
+-- entity providers stay silent and the popup is empty rather than offering
+-- actions that fail when picked. (Only built-ins are registered at this point.)
+local blank_params = {
+  textDocument = { uri = store_uri },
+  range = {
+    start = { line = 0, character = 0 },
+    ["end"] = { line = 0, character = 0 },
+  },
+  context = { diagnostics = {} },
+}
+local ca0 = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", blank_params, 5000)
+local a0 = ca0 and ca0[client.id] and ca0[client.id].result
+check("no code action offered off-entity", type(a0) == "table" and #a0 == 0, a0 and #a0 or nil)
 
 -- ── Part 1b: a third-party plugin contributes actions with no fork ──────────
 -- The extensibility seam: register a raw provider + a register_entity_action,
@@ -277,17 +308,34 @@ check("explain record is present on the durable layer", authored and authored.st
 check("explain record value matches the returned text", authored and authored.value and authored.value.text == ex_res.text)
 check("explain record stamped the offline model", authored and authored.value and authored.value.model == "stub")
 
--- ── Part 3: simplify mode updates the same id's record ──────────────────────
+-- ── Part 3: the explain verb's simplify mode updates the same id's record ───
+-- (Driven directly: the code action's Simplify is now a resolve-to-edit, but
+-- the `explain` verb still supports mode=simplify for the prose path.)
 local simplified, smpl_done
-if simplify_action then
-  require("tyo3.lsp").run_explain(bufnr, proj, simplify_action.command.arguments[1], function(_, res)
+require("tyo3.lsp").run_explain(
+  bufnr,
+  proj,
+  { uri = store_uri, line = checkout_pos.line, col = checkout_pos.column, mode = "simplify" },
+  function(_, res)
     simplified, smpl_done = res, true
-  end)
-  vim.wait(15000, function()
-    return smpl_done
-  end, 50)
-end
+  end
+)
+vim.wait(15000, function()
+  return smpl_done
+end, 50)
 check("simplify mode returns text", simplified and simplified.mode == "simplify" and #simplified.text > 0)
+
+-- ── Part 3b: codeAction/resolve degrades gracefully under the offline stub ──
+-- The offline stub returns prose (not parseable source), so simplify_edit
+-- returns no changes and resolve hands back the action unchanged — no edit, no
+-- preview, still selectable. (A real model returning parseable source yields a
+-- WorkspaceEdit; that path is covered by the daemon's e2e test.)
+if simplify_action then
+  local rs = vim.lsp.buf_request_sync(bufnr, "codeAction/resolve", simplify_action, 60000)
+  local resolved = rs and rs[client.id] and rs[client.id].result
+  check("resolve returns the action", type(resolved) == "table")
+  check("resolve degrades to no edit under the offline stub", resolved and resolved.edit == nil)
+end
 
 local au2, au2_done
 require("tyo3").with_client(bufnr, function(c)
@@ -301,5 +349,84 @@ vim.wait(10000, function()
   return au2_done
 end, 50)
 check("explain record now records simplify mode", au2 and au2.value and au2.value.mode == "simplify")
+
+-- ── Part 4: review-acknowledge quickfix appears + clears needs_review ───────
+-- Author an `intent` note on show_label, edit its body (flips intent →
+-- needs_review), then request codeAction on it: a `tyo3.ack` quickfix appears,
+-- marked isPreferred. Invoking it re-authors the note (re-stamps the reviewed
+-- hash), which clears the flag.
+local ack_ready, ack_err
+require("tyo3").with_client(bufnr, function(c)
+  c:request(
+    "author",
+    { layer = "intent", durable_id = label_id, value = { note = "keep this label stable" } },
+    function(aerr)
+      if aerr then
+        ack_err, ack_ready = aerr.message, true
+        return
+      end
+      -- Edit show_label's body so its content hash drifts from the reviewed one.
+      local orig = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n") .. "\n"
+      local edited = orig:gsub("return Item%(%)%.label%(%)", 'return Item().label() + "!"')
+      c:request("sync_buffer", { path = store, text = edited }, function(serr)
+        ack_err, ack_ready = serr and serr.message or nil, true
+      end)
+    end
+  )
+end, function(msg)
+  ack_err, ack_ready = msg, true
+end)
+vim.wait(15000, function()
+  return ack_ready
+end, 50)
+check("authored intent on show_label + drifted its body", not ack_err, ack_err)
+
+-- needs_review is anchored to the entity id, so the def line hasn't moved.
+local ack_params = {
+  textDocument = { uri = store_uri },
+  range = {
+    start = { line = label_pos.line - 1, character = label_pos.column - 1 },
+    ["end"] = { line = label_pos.line - 1, character = label_pos.column - 1 },
+  },
+  context = { diagnostics = {} },
+}
+local ca_ack = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", ack_params, 5000)
+local ack_actions = ca_ack and ca_ack[client.id] and ca_ack[client.id].result
+local ack_action
+for _, a in ipairs(ack_actions or {}) do
+  if a.command and a.command.command == "tyo3.ack" then
+    ack_action = a
+  end
+end
+check("ack quickfix appears when entity is needs_review", ack_action ~= nil)
+check("ack quickfix is marked isPreferred", ack_action and ack_action.isPreferred == true)
+check("ack quickfix carries the quickfix kind", ack_action and ack_action.kind == "quickfix")
+
+if ack_action then
+  vim.lsp.commands["tyo3.ack"]({
+    command = "tyo3.ack",
+    arguments = ack_action.command.arguments,
+  }, { bufnr = bufnr })
+
+  -- Poll the intent status until it clears (re-author is async over two hops).
+  local cleared = false
+  local deadline = vim.loop.now() + 15000
+  while not cleared and vim.loop.now() < deadline do
+    local got, done
+    require("tyo3").with_client(bufnr, function(c)
+      c:request("authored", { layer = "intent", durable_id = label_id }, function(_, av)
+        got, done = av, true
+      end)
+    end)
+    vim.wait(2000, function()
+      return done
+    end, 25)
+    cleared = got ~= nil and got.status == "present"
+    if not cleared then
+      vim.wait(300)
+    end
+  end
+  check("ack cleared show_label's needs_review", cleared)
+end
 
 report_and_exit(proj)

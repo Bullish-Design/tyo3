@@ -13,13 +13,23 @@ local function has_telescope()
   return pcall(require, "telescope")
 end
 
+-- Search the located file for the entity's bare name (the fallback when a
+-- precise range isn't available).
+local function search_name(loc)
+  local name = loc:match("::([^:]+)$")
+  if name then
+    local bare = name:match("([^.]+)$") or name
+    vim.fn.search("\\<" .. vim.fn.escape(bare, "\\") .. "\\>", "w")
+  end
+end
+
 local function jump_to(bufnr, durable_id)
   require("tyo3").rpc(bufnr, "locate", { durable_id = durable_id }, function(err, res)
     if err or not res or not res.location or res.location == vim.NIL then
       vim.notify("[tyo3] could not locate entity", vim.log.levels.WARN)
       return
     end
-    -- location is "file::qualified_name"; jump to the file then search the name.
+    -- location is "file::qualified_name"; jump to the file by identity.
     local loc = res.location
     local file = loc:match("^(.-)::") or loc
     local root = require("tyo3").root_for_buf(bufnr)
@@ -28,11 +38,27 @@ local function jump_to(bufnr, durable_id)
       abs = root:gsub("/$", "") .. "/" .. file
     end
     vim.cmd("edit " .. vim.fn.fnameescape(abs))
-    local name = loc:match("::([^:]+)$")
-    if name then
-      local bare = name:match("([^.]+)$") or name
-      vim.fn.search("\\<" .. vim.fn.escape(bare, "\\") .. "\\>", "w")
-    end
+    -- Decorate the located file to get the id's *current* range and jump
+    -- precisely to it, instead of a name search that can land on the wrong
+    -- same-named symbol. The decorate batch is fresh, so this is correct even
+    -- after the entity moved. Fall back to the name search if the id isn't found.
+    local jbuf = vim.api.nvim_get_current_buf()
+    require("tyo3").rpc(jbuf, "decorate", { path = abs }, function(derr, items)
+      local placed = false
+      if not derr and type(items) == "table" then
+        for _, it in ipairs(items) do
+          if it.durable_id == durable_id and it.range and it.range.start then
+            local row = it.range.start.line
+            local col = math.max((it.range.start.column or 1) - 1, 0)
+            placed = pcall(vim.api.nvim_win_set_cursor, 0, { row, col })
+            break
+          end
+        end
+      end
+      if not placed then
+        search_name(loc)
+      end
+    end)
   end)
 end
 

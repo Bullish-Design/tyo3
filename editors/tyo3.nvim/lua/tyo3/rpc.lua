@@ -13,18 +13,33 @@ local Client = {}
 Client.__index = Client
 
 --- Create (but do not connect) a client.
---- opts = { socket = path, on_notification = fn(method, params), on_close = fn() }
+--- opts = { socket = path, on_notification = fn(method, params), on_close = fn(),
+---          timeout_ms = per-request deadline (0 ⇒ disabled) }
 function M.new(opts)
   return setmetatable({
     socket = opts.socket,
     on_notification = opts.on_notification,
     on_close = opts.on_close,
+    timeout_ms = opts.timeout_ms or 0,
     pipe = nil,
     connected = false,
     next_id = 0,
     pending = {},
+    timers = {}, -- id -> uv_timer (armed request deadlines)
     buffer = "",
   }, Client)
+end
+
+--- Stop and close the deadline timer for a pending id, if any.
+function Client:_clear_timer(id)
+  local t = self.timers[id]
+  if t then
+    self.timers[id] = nil
+    pcall(function()
+      t:stop()
+      t:close()
+    end)
+  end
 end
 
 function Client:connect(cb)
@@ -81,6 +96,7 @@ function Client:_dispatch(line)
     if obj.id ~= nil then
       local cb = self.pending[obj.id]
       self.pending[obj.id] = nil
+      self:_clear_timer(obj.id)
       if cb then
         if obj.error ~= nil then
           cb(obj.error, nil)
@@ -99,6 +115,9 @@ function Client:_on_close(_err)
     return
   end
   self.connected = false
+  for id in pairs(self.timers) do
+    self:_clear_timer(id)
+  end
   local pending = self.pending
   self.pending = {}
   for _, cb in pairs(pending) do
@@ -112,7 +131,8 @@ function Client:_on_close(_err)
 end
 
 --- Send a request. `cb(err, result)` is optional (omit for fire-and-forget).
-function Client:request(method, params, cb)
+--- `opts.timeout_ms` overrides the client default for this call (0 ⇒ disable).
+function Client:request(method, params, cb, opts)
   if not self.connected or not self.pipe then
     if cb then
       vim.schedule(function()
@@ -125,6 +145,23 @@ function Client:request(method, params, cb)
   local id = self.next_id
   if cb then
     self.pending[id] = cb
+    local tmo = (opts and opts.timeout_ms) or self.timeout_ms
+    if tmo and tmo > 0 then
+      local timer = uv.new_timer()
+      self.timers[id] = timer
+      timer:start(
+        tmo,
+        0,
+        vim.schedule_wrap(function()
+          local pcb = self.pending[id]
+          self.pending[id] = nil
+          self:_clear_timer(id)
+          if pcb then
+            pcb({ code = -32099, message = ("request timed out after %dms"):format(tmo) }, nil)
+          end
+        end)
+      )
+    end
   end
   -- An empty params table must encode as a JSON object, not [].
   if params == nil or (type(params) == "table" and vim.tbl_isempty(params)) then
@@ -136,6 +173,9 @@ end
 
 function Client:close()
   self.connected = false
+  for id in pairs(self.timers) do
+    self:_clear_timer(id)
+  end
   local pipe = self.pipe
   self.pipe = nil
   if pipe then

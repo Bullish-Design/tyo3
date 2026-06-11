@@ -212,6 +212,26 @@ function M.handle_notification(root, method, params)
   end
 end
 
+-- ── Buffer-state reclamation ────────────────────────────────────────────────
+
+--- Drop the per-buffer caches/timers for *bufnr* when its buffer is wiped.
+--- Neovim reuses bufnrs after wipeout, so a stale `_root_by_buf[bufnr] = false`
+--- (non-project) could otherwise mis-classify a freshly-opened project file
+--- under the recycled number. Also stops the slow leak over long sessions.
+function M.on_buf_cleanup(bufnr)
+  local t = M._debounce[bufnr]
+  if t then
+    pcall(function()
+      t:stop()
+      t:close()
+    end)
+  end
+  M._debounce[bufnr] = nil
+  M._root_by_buf[bufnr] = nil
+  M._last_synced[bufnr] = nil
+  require("tyo3.context").forget(bufnr)
+end
+
 -- ── setup ───────────────────────────────────────────────────────────────────
 
 function M.setup(opts)
