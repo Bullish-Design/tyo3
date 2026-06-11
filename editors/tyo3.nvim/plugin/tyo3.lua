@@ -28,16 +28,16 @@ cmd("TyO3Docs", function()
 end, { desc = "Open the TyO3 documentation (user + developer)" })
 
 cmd("TyO3Affected", function()
-  require("tyo3.telescope").affected()
-end, { desc = "Telescope the last edit's affected set" })
+  require("tyo3.picker").affected()
+end, { desc = "Pick the last edit's affected set" })
 
 cmd("TyO3Entities", function()
-  require("tyo3.telescope").entities()
-end, { desc = "Telescope all known entities" })
+  require("tyo3.picker").entities()
+end, { desc = "Pick all known entities" })
 
 cmd("TyO3Authored", function()
-  require("tyo3.telescope").authored()
-end, { desc = "Telescope authored notes" })
+  require("tyo3.picker").authored()
+end, { desc = "Pick authored notes" })
 
 cmd("TyO3Diff", function(a)
   require("tyo3.diff").show(a.args)
@@ -51,14 +51,6 @@ end, { nargs = "+", desc = "Atomic entity move: :TyO3Move <name> <dest_path>" })
 cmd("TyO3Panel", function()
   require("tyo3.panel").toggle()
 end, { desc = "Toggle the affected-set panel" })
-
-cmd("TyO3Context", function()
-  require("tyo3.context").toggle()
-end, { desc = "Toggle the cursor-context panel section (context = cursor/off)" })
-
-cmd("TyO3Lsp", function()
-  require("tyo3.lsp").toggle()
-end, { desc = "Toggle the native LSP bridge (vim.lsp/vim.diagnostic over the daemon)" })
 
 cmd("TyO3Start", function()
   local bufnr = vim.api.nvim_get_current_buf()
@@ -94,9 +86,7 @@ vim.api.nvim_create_autocmd({ "BufReadPost", "BufEnter" }, {
   group = group,
   pattern = "*.py",
   callback = function(ev)
-    if require("tyo3.config").get().auto_start then
-      require("tyo3").on_buf_enter(ev.buf)
-    end
+    require("tyo3").on_buf_enter(ev.buf)
   end,
 })
 

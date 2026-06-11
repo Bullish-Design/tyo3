@@ -205,10 +205,7 @@ function M.ensure(root, cb)
     if not err then
       finish(root, nil, client)
     else
-      if not config.get().auto_start then
-        finish(root, { message = "no daemon running and auto_start=false" })
-        return
-      end
+      -- Always-on (proj 28): spawn a daemon when none is running.
       start_spawn(root, st)
     end
   end)

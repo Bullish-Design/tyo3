@@ -1,17 +1,14 @@
--- tyo3.nvim — Telescope pickers (navigate by durable identity).
+-- tyo3.nvim — pickers (navigate by durable identity), over Snacks.picker.
 --
 -- `entities` (everything decorated so far), `affected` (the last edit's closure),
 -- and `authored` (notes). Selecting an item resolves its current location via
 -- `locate {id}` and jumps there — navigation by identity, not by line.
 --
--- Telescope is an optional dependency: every picker degrades to a clear notice
--- (or, where possible, a `vim.ui.select` fallback) when it is not installed.
+-- Single path (proj 28): snacks is a managed hard dep (see deps.lua), so there
+-- is no telescope / `vim.ui.select` fallback. A missing snacks surfaces as a
+-- `:checkhealth tyo3` error rather than a silent downgrade.
 
 local M = {}
-
-local function has_telescope()
-  return pcall(require, "telescope")
-end
 
 -- Search the located file for the entity's bare name (the fallback when a
 -- precise range isn't available).
@@ -23,6 +20,10 @@ local function search_name(loc)
   end
 end
 
+-- Jump to *durable_id*'s current location, precisely. Resolves the file by
+-- identity (`locate`), then re-reads the id's *fresh* range via `decorate` so we
+-- land on it exactly even after it moved — falling back to a name search only
+-- when the id isn't in the decorate batch. (Preserved verbatim from proj 27.)
 local function jump_to(bufnr, durable_id)
   require("tyo3").rpc(bufnr, "locate", { durable_id = durable_id }, function(err, res)
     if err or not res or not res.location or res.location == vim.NIL then
@@ -62,58 +63,40 @@ local function jump_to(bufnr, durable_id)
   end)
 end
 
--- Generic vim.ui.select fallback when telescope is absent.
-local function select_fallback(title, entries)
+-- Open a Snacks.picker over *entries* ({ durable_id, label }); confirming jumps
+-- to the selected entity by identity. `item.text` is the searchable string snacks
+-- filters on; the "text" formatter renders it.
+local function run_picker(title, entries)
   if #entries == 0 then
     vim.notify("[tyo3] nothing to show: " .. title, vim.log.levels.INFO)
     return
   end
-  vim.ui.select(entries, {
-    prompt = title,
-    format_item = function(e)
-      return e.label
-    end,
-  }, function(choice)
-    if choice then
-      jump_to(vim.api.nvim_get_current_buf(), choice.durable_id)
-    end
-  end)
-end
-
-local function run_picker(title, entries)
-  if not has_telescope() then
-    select_fallback(title, entries)
+  local ok, Snacks = pcall(require, "snacks")
+  if not ok or not Snacks.picker then
+    vim.notify("[tyo3] snacks.nvim is required for pickers (see :checkhealth tyo3)", vim.log.levels.ERROR)
     return
   end
-  local pickers = require("telescope.pickers")
-  local finders = require("telescope.finders")
-  local conf = require("telescope.config").values
-  local actions = require("telescope.actions")
-  local action_state = require("telescope.actions.state")
   local bufnr = vim.api.nvim_get_current_buf()
-
-  pickers
-    .new({}, {
-      prompt_title = title,
-      finder = finders.new_table({
-        results = entries,
-        entry_maker = function(e)
-          return { value = e, display = e.label, ordinal = e.label }
-        end,
-      }),
-      sorter = conf.generic_sorter({}),
-      attach_mappings = function(prompt_bufnr)
-        actions.select_default:replace(function()
-          local sel = action_state.get_selected_entry()
-          actions.close(prompt_bufnr)
-          if sel then
-            jump_to(bufnr, sel.value.durable_id)
-          end
-        end)
-        return true
-      end,
-    })
-    :find()
+  local items = {}
+  for _, e in ipairs(entries) do
+    table.insert(items, { text = e.label, durable_id = e.durable_id })
+  end
+  Snacks.picker.pick({
+    title = title,
+    items = items,
+    format = "text",
+    -- These are identity entries (durable_id + label), not files/positions, so
+    -- the default file preview has nothing to show. The "select" layout hides
+    -- the preview window entirely; jumping happens on confirm via the
+    -- identity-resolving jump_to.
+    layout = { preset = "select" },
+    confirm = function(picker, item)
+      picker:close()
+      if item and item.durable_id then
+        jump_to(bufnr, item.durable_id)
+      end
+    end,
+  })
 end
 
 -- Build entries from the decorate name cache (everything seen so far).

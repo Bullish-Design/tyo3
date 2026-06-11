@@ -1,10 +1,10 @@
 -- Headless integration test for the cursor-driven CONTEXT panel section.
 --
 -- Spawns a real tyo3-daemon against a fresh copy of the synthetic shop project,
--- opens store.py with `context = "cursor"`, and drives context.lua end to end:
--- the Treesitter enclosing-node gate, entity_at resolution + panel rendering,
--- note surfacing, stale-drop, the no-parser fallback, and default-off. Prints
--- PASS/FAIL per check and exits non-zero on any failure (so it gates in CI).
+-- opens store.py (cursor context is always on, proj 28), and drives context.lua
+-- end to end: the Treesitter enclosing-node gate, entity_at resolution + panel
+-- rendering, note surfacing, stale-drop, the no-parser fallback, and always-on.
+-- Prints PASS/FAIL per check and exits non-zero on any failure (so it gates CI).
 --
 -- Run:
 --   nvim --headless --clean -u editors/tyo3.nvim/tests/minimal_init.lua \
@@ -44,12 +44,10 @@ local py = table.concat({
 vim.fn.system({ "python", "-c", py, proj })
 check("build shop project", vim.fn.isdirectory(proj) == 1, proj)
 
--- ── Configure the plugin with context = "cursor" ────────────────────────────
+-- ── Configure the plugin (cursor context is always on, proj 28) ─────────────
 require("tyo3").setup({
   daemon_cmd = { "python", "-m", "tyo3.daemon" },
-  auto_start = true,
   debounce_ms = 50,
-  context = "cursor",
   context_debounce_ms = 50,
 })
 
@@ -66,7 +64,6 @@ end)
 
 local context = require("tyo3.context")
 local panel = require("tyo3.panel")
-local config = require("tyo3.config")
 
 local function panel_text()
   if not (panel.buf and vim.api.nvim_buf_is_valid(panel.buf)) then
@@ -256,20 +253,16 @@ local ok5, key5, _, _, fb5 = pcall(context.node_key, fb_buf)
 check("fallback: node_key does not error", ok5, ok5 and "" or tostring(key5))
 check("fallback: keys by cursor line", ok5 and fb5 == true and key5 == "line:2", tostring(key5))
 
--- ── Gate 6: default-off is a no-op with no CONTEXT section ───────────────────
-config.get().context = "off"
+-- ── Gate 6: cursor context is always on (no flag, no opt-out) ───────────────
 panel.clear_context()
 vim.api.nvim_set_current_buf(bufnr)
 vim.api.nvim_win_set_cursor(0, { checkout_line, 4 })
 context._last_key[bufnr] = nil
 context.on_cursor(bufnr)
-vim.wait(500) -- give any (erroneous) debounce time to fire
-local t6 = panel_text()
-check(
-  "default-off: on_cursor is a no-op, no CONTEXT section",
-  t6:find("CONTEXT", 1, true) == nil and t6:find("checkout · function", 1, true) == nil,
-  t6
-)
+local got6 = vim.wait(30000, function()
+  return panel_text():find("checkout", 1, true) ~= nil
+end, 50)
+check("always-on: on_cursor populates CONTEXT with no flag", got6, panel_text())
 
 -- ── Report ──────────────────────────────────────────────────────────────────
 vim.fn.delete(proj, "rf")

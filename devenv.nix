@@ -346,6 +346,21 @@ in
     echo "═══ Wrote editors/tyo3.nvim/demo/symbols/symbols.gif ═══"
   '';
 
+  # Render the PICKER demo (proj 28, Phase B): the single-path, snacks-backed
+  # pickers (:TyO3Entities / :TyO3Authored / :TyO3Affected) and the snacks
+  # `vim.ui.input` prompt — the Phase-B verification that the rewrite drives end
+  # to end (snacks is resolved from the nix store by the picker init.lua).
+  scripts.demo-record-picker.exec = ''
+    echo "═══ Recording tyo3.nvim PICKER demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/picker/picker.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/picker/picker.gif ═══"
+  '';
+
   # ── Utility scripts ──────────────────────────────────────────
 
   scripts.clean.exec = ''

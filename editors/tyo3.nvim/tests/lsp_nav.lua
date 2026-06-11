@@ -50,13 +50,11 @@ local py = table.concat({
 vim.fn.system({ "python", "-c", py, proj })
 check("build shop project", vim.fn.isdirectory(proj) == 1, proj)
 
--- lsp = true ⇒ layer_diagnostics follows lsp (enabled), so the layer namespace
--- is populated; default-off behaviour is exercised by the other specs.
+-- The bridge + layer-state namespace are always on (proj 28), so the layer
+-- diagnostics populate without any flag.
 require("tyo3").setup({
   daemon_cmd = { "python", "-m", "tyo3.daemon" },
-  auto_start = true,
   debounce_ms = 50,
-  lsp = true,
 })
 
 local store = proj .. "/store.py"

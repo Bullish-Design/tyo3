@@ -25,6 +25,21 @@ end
 function M.check()
   start()("tyo3.nvim")
 
+  -- Curated dependency stack (opt out via `setup{ manage = false }`).
+  local cfg0 = require("tyo3.config").get()
+  if cfg0.manage == false then
+    info("dependency management disabled (manage = false) — you own the stack")
+  else
+    local missing = require("tyo3.deps").missing or {}
+    if #missing == 0 then
+      ok("curated dependency stack configured (snacks / tiny-code-action / edgy / treesitter / treewalker)")
+    else
+      for _, m in ipairs(missing) do
+        err(("%s missing — required for %s"):format(m.mod, m.role))
+      end
+    end
+  end
+
   -- Daemon command resolution.
   local cfg = require("tyo3.config").get()
   if cfg.daemon_cmd then
@@ -47,16 +62,12 @@ function M.check()
   info("project root: " .. root)
   info("socket: " .. require("tyo3.daemon").socket_path(root))
 
-  -- Native LSP bridge (opt-in).
-  if cfg.lsp then
-    local attached = vim.lsp.get_clients({ name = "tyo3", bufnr = bufnr })
-    if #attached > 0 then
-      ok(("native LSP bridge enabled — client attached (encoding %s)"):format(attached[1].offset_encoding))
-    else
-      info("native LSP bridge enabled — no client attached to this buffer yet")
-    end
+  -- Native LSP bridge (always on — rides vim.lsp / vim.diagnostic).
+  local attached = vim.lsp.get_clients({ name = "tyo3", bufnr = bufnr })
+  if #attached > 0 then
+    ok(("native LSP bridge — client attached (encoding %s)"):format(attached[1].offset_encoding))
   else
-    info("native LSP bridge disabled (setup{ lsp = true } to ride vim.lsp / vim.diagnostic)")
+    info("native LSP bridge — no client attached to this buffer yet")
   end
 
   -- Synchronous-ish probe: ensure + ping, waiting briefly.

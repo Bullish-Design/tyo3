@@ -23,13 +23,10 @@ vim.cmd("runtime! plugin/tyo3.lua")
 
 require("tyo3").setup({
   daemon_cmd = { "python", "-m", "tyo3.daemon" },
-  auto_start = true,
   debounce_ms = 200,
   virtual_text = true,
-  panel = "always",
-  -- The feature under demo: auto-update the CONTEXT section from the entity
-  -- under the cursor, only when the enclosing definition node changes.
-  context = "cursor",
+  -- The feature under demo: the CONTEXT section auto-updates from the entity
+  -- under the cursor (always on now), only when the enclosing def node changes.
   context_debounce_ms = 120,
 })
 

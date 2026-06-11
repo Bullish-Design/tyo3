@@ -29,7 +29,6 @@ check("build shop project", vim.fn.isdirectory(proj) == 1, proj)
 -- ── Configure the plugin (force python -m so no console-script install needed) ──
 require("tyo3").setup({
   daemon_cmd = { "python", "-m", "tyo3.daemon" },
-  auto_start = true,
   debounce_ms = 50,
 })
 

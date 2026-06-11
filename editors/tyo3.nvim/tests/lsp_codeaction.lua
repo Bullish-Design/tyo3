@@ -52,9 +52,7 @@ check("build shop project", vim.fn.isdirectory(proj) == 1, proj)
 
 require("tyo3").setup({
   daemon_cmd = { "python", "-m", "tyo3.daemon" },
-  auto_start = true,
   debounce_ms = 50,
-  lsp = true,
 })
 
 local store = proj .. "/store.py"

@@ -1,4 +1,4 @@
--- tyo3.nvim — native LSP bridge (opt-in via `setup{ lsp = true }`).
+-- tyo3.nvim — native LSP bridge (always on).
 --
 -- Runs an *in-process* `vim.lsp` server (no separate process, no Content-Length
 -- framing) whose request handlers forward to the per-project tyo3 daemon over
@@ -6,8 +6,10 @@
 -- `K` hover, `grr`/`gra`, `]d`/`[d`, Trouble, lualine, fzf-lua/snacks/telescope
 -- LSP pickers all work against tyo3 for free, inheriting the user's own config.
 --
--- This is additive and opt-in. The bespoke UI (panel / inspect / decorate /
--- telescope) is untouched; with `lsp = false` (the default) nothing here runs.
+-- Single path (proj 28): the bridge attaches on every project python buffer —
+-- there is no standalone `lsp = false` mode. The durable-identity half that has
+-- no LSP vocabulary (needs_review / orphaned) rides a dedicated `vim.diagnostic`
+-- namespace, also always on (see refresh_layer_diagnostics below).
 --
 -- Position conventions (verified empirically against the engine):
 --   * daemon positions are 1-based; LSP positions are 0-based.
@@ -940,7 +942,8 @@ function M.layer_namespace()
 end
 
 --- Refresh the tyo3-layer diagnostics for *bufnr* (project *root*) from
---- `review_state`. Default-off: only call this when the flag is on.
+--- `review_state`. Always on (proj 28): the layer-state namespace ships with the
+--- bridge.
 function M.refresh_layer_diagnostics(bufnr, root)
   local path = vim.api.nvim_buf_get_name(bufnr)
   if path == nil or path == "" then
@@ -984,38 +987,6 @@ function M.attach(bufnr, root)
   }, { bufnr = bufnr })
 end
 
---- Flip the `lsp` flag at runtime (`:TyO3Lsp`). Enabling attaches every loaded
---- Python buffer in a known project; disabling stops the tyo3 clients. The
---- BufEnter autocmd keeps newly-opened buffers in sync with the flag.
-function M.toggle()
-  local cfg = require("tyo3.config").get()
-  cfg.lsp = not cfg.lsp
-  if cfg.lsp then
-    local tyo3 = require("tyo3")
-    local layer_on = require("tyo3.config").layer_diagnostics_enabled()
-    for _, b in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == "python" then
-        local root = tyo3.root_for_buf(b)
-        if root then
-          M.attach(b, root)
-          -- Seed layer-state diagnostics so enabling reflects current state
-          -- immediately (don't wait for the next bus delta to surface a
-          -- pre-existing needs_review / orphaned).
-          if layer_on then
-            M.refresh_layer_diagnostics(b, root)
-          end
-        end
-      end
-    end
-    vim.notify("[tyo3] native LSP bridge enabled", vim.log.levels.INFO)
-  else
-    for _, c in ipairs(vim.lsp.get_clients({ name = "tyo3" })) do
-      c:stop()
-    end
-    vim.notify("[tyo3] native LSP bridge disabled", vim.log.levels.INFO)
-  end
-end
-
 -- ── tyo3.explain client command (proj 26) ────────────────────────────────────
 --
 -- Registered client-side so every code-action entry point (`gra`,
@@ -1034,9 +1005,7 @@ function M.run_verb(bufnr, root, verb, params, cb)
       pcall(function()
         require("tyo3.decorate").apply(bufnr)
       end)
-      if require("tyo3.config").layer_diagnostics_enabled() then
-        M.refresh_layer_diagnostics(bufnr, root)
-      end
+      M.refresh_layer_diagnostics(bufnr, root)
     end
     if cb then
       cb(err, res)
@@ -1110,9 +1079,7 @@ M.register_command("tyo3.ack", function(command, cmd_ctx)
         pcall(function()
           require("tyo3.decorate").apply(bufnr)
         end)
-        if require("tyo3.config").layer_diagnostics_enabled() then
-          M.refresh_layer_diagnostics(bufnr, root)
-        end
+        M.refresh_layer_diagnostics(bufnr, root)
       end
       vim.notify("[tyo3] review acknowledged", vim.log.levels.INFO)
     end)

@@ -25,11 +25,10 @@ vim.cmd("runtime! plugin/tyo3.lua")
 
 require("tyo3").setup({
   daemon_cmd = { "python", "-m", "tyo3.daemon" },
-  auto_start = true,
   debounce_ms = 200,
-  -- The features under demo: the in-process LSP bridge attaches on BufEnter and
-  -- serves documentSymbol / workspace symbol / call hierarchy from the spine.
-  lsp = true,
+  -- The features under demo: the in-process LSP bridge attaches on BufEnter
+  -- (always on now) and serves documentSymbol / workspace symbol / call
+  -- hierarchy from the spine.
   -- Keep the native quickfix/loclist the focus — no inline virtual text.
   virtual_text = false,
 })

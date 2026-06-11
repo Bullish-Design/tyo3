@@ -367,7 +367,9 @@ function M.set_context(card, src_buf)
     end
   end
   render()
-  if require("tyo3.config").get().context == "cursor" and not M.is_open() then
+  -- Always-on (proj 28): the cursor-context dock opens on the first entity so it
+  -- follows you through the tree without a manual toggle.
+  if not M.is_open() then
     M.open()
     render()
   end
@@ -407,10 +409,6 @@ end
 
 --- Handle a `delta` notification.
 function M.on_delta(_root, params)
-  local cfg = require("tyo3.config").get()
-  if cfg.panel == "off" then
-    return
-  end
   local changed = params.changed_ids or {}
   local affected = params.affected_ids or {}
   if #changed == 0 and #affected == 0 and not params.rescan then
@@ -427,7 +425,9 @@ function M.on_delta(_root, params)
   end
   M._rev_index[params.revision] = #M._affected_lines
   render()
-  if cfg.panel == "auto" and not M.is_open() then
+  -- Always-on (proj 28): auto-open on the first delta so the affected-set log
+  -- surfaces without a manual :TyO3Panel.
+  if not M.is_open() then
     M.open()
     render()
   end

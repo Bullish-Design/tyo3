@@ -246,7 +246,7 @@ function M.list(card)
     table.insert(items, { label = "↪ Go to definition", run = goto_def })
     table.insert(items, { label = "📞 Find callers (references)", run = find_callers })
   end
-  table.insert(items, { label = "🌐 Affected set (picker)", run = function(_, _) require("tyo3.telescope").affected() end })
+  table.insert(items, { label = "🌐 Affected set (picker)", run = function(_, _) require("tyo3.picker").affected() end })
   return items
 end
 

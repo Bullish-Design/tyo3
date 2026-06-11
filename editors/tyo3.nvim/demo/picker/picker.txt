@@ -1,0 +1,2013 @@
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-YoUAVM/shop
+tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+:TyO3Entities
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+:TyO3Entities
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~                  ╭──────────────────────────────── TyO3 Entities ─────────────────────────────────╮
+~                  │                                                                           2/2 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ checkout  [function]  /tmp/claude-1000/tyo3-demo-YoUAVM/shop/store.py          │
+~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-YoUAVM/shop/store.py        │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+-- INSERT --                                                                                           1,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~                  ╭──────────────────────────────── TyO3 Entities ─────────────────────────────────╮
+~                  │ show_label                                                                1/2 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-YoUAVM/shop/store.py        │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+-- INSERT --                                                                                           1,11          All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~                  ╭──────────────────────────────── TyO3 Entities ─────────────────────────────────╮
+~                  │ show_label                                                                1/2 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-YoUAVM/shop/store.py        │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+-- INSERT --                                                                                           1,11          All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+:TyO3Note
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+:TyO3Note
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd  ╭───────────── TyO3 intent note for show_label ──────────────╮G0
+    4                        │                                                           │::show_label
+    5                        ╰────────────────────────────────────────────────────────────╯
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+-- INSERT --                                                                                           1,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd  ╭───────────── TyO3 intent note for show_label ──────────────╮G0
+    4                        │   keep this label stable                                  │::show_label
+    5                        ╰────────────────────────────────────────────────────────────╯
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+-- INSERT --                                                                                           1,23          All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd  ╭───────────── TyO3 intent note for show_label ──────────────╮G0
+    4                        │   keep this label stable                                  │::show_label
+    5                        ╰────────────────────────────────────────────────────────────╯
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+-- INSERT --                                                                                           1,23          All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+                                                                                                       1,23          All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+[tyo3] intent note authored
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+:TyO3Authored
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+:TyO3Authored
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return It╭────────────────────────────── TyO3 intent notes ───────────────────────────────╮re
+~                  │                                                                           1/1 │entity
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ show_label — keep this label stable                                            │ef show_label() -> s
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │rd
+~                  │                                                                                │
+~                  │                                                                                │ication
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯erences)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+-- INSERT --                                                                                           1,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+:e catalog.py
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …MSKQRFG0
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+:e catalog.py
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 100                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                1,1            All TyO3://panel [-]          1,1            All
+:e catalog.py
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 100                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                3,16           All TyO3://panel [-]          1,1            All
+/100
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 100                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                3,16           All TyO3://panel [-]          1,1            All
+/100                                                                                                   [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 100                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                3,16           All TyO3://panel [-]          1,1            All
+/100                                                                                                   [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py [+]                                            3,19           All TyO3://panel [-]          1,1            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py [+]                                            3,19           All TyO3://panel [-]          1,1            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py [+]                                            3,18           All TyO3://panel [-]          1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py [+]                                            3,18           All TyO3://panel [-]          1,1            All
+:w
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                3,18           All TyO3://panel [-]          1,1            All
+"catalog.py" 6L, 110B written
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                3,18           All TyO3://panel [-]          1,1            All
+"catalog.py" 6L, 110B written
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                3,18           All TyO3://panel [-]          1,1            All
+:TyO3Affected
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                3,18           All TyO3://panel [-]          1,1            All
+:TyO3Affected
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                                  │  ▾ IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>      │    Item · class_
+    3         return 250                                                    │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>      │  ▾ NOTES  (0)
+    6         return "item"                                                 │    (none — see ACTIONS)
+~                                                                           │  ▾ DOCS
+~                                                                           │    📄 (no doc — <CR> to write)
+~                                                                           │    reference:
+~                                                                           │      • User · workflow
+~                                                                           │      • User · command reference
+~                  ╭────────────────────────── TyO3 Affected (last edit) ───────────────────────────╮re
+~                  │                                                                           5/5 │entity
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ show_label                                                                     │
+~                  │ …2WA7YJCS                                                                      │
+~                  │ Item                                                                           │rd
+~                  │ checkout                                                                       │
+~                  │ Item.price                                                                     │ication
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │erences)
+~                  │                                                                                │ker)
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+catalog.py                                                3,18           All TyO3://panel [-]          1,1            All
+-- INSERT --                                                                                           1,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    Item · class_
+    3 from money import usd                                                 │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    Item · class_
+    3 from money import usd                                                 │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    Item · class_
+    3 from money import usd                                                 │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+:qa!
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    Item · class_
+    3 from money import usd                                                 │    id …6953MAKF
+    4                                                                       │    ▪ catalog.py::Item
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+        🏷  keep this label stable                                           │      • User · workflow
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · command reference
+   11     return Item().label()                                             │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (0)
+~                                                                           │    (none)
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (1)
+~                                                                           │  rev 16 · Δ2 · affects {show_label, …A7YJCS
+~                                                                           │  , Item, checkout, Item.price}  → narrowed
+~                                                                           │  {Item, checkout, Item.price}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  10,1           All TyO3://panel [-]          1,1            All
+:qa!
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-YoUAVM/shop
+tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
+> $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/picker/init.lua store.py
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────

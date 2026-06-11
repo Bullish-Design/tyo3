@@ -6,8 +6,8 @@
 -- debounced, and resilient to stale responses — so it never floods the
 -- single-threaded session actor or flickers to a previous entity.
 --
--- Default-off (`context = "off"`); opt in with `setup{ context = "cursor" }` or
--- toggle at runtime with :TyO3Context.
+-- Single path (proj 28): the cursor-context dock is always on — the durable
+-- identity under the cursor follows you through the tree, no flag.
 
 local config = require("tyo3.config")
 
@@ -72,9 +72,6 @@ end
 function M.on_cursor(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local cfg = config.get()
-  if cfg.context ~= "cursor" then
-    return
-  end
   if not vim.api.nvim_buf_is_loaded(bufnr) then
     return
   end
@@ -126,21 +123,6 @@ function M.forget(bufnr)
   end
   M._debounce[bufnr] = nil
   M._last_key[bufnr] = nil
-end
-
---- :TyO3Context — flip `context` between "cursor" and "off" at runtime.
-function M.toggle()
-  local cfg = config.get()
-  if cfg.context == "cursor" then
-    cfg.context = "off"
-    M._last_key = {}
-    require("tyo3.panel").clear_context()
-    vim.notify("[tyo3] context: off", vim.log.levels.INFO)
-  else
-    cfg.context = "cursor"
-    vim.notify("[tyo3] context: cursor", vim.log.levels.INFO)
-    M.on_cursor(vim.api.nvim_get_current_buf())
-  end
 end
 
 return M

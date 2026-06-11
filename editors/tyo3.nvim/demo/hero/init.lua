@@ -23,16 +23,12 @@ vim.cmd("runtime! plugin/tyo3.lua")
 
 require("tyo3").setup({
   daemon_cmd = { "python", "-m", "tyo3.daemon" },
-  auto_start = true,
   debounce_ms = 250,
   virtual_text = true,
-  panel = "always",
-  -- Rich IDENTITY / NOTES / DOCS / SUMMARY / ACTIONS dock, cursor-tracked.
-  context = "cursor",
+  -- The cursor-context dock, the panel, and the native LSP bridge (so `]d`
+  -- walks needs_review + the type error and the code-action menu offers the
+  -- acknowledge quickfix) are all always on now — no flags needed.
   context_debounce_ms = 100,
-  -- Native LSP bridge, so `]d` walks needs_review + the type error in one
-  -- stream and the code-action menu offers the acknowledge quickfix.
-  lsp = true,
 })
 
 -- Open the panel up front so the CONTEXT section is visible from the start.
