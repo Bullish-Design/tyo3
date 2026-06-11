@@ -454,7 +454,7 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-CjpCM8/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-EOtdZb/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 >
 
@@ -525,8 +525,8 @@ tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwr
 ~                                                                           │~
 ~                                                                           │~
 
-[tyo3] reindex: {"changed_ids":[],"affected_ids":[],"rescan":true,"created_ids":[],"deleted_ids":[],"revision":6,"touched
-_files":[],"affected_files":[],"moved":[]}
+[tyo3] reindex: {"created_ids":[],"deleted_ids":[],"changed_ids":[],"affected_ids":[],"touched_files":[],"affected_files"
+:[],"revision":6,"rescan":true,"moved":[]}
 Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ AFFECTED  (1)
@@ -607,7 +607,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    checkout · function
-    3 from money import usd                                                 │    id …ZYKNKWS1
+    3 from money import usd                                                 │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5                                                                       │  ▾ NOTES  (0)
     6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
@@ -619,9 +619,9 @@ Press ENTER or type command to continue
 ~                                                                           │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -645,7 +645,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    checkout · function
-    3 from money import usd                                                 │    id …ZYKNKWS1
+    3 from money import usd                                                 │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5                                                                       │  ▾ NOTES  (0)
     6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
@@ -657,9 +657,9 @@ Press ENTER or type command to continue
 ~                                                                           │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -683,7 +683,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    checkout · function
-    3 from money import usd                                                 │    id …ZYKNKWS1
+    3 from money import usd                                                 │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5                                                                       │  ▾ NOTES  (0)
     6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — see ACTIONS)
@@ -695,9 +695,9 @@ Press ENTER or type command to continue
 ~                                                                           │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -721,7 +721,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    checkout · function
-    3 from money import usd                                                 │    id …ZYKNKWS1
+    3 from money import usd                                                 │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5                                                                       │  ▾ NOTES  (0)
         🏷  load-bearing checkout path                                       │    (none — see ACTIONS)
@@ -733,9 +733,9 @@ Press ENTER or type command to continue
    11     return Item().label()                                             │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -759,7 +759,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    checkout · function
-    3 from money import usd                                                 │    id …ZYKNKWS1
+    3 from money import usd                                                 │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5                                                                       │  ▾ NOTES  (0)
         🏷  load-bearing checkout path                                       │    (none — see ACTIONS)
@@ -771,9 +771,9 @@ Press ENTER or type command to continue
    11     return Item().label()                                             │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -797,7 +797,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    checkout · function
-    3 from money import usd                                                 │    id …ZYKNKWS1
+    3 from money import usd                                                 │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5                                                                       │  ▾ NOTES  (0)
         🏷  load-bearing checkout path                                       │    (none — see ACTIONS)
@@ -809,9 +809,9 @@ Press ENTER or type command to continue
    11     return Item().label()                                             │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -835,7 +835,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    checkout · function
-    3 from money import usd                                                 │    id …ZYKNKWS1
+    3 from money import usd                                                 │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5                                                                       │  ▾ NOTES  (0)
     6                                                                       │    (none — see ACTIONS)
@@ -847,9 +847,9 @@ Press ENTER or type command to continue
 ~                                                                           │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -873,7 +873,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    checkout · function
-    3 from money import usd                                                 │    id …ZYKNKWS1
+    3 from money import usd                                                 │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5                                                                       │  ▾ NOTES  (0)
     6                                                                       │    (none — see ACTIONS)
@@ -885,9 +885,9 @@ Press ENTER or type command to continue
 ~                                                                           │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -911,7 +911,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from money import usd                                                 │    checkout · function
-    3                                                                       │    id …ZYKNKWS1
+    3                                                                       │    id …5DCAT3DP
     4                                                                       │    ▪ store.py::checkout
     5 def checkout() -> str:                                                │  ▾ NOTES  (0)
     6     return usd(Book().price())                                        │    (none — see ACTIONS)
@@ -923,9 +923,9 @@ Press ENTER or type command to continue
 ~                                                                           │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
 ~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │    ⟢ summary: summary<def checkout() -> str
 ~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
 ~                                                                           │  ▾ ACTIONS
 ~                                                                           │    🔍 Inspect entity card
 ~                                                                           │    🤖 Explain (AI)
@@ -944,7 +944,7 @@ Press ENTER or type command to continue
 ~                                                                           │~
 ~                                                                           │~
 ~                                                                           │~
-  TyO3 ● live       /tmp/claude-1000/tyo3-demo-CjpCM8/shop/checkout.py  1:1    TyO3 ● live             TyO3://panel  1:1
+  TyO3 ● live       /tmp/claude-1000/tyo3-demo-EOtdZb/shop/checkout.py  1:1    TyO3 ● live             TyO3://panel  1:1
 :e checkout.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ AFFECTED  (2)
@@ -982,7 +982,7 @@ Press ENTER or type command to continue
 ~                                                                           │~
 ~                                                                           │~
 ~                                                                           │~
-  TyO3 ● live       /tmp/claude-1000/tyo3-demo-CjpCM8/shop/checkout.py  1:1    TyO3 ● live             TyO3://panel  1:1
+  TyO3 ● live       /tmp/claude-1000/tyo3-demo-EOtdZb/shop/checkout.py  1:1    TyO3 ● live             TyO3://panel  1:1
 :e checkout.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ AFFECTED  (2)
@@ -1020,7 +1020,7 @@ Press ENTER or type command to continue
 ~                                                                           │~
 ~                                                                           │~
 ~                                                                           │~
-  TyO3 ● live       /tmp/claude-1000/tyo3-demo-CjpCM8/shop/checkout.py  1:1    TyO3 ● live             TyO3://panel  1:1
+  TyO3 ● live       /tmp/claude-1000/tyo3-demo-EOtdZb/shop/checkout.py  1:1    TyO3 ● live             TyO3://panel  1:1
 :e store.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ AFFECTED  (2)
@@ -1177,7 +1177,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (0)
     6                                                                       │    (none — see ACTIONS)
@@ -1215,7 +1215,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (0)
     6                                                                       │    (none — see ACTIONS)
@@ -1253,7 +1253,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (0)
     6                                                                       │    (none — see ACTIONS)
@@ -1291,7 +1291,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (0)
     6                                                                       │    (none — see ACTIONS)
@@ -1329,7 +1329,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (0)
     6                                                                       │    (none — see ACTIONS)
@@ -1367,7 +1367,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (0)
     6                                                                       │    (none — see ACTIONS)
@@ -1405,7 +1405,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable
@@ -1443,7 +1443,7 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable
@@ -1481,14 +1481,14 @@ Press ENTER or type command to continue
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable
     7                                                                       │  ▾ DOCS
         🏷  keep this label stable                                           │    📄 (no doc — <CR> to write)
-    8 def show_label() -> str:   ⟢ summary<>                                │    reference:
-E   9     return Item().price()                                             │      • User · workflow
+W   8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │    reference:
+    9     return Item().price()                                             │      • User · workflow
 ~                                                                           │      • User · command reference
 ~                                                                           │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
@@ -1519,14 +1519,14 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable
     7                                                                       │  ▾ DOCS
         🏷  keep this label stable                                           │    📄 (no doc — <CR> to write)
-    8 def show_label() -> str:   ⟢ summary<>                                │    reference:
-E   9     return Item().price()                                             │      • User · workflow
+W   8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │    reference:
+    9     return Item().price()                                             │      • User · workflow
 ~                                                                           │      • User · command reference
 ~                                                                           │      • Dev · architecture
 ~                                                                           │      • Dev · durable identity
@@ -1557,7 +1557,45 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (1)
+    6                                                                       │    🏷  keep this label stable
+    7                                                                       │  ▾ DOCS
+        🏷  keep this label stable                                           │    📄 (no doc — <CR> to write)
+W   8 def show_label() -> str:   ⟢ summary<>                                │    reference:
+    9     return Item().price()                                             │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ embed: vec[dim=3]
+~                                                                           │    ⟢ summary: summary<def show_label() -> s
+~                                                                           │  tr:>
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (3)
+~                                                                           │  rev 6 · rescan
+~                                                                           │  rev 9 · Δ0 · affects {checkout}  → narrowe
+~                                                                           │  d {}
+~                                                                           │  rev 16 · Δ1 · affects {show_label}  → narr
+~                                                                           │  owed {show_label}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+  TyO3 ● live                                                store.py  9:23    TyO3 ● live             TyO3://panel  1:1
+"store.py" 9L, 124B written
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable
@@ -1595,45 +1633,7 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
-    4                                                                       │    ▪ store.py::show_label
-    5                                                                       │  ▾ NOTES  (1)
-    6                                                                       │    🏷  keep this label stable
-    7                                                                       │  ▾ DOCS
-        🏷  keep this label stable                                           │    📄 (no doc — <CR> to write)
-W   8 def show_label() -> str:   ⟢ summary<>                                │    reference:
-E   9     return Item().price()                                             │      • User · workflow
-~                                                                           │      • User · command reference
-~                                                                           │      • Dev · architecture
-~                                                                           │      • Dev · durable identity
-~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=3]
-~                                                                           │    ⟢ summary: summary<def show_label() -> s
-~                                                                           │  tr:>
-~                                                                           │  ▾ ACTIONS
-~                                                                           │    🔍 Inspect entity card
-~                                                                           │    🤖 Explain (AI)
-~                                                                           │    ✨ Suggest a simplification
-~                                                                           │    📝 Author intent
-~                                                                           │    📄 Write / edit doc
-~                                                                           │    ↪ Go to definition
-~                                                                           │    📞 Find callers (references)
-~                                                                           │    🌐 Affected set (picker)
-~                                                                           │  ▾ AFFECTED  (3)
-~                                                                           │  rev 6 · rescan
-~                                                                           │  rev 9 · Δ0 · affects {checkout}  → narrowe
-~                                                                           │  d {}
-~                                                                           │  rev 16 · Δ1 · affects {show_label}  → narr
-~                                                                           │  owed {show_label}
-~                                                                           │~
-~                                                                           │~
-~                                                                           │~
-  TyO3 ● live                                                store.py  9:23    TyO3 ● live             TyO3://panel  1:1
-"store.py" 9L, 124B written
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                 │  ▾ IDENTITY
-    2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable
@@ -1747,7 +1747,7 @@ E   9     return Item().price()                                             │~
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -1785,7 +1785,7 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -1823,7 +1823,7 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -1861,7 +1861,7 @@ E   9 Diagnostics:                                                          │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -1899,7 +1899,7 @@ E   9 Diagnostics:                                                          │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -1937,45 +1937,7 @@ E   9 Diagnostics:                                                          │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
-    4                                                                       │    ▪ store.py::show_label
-    5                                                                       │  ▾ NOTES  (1)
-    6                                                                       │    🏷  keep this label stable ⚠
-    7                                                                       │  ▾ DOCS
-        🏷  keep this label stable                                           │    📄 (no doc — <CR> to write)
-W   8 def show_label() -> str:   ⟢ summary<>                                │    reference:
-E   9     return Item().price()                                             │      • User · workflow
-~                                                                           │      • User · command reference
-~                                                                           │      • Dev · architecture
-~                                                                           │      • Dev · durable identity
-~                                                                           │  ▾ SUMMARY  (2)
-~                                                                           │    ⟢ embed: vec[dim=51]
-~                                                                           │    ⟢ summary: summary<>
-~                                                                           │  ▾ ACTIONS
-~                                                                           │    🔍 Inspect entity card
-~                                                                           │    🤖 Explain (AI)
-~                                                                           │    ✨ Suggest a simplification
-~                                                                           │    📝 Author intent
-~                                                                           │    📄 Write / edit doc
-~                                                                           │    ↪ Go to definition
-~                                                                           │    📞 Find callers (references)
-~                                                                           │    🌐 Affected set (picker)
-~                                                                           │  ▾ AFFECTED  (3)
-~                                                                           │  rev 6 · rescan
-~                                                                           │  rev 9 · Δ0 · affects {checkout}  → narrowe
-~                                                                           │  d {}
-~                                                                           │  rev 16 · Δ1 · affects {show_label}  → narr
-~                                                                           │  owed {show_label}
-~                                                                           │~
-~                                                                           │~
-~                                                                           │~
-~                                                                           │~
-  TyO3 ● live                                                store.py  9:12    TyO3 ● live             TyO3://panel  1:1
-:lua vim.diagnostic.open_float()
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                 │  ▾ IDENTITY
-    2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2013,7 +1975,45 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
+    4                                                                       │    ▪ store.py::show_label
+    5                                                                       │  ▾ NOTES  (1)
+    6                                                                       │    🏷  keep this label stable ⚠
+    7                                                                       │  ▾ DOCS
+        🏷  keep this label stable                                           │    📄 (no doc — <CR> to write)
+W   8 def show_label() -> str:   ⟢ summary<>                                │    reference:
+E   9     return Item().price()                                             │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ embed: vec[dim=51]
+~                                                                           │    ⟢ summary: summary<>
+~                                                                           │  ▾ ACTIONS
+~                                                                           │    🔍 Inspect entity card
+~                                                                           │    🤖 Explain (AI)
+~                                                                           │    ✨ Suggest a simplification
+~                                                                           │    📝 Author intent
+~                                                                           │    📄 Write / edit doc
+~                                                                           │    ↪ Go to definition
+~                                                                           │    📞 Find callers (references)
+~                                                                           │    🌐 Affected set (picker)
+~                                                                           │  ▾ AFFECTED  (3)
+~                                                                           │  rev 6 · rescan
+~                                                                           │  rev 9 · Δ0 · affects {checkout}  → narrowe
+~                                                                           │  d {}
+~                                                                           │  rev 16 · Δ1 · affects {show_label}  → narr
+~                                                                           │  owed {show_label}
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+  TyO3 ● live                                                store.py  9:12    TyO3 ● live             TyO3://panel  1:1
+:lua vim.diagnostic.open_float()
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    show_label · function
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2051,7 +2051,7 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2089,7 +2089,7 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2127,7 +2127,7 @@ Type number and <Enter> or click with the mouse (q or empty cancels):
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2165,7 +2165,7 @@ Type number and <Enter> or click with the mouse (q or empty cancels): 1
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2199,11 +2199,11 @@ E   9     return Item().price()                                             │ 
 ~                                                                           │~
 ~                                                                           │~
   TyO3 ● live                                                store.py  9:12    TyO3 ● live             TyO3://panel  1:1
-[tyo3] review acknowledged
+
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2241,7 +2241,7 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2279,7 +2279,7 @@ E   9     return Item().price()                                             │ 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                 │  ▾ IDENTITY
     2 from catalog import Item                                              │    show_label · function
-    3 from money import usd                                                 │    id …FVHZ8MVW
+    3 from money import usd                                                 │    id …K5MPS8VT
     4                                                                       │    ▪ store.py::show_label
     5                                                                       │  ▾ NOTES  (1)
     6                                                                       │    🏷  keep this label stable ⚠
@@ -2316,7 +2316,7 @@ E   9     return Item().price()                                             │ 
 :qa!
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-CjpCM8/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-EOtdZb/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 > $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/hero/init.lua store.py
 >
