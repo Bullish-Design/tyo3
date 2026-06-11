@@ -1,0 +1,1443 @@
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-vmTId1/shop
+tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               6,1            All
+/def checkout
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               6,1            All
+/def checkout                                                                                          [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+    9                                                                       │    📄 (no doc — <CR> to write)
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │    reference:
+   11     return Item().label()                                             │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+/def checkout                                                                                          [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+    9                                                                       │    📄 (no doc — <CR> to write)
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │    reference:
+   11     return Item().label()                                             │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+/def checkout                                                                                          [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+╭──────────────────────── Code Actions ────────────────────────╮            │    📄 (no doc — <CR> to write)
+│##   Refactor                                                │tr:>        │    reference:
+│  [t ] tyo3: Simplify `checkout`                              │            │      • User · workflow
+│  [tm] tyo3: Move `checkout` to…                              │            │      • User · command reference
+│                                                              │            │      • Dev · architecture
+│##   Source                                                  │            │      • Dev · durable identity
+│  [ta] tyo3: Author `checkout` (intent)                       │            │  ▾ SUMMARY  (2)
+│  [tc] tyo3: Explain `checkout`                               │            │    ⟢ summary: summary<def checkout() -> str
+│  [td] tyo3: Write/edit doc                                   │            │  :>
+│                                                              │            │    ⟢ embed: vec[dim=54]
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯            │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+/def checkout                                                                                          2,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+╭──────────────────────── Code Actions ────────────────────────╮            │    📄 (no doc — <CR> to write)
+│##   Refactor                                                │tr:>        │    reference:
+│  [t ] tyo3: Simplify `checkout`                              │            │      • User · workflow
+│  [tm] tyo3: Move `checkout` to…                              │            │      • User · command reference
+│                                                              │            │      • Dev · architecture
+│##   Source                                                  │            │      • Dev · durable identity
+│  [ta] tyo3: Author `checkout` (intent)                       │            │  ▾ SUMMARY  (2)
+│  [tc] tyo3: Explain `checkout`                               │            │    ⟢ summary: summary<def checkout() -> str
+│  [td] tyo3: Write/edit doc                                   │            │  :>
+│                                                              │            │    ⟢ embed: vec[dim=54]
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯            │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+/def checkout                                                                                          6,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+╭──────────────────────── Code Actions ────────────────────────╮            │    📄 (no doc — <CR> to write)
+│##   Refactor                                                │tr:>        │    reference:
+│  [t ] tyo3: Simplify `checkout`                              │            │      • User · workflow
+│  [tm] tyo3: Move `checkout` to…                              │            │      • User · command reference
+│                                                              │            │      • Dev · architecture
+│##   Source                                                  │            │      • Dev · durable identity
+│  [ta] tyo3: Author `checkout` (intent)                       │            │  ▾ SUMMARY  (2)
+│  [tc] tyo3: Explain `checkout`                               │            │    ⟢ summary: summary<def checkout() -> str
+│  [td] tyo3: Write/edit doc                                   │            │  :>
+│                                                              │            │    ⟢ embed: vec[dim=54]
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯            │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+/def checkout                                                                                          6,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+╭──────────────────────── Code Actions ────────────────────────╮            │    📄 (no doc — <CR> to write)
+│##   Refactor                                                │tr:>        │    reference:
+│  [t ] tyo3: Simplify `checkout`                              │            │      • User · workflow
+│  [tm] tyo3: Move `checkout` to…                              │            │      • User · command reference
+│                                                              │            │      • Dev · architecture
+│##   Source                                                  │            │      • Dev · durable identity
+│  [ta] tyo3: Author `checkout` (intent)                       │            │  ▾ SUMMARY  (2)
+│  [tc] tyo3: Explain `checkout`                               │            │    ⟢ summary: summary<def checkout() -> str
+│  [td] tyo3: Write/edit doc                                   │            │  :>
+│                                                              │            │    ⟢ embed: vec[dim=54]
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯            │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+/def checkout                                                                                          6,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮9Z
+    4                        │                                                           │::checkout
+    5                        ╰────────────────────────────────────────────────────────────╯
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+    9                                                                       │    📄 (no doc — <CR> to write)
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │    reference:
+   11     return Item().label()                                             │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+-- INSERT --                                                                                           1,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮9Z
+    4                        │   load-bearing checkout path                              │::checkout
+    5                        ╰────────────────────────────────────────────────────────────╯
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+    9                                                                       │    📄 (no doc — <CR> to write)
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │    reference:
+   11     return Item().label()                                             │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+-- INSERT --                                                                                           1,27          All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮9Z
+    4                        │   load-bearing checkout path                              │::checkout
+    5                        ╰────────────────────────────────────────────────────────────╯
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+    9                                                                       │    📄 (no doc — <CR> to write)
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │    reference:
+   11     return Item().label()                                             │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+-- INSERT --                                                                                           1,27          All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │    (none — author one via the code-action m
+    7     return usd(Book().price())                                        │  enu)
+    8                                                                       │  ▾ DOCS
+    9                                                                       │    📄 (no doc — <CR> to write)
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │    reference:
+   11     return Item().label()                                             │      • User · workflow
+~                                                                           │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] intent authored
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] intent authored
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] intent authored
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+╭──────────────────────── Code Actions ────────────────────────╮            │    reference:
+│##   Refactor                                                │tr:>        │      • User · workflow
+│  [t ] tyo3: Simplify `checkout`                              │            │      • User · command reference
+│  [tm] tyo3: Move `checkout` to…                              │            │      • Dev · architecture
+│                                                              │            │      • Dev · durable identity
+│##   Source                                                  │            │  ▾ SUMMARY  (2)
+│  [ta] tyo3: Author `checkout` (intent)                       │            │    ⟢ summary: summary<def checkout() -> str
+│  [tc] tyo3: Explain `checkout`                               │            │  :>
+│  [td] tyo3: Write/edit doc                                   │            │    ⟢ embed: vec[dim=54]
+│                                                              │            │~
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯            │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] intent authored                                                                                 2,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+╭──────────────────────── Code Actions ────────────────────────╮            │    reference:
+│##   Refactor                                                │tr:>        │      • User · workflow
+│  [t ] tyo3: Simplify `checkout`                              │            │      • User · command reference
+│  [tm] tyo3: Move `checkout` to…                              │            │      • Dev · architecture
+│                                                              │            │      • Dev · durable identity
+│##   Source                                                  │            │  ▾ SUMMARY  (2)
+│  [ta] tyo3: Author `checkout` (intent)                       │            │    ⟢ summary: summary<def checkout() -> str
+│  [tc] tyo3: Explain `checkout`                               │            │  :>
+│  [td] tyo3: Write/edit doc                                   │            │    ⟢ embed: vec[dim=54]
+│                                                              │            │~
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯            │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] intent authored                                                                                 7,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+╭──────────────────────── Code Actions ────────────────────────╮            │    reference:
+│##   Refactor                                                │tr:>        │      • User · workflow
+│  [t ] tyo3: Simplify `checkout`                              │            │      • User · command reference
+│  [tm] tyo3: Move `checkout` to…                              │            │      • Dev · architecture
+│                                                              │            │      • Dev · durable identity
+│##   Source                                                  │            │  ▾ SUMMARY  (2)
+│  [ta] tyo3: Author `checkout` (intent)                       │            │    ⟢ summary: summary<def checkout() -> str
+│  [tc] tyo3: Explain `checkout`                               │            │  :>
+│  [td] tyo3: Write/edit doc                                   │            │    ⟢ embed: vec[dim=54]
+│                                                              │            │~
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯            │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] intent authored                                                                                 7,1           All
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7     return usd(Book().price())                                        │  ▾ DOCS
+    8                                                                       │    📄 (no doc — <CR> to write)
+    9                                                                       │    reference:
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>        │      • User · workflow
+   11     return Item().label()                                             │      • User · command reference
+~                                                                           │      • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] explain …
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7 ╭──────────────────────────────tyo3: explain───────────────────────────────╮OCS
+    8 │Prices a single book for sale — the load-bearing purchase path.           │  (no doc — <CR> to write)
+    9 │checkout constructs a Book, reads its inherited price(), and              │eference:
+   10 │renders the result as a USD string via usd(). It depends on both Book     │ • User · workflow
+   11 │and usd, so a change to either ripples straight through here.             │ • User · command reference
+~     ╰──────────────────────────────────────────────────────────────────────────╯ • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] explain …
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7 ╭──────────────────────────────tyo3: explain───────────────────────────────╮OCS
+    8 │Prices a single book for sale — the load-bearing purchase path.           │  (no doc — <CR> to write)
+    9 │checkout constructs a Book, reads its inherited price(), and              │eference:
+   10 │renders the result as a USD string via usd(). It depends on both Book     │ • User · workflow
+   11 │and usd, so a change to either ripples straight through here.             │ • User · command reference
+~     ╰──────────────────────────────────────────────────────────────────────────╯ • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] explain …
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7 ╭──────────────────────────────tyo3: explain───────────────────────────────╮OCS
+    8 │Prices a single book for sale — the load-bearing purchase path.           │  (no doc — <CR> to write)
+    9 │checkout constructs a Book, reads its inherited price(), and              │eference:
+   10 │renders the result as a USD string via usd(). It depends on both Book     │ • User · workflow
+   11 │and usd, so a change to either ripples straight through here.             │ • User · command reference
+~     ╰──────────────────────────────────────────────────────────────────────────╯ • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+[tyo3] explain …
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7 ╭──────────────────────────────tyo3: explain───────────────────────────────╮OCS
+    8 │Prices a single book for sale — the load-bearing purchase path.           │  (no doc — <CR> to write)
+    9 │checkout constructs a Book, reads its inherited price(), and              │eference:
+   10 │renders the result as a USD string via usd(). It depends on both Book     │ • User · workflow
+   11 │and usd, so a change to either ripples straight through here.             │ • User · command reference
+~     ╰──────────────────────────────────────────────────────────────────────────╯ • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+:qa!
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                 │  ▾ IDENTITY
+    2 from catalog import Item                                              │    checkout · function
+    3 from money import usd                                                 │    id …SEQ1309Z
+    4                                                                       │    ▪ store.py::checkout
+    5                                                                       │  ▾ NOTES  (0)
+        🏷  load-bearing checkout path                                       │    (none — author one via the code-action m
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>            │  enu)
+    7 ╭──────────────────────────────tyo3: explain───────────────────────────────╮OCS
+    8 │Prices a single book for sale — the load-bearing purchase path.           │  (no doc — <CR> to write)
+    9 │checkout constructs a Book, reads its inherited price(), and              │eference:
+   10 │renders the result as a USD string via usd(). It depends on both Book     │ • User · workflow
+   11 │and usd, so a change to either ripples straight through here.             │ • User · command reference
+~     ╰──────────────────────────────────────────────────────────────────────────╯ • Dev · architecture
+~                                                                           │      • Dev · durable identity
+~                                                                           │  ▾ SUMMARY  (2)
+~                                                                           │    ⟢ summary: summary<def checkout() -> str
+~                                                                           │  :>
+~                                                                           │    ⟢ embed: vec[dim=54]
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+~                                                                           │~
+store.py                                                  6,1            All TyO3://panel [-]          1,1            All
+:qa!
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-vmTId1/shop
+tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
+> $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/codeaction/init.lua store.py
+>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────

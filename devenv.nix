@@ -361,6 +361,22 @@ in
     echo "═══ Wrote editors/tyo3.nvim/demo/picker/picker.gif ═══"
   '';
 
+  # Render the CODE ACTION demo (proj 28, Phase C): the single "act on the entity"
+  # surface — `gra` opens the tiny-code-action buffer picker over the registry
+  # providers (Author / Write doc / Move / Explain / Simplify). tiny-code-action +
+  # snacks are resolved from the local vim.pack opt checkout by the codeaction
+  # init.lua (demo/pack.lua); hermetic CI provisioning is the Phase-F task.
+  scripts.demo-record-codeaction.exec = ''
+    echo "═══ Recording tyo3.nvim CODE ACTION demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/codeaction/codeaction.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/codeaction/codeaction.gif ═══"
+  '';
+
   # ── Utility scripts ──────────────────────────────────────────
 
   scripts.clean.exec = ''
