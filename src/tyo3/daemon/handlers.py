@@ -411,6 +411,122 @@ class Handlers:
 
         return self._actor.submit(work)
 
+    def symbols(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Project-wide symbol list (the ``workspace/symbol`` surface).
+
+        Walks the head graph for entity nodes (same filter as ``decorate``:
+        ``is_entity_durable_id``, not external, not a module), returning a flat
+        ``[{durable_id, name, qualified_name, kind, path, range}]``. Optional
+        ``query`` is a case-insensitive substring filter on ``qualified_name``;
+        the result is capped (a hot prefix shouldn't flood the picker). One
+        snapshot for the whole walk (golden rule #2)."""
+        query = params.get("query")
+        if query is not None and not isinstance(query, str):
+            raise ProtocolError("'query' must be a string", code=INVALID_PARAMS)
+        needle = query.lower() if query else None
+
+        def work(s: TyO3Session) -> dict[str, Any]:
+            out: list[dict[str, Any]] = []
+            with s.snapshot() as snap:
+                g = snap.graph()
+                for idx in g._graph.node_indices():
+                    node = g._graph[idx]
+                    if node.external or not is_entity_durable_id(node.durable_id):
+                        continue
+                    if needle is not None and needle not in node.qualified_name.lower():
+                        continue
+                    out.append(
+                        {
+                            "durable_id": node.durable_id,
+                            "name": node.name,
+                            "qualified_name": node.qualified_name,
+                            "kind": node.kind.value,
+                            "path": node.file,
+                            "range": _range_dict(node.range),
+                        }
+                    )
+                    if len(out) >= _MAX_SYMBOLS:
+                        break
+            out.sort(key=lambda d: (d["path"], d["range"]["start"]["line"]))
+            return {"symbols": out}
+
+        return self._actor.submit(work)
+
+    def call_hierarchy(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Call hierarchy for the entity at *(path, line, col)* — the whole thing
+        at once, like ``type_hierarchy``.
+
+        Returns ``{item, incoming, outgoing}`` where *incoming* is the callers
+        (references to the entity, grouped by their enclosing entity, with the
+        call-site ranges) and *outgoing* is the entity's own dependency entities.
+        Each item is ``{name, kind, path, full_range, selection_range}`` and
+        round-trips its ``selection_range`` back to a position, so the bridge's
+        ``incomingCalls``/``outgoingCalls`` follow-ups re-query without server
+        state (mirrors ``type_hierarchy_relatives``). ``null`` if nothing
+        resolves at the position.
+
+        Note (documented binding rule): ``id_for`` at a call site inside a method
+        resolves to that method's *class*, so a method-internal caller is grouped
+        under its class — caller granularity is entity-level, not statement-level.
+        """
+        path = _require(params, "path", str)
+        line = _require(params, "line", int)
+        col = _require(params, "col", int)
+        rel = self._relpath(path)
+
+        def work(s: TyO3Session) -> dict[str, Any] | None:
+            did = s.id_for(rel, line, col)
+            if did is None:
+                return None
+            with s.snapshot() as snap:
+                g = snap.graph()
+                node = _node_by_id(g, did)
+                if node is None:
+                    return None
+                # Resolve callers off the entity's *name* token, so the query is
+                # stable wherever the cursor sat inside the entity.
+                sel = node.selection_range or node.range
+                incoming: dict[str, dict[str, Any]] = {}
+                for r in s.find_references(rel, sel.start.line, sel.start.column, include_declaration=False):
+                    start = r.range.start
+                    caller_id = s.id_for(self._relpath(str(r.path)), start.line, start.column)
+                    if caller_id is None or caller_id == did:
+                        continue
+                    caller = _node_by_id(g, caller_id)
+                    if caller is None or caller.external or not is_entity_durable_id(caller_id):
+                        continue
+                    entry = incoming.setdefault(
+                        caller_id, {"from": self._call_item(caller), "ranges": []}
+                    )
+                    entry["ranges"].append(_range_dict(r.range))
+                # Outgoing: this entity's direct dependency entities (its own
+                # calls/uses), resolved to in-project entity nodes.
+                outgoing: list[dict[str, Any]] = []
+                for dep_id in sorted(g.dependencies(did)):
+                    dep = _node_by_id(g, dep_id)
+                    if dep is None or dep.external or not is_entity_durable_id(dep_id):
+                        continue
+                    outgoing.append({"to": self._call_item(dep), "ranges": []})
+                return {
+                    "item": self._call_item(node),
+                    "incoming": list(incoming.values()),
+                    "outgoing": outgoing,
+                }
+
+        return self._actor.submit(work)
+
+    @staticmethod
+    def _call_item(node: Any) -> dict[str, Any]:
+        """A call-hierarchy item from a graph node — the same shape the type
+        hierarchy emits (so the bridge maps it identically)."""
+        return {
+            "name": node.name,
+            "kind": node.kind.value,
+            "path": node.file,
+            "full_range": _range_dict(node.range),
+            "selection_range": _range_dict(node.selection_range or node.range),
+        }
+
     def can_rename(self, params: dict[str, Any]) -> dict[str, Any]:
         """Is the symbol at *(path, line, col)* renameable? Returns the editable range."""
         path = _require(params, "path", str)
@@ -879,6 +995,10 @@ class Handlers:
 _MAX_REFERENCES = 12
 _MAX_REFERENCE_BODIES = 3
 
+# Server-side cap on a ``workspace/symbol`` walk — a short/empty query shouldn't
+# flood the picker with the whole graph.
+_MAX_SYMBOLS = 500
+
 _EXPLAIN_SYSTEM = {
     "explain": (
         "You are a code-comprehension assistant for a Python codebase. Explain "
@@ -1087,6 +1207,8 @@ _METHODS = {
     "document_highlights": Handlers.document_highlights,
     "hover": Handlers.hover,
     "type_hierarchy": Handlers.type_hierarchy,
+    "symbols": Handlers.symbols,
+    "call_hierarchy": Handlers.call_hierarchy,
     "can_rename": Handlers.can_rename,
     "rename": Handlers.rename,
     "diagnostics_at": Handlers.diagnostics_at,

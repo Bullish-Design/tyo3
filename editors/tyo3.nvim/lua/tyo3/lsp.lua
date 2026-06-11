@@ -37,6 +37,16 @@ local CAPS = {
   -- supports_method() lets the requests through.
   ["typeHierarchy/supertypes"] = true,
   ["typeHierarchy/subtypes"] = true,
+  -- Symbol surfaces (proj 28 Phase A): breadcrumbs/outline (documentSymbol),
+  -- project-wide pickers (workspace/symbol), caller/callee navigation
+  -- (callHierarchy). Call hierarchy needs no analogous literal capability keys:
+  -- nvim 0.12 gates its follow-ups (callHierarchy/incomingCalls etc.) on the
+  -- ordinary `callHierarchyProvider` (protocol._request_name_to_server_capability),
+  -- unlike type hierarchy, whose subtypes/supertypes map to *self-named*
+  -- capabilities and so required the literal keys above.
+  documentSymbolProvider = true,
+  workspaceSymbolProvider = true,
+  callHierarchyProvider = true,
   renameProvider = { prepareProvider = true },
   -- Code actions are the "act on what's under the cursor" trigger (proj 26).
   -- We return client-side commands (tyo3.explain / tyo3.ack), resolved through
@@ -94,6 +104,28 @@ end
 
 -- ReferenceKind → LSP DocumentHighlightKind.
 local DH_KIND = { read = 2, write = 3, other = 1 }
+
+-- daemon SymbolKind (the StrEnum *value*, e.g. "class_"/"function") → LSP
+-- SymbolKind enum. Drives documentSymbol, workspace/symbol, and the
+-- call-hierarchy item kind. Unknown kinds fall back to Variable (13).
+local SYMBOL_KIND = {
+  module = 2, -- Module
+  class_ = 5, -- Class
+  ["function"] = 12, -- Function ("function" is a Lua keyword → bracket key)
+  method = 6, -- Method
+  constructor = 9, -- Constructor
+  variable = 13, -- Variable
+  constant = 14, -- Constant
+  field = 8, -- Field
+  parameter = 26, -- (no Parameter kind in LSP) → TypeParameter
+  property = 7, -- Property
+  type_parameter = 26, -- TypeParameter
+  import_ = 3, -- Namespace
+  unknown = 13, -- Variable
+}
+local function symbol_kind(daemon_kind)
+  return SYMBOL_KIND[daemon_kind] or 13
+end
 
 -- DiagnosticSeverity (StrEnum string) → LSP DiagnosticSeverity.
 local DIAG_SEVERITY = { fatal = 1, error = 1, warning = 2, information = 3, hint = 4 }
@@ -512,6 +544,156 @@ end
 
 handlers["typeHierarchy/supertypes"] = type_hierarchy_relatives("supertypes")
 handlers["typeHierarchy/subtypes"] = type_hierarchy_relatives("subtypes")
+
+-- ── Document symbols (breadcrumbs / outline) ─────────────────────────────────
+--
+-- No daemon verb: `decorate` already returns every entity in the file with its
+-- dotted `qualified_name`, so we build the hierarchical DocumentSymbol[] in Lua
+-- by nesting each entity under its dotted parent (e.g. `Item.price` under
+-- `Item`). selectionRange = range (decorate carries only the full range; the
+-- spec requires selectionRange ⊆ range, which an equal range satisfies).
+
+-- Sort a DocumentSymbol list (and its children, recursively) by start line/char.
+local function sort_doc_symbols(list)
+  table.sort(list, function(a, b)
+    local as, bs = a.range.start, b.range.start
+    if as.line ~= bs.line then
+      return as.line < bs.line
+    end
+    return as.character < bs.character
+  end)
+  for _, node in ipairs(list) do
+    if node.children and #node.children > 0 then
+      sort_doc_symbols(node.children)
+    end
+  end
+end
+
+handlers["textDocument/documentSymbol"] = function(root, params, reply)
+  daemon_request(root, "decorate", { path = uri_to_path(params.textDocument.uri) }, function(err, items)
+    if err then
+      reply(lsp_error(err))
+      return
+    end
+    -- First pass: a node per entity, keyed by qualified_name.
+    local by_qname = {}
+    for _, e in ipairs(items or {}) do
+      local rng = daemon_range_to_lsp(e.range)
+      by_qname[e.qualified_name] = {
+        name = e.name,
+        kind = symbol_kind(e.kind),
+        range = rng,
+        selectionRange = rng,
+        children = {},
+      }
+    end
+    -- Second pass: nest each under its dotted parent, else it is a root.
+    local roots = {}
+    for _, e in ipairs(items or {}) do
+      local node = by_qname[e.qualified_name]
+      local parent_qname = e.qualified_name:match("^(.*)%.[^.]+$")
+      local parent = parent_qname and by_qname[parent_qname]
+      if parent then
+        table.insert(parent.children, node)
+      else
+        table.insert(roots, node)
+      end
+    end
+    sort_doc_symbols(roots)
+    reply(nil, roots)
+  end)
+end
+
+-- ── Workspace symbols (project-wide pickers) ─────────────────────────────────
+
+handlers["workspace/symbol"] = function(root, params, reply)
+  daemon_request(root, "symbols", { query = params.query }, function(err, res)
+    if err then
+      reply(lsp_error(err))
+      return
+    end
+    local out = {}
+    for _, sym in ipairs((res and res.symbols) or {}) do
+      table.insert(out, {
+        name = sym.qualified_name or sym.name,
+        kind = symbol_kind(sym.kind),
+        location = { uri = path_to_uri(root, sym.path), range = daemon_range_to_lsp(sym.range) },
+      })
+    end
+    reply(nil, out)
+  end)
+end
+
+-- ── Call hierarchy (caller/callee navigation) ────────────────────────────────
+--
+-- Mirrors type hierarchy: the daemon `call_hierarchy` verb returns the *whole*
+-- thing ({item, incoming, outgoing}); LSP splits it across prepare /
+-- incomingCalls / outgoingCalls. The item round-trips its selectionRange back to
+-- a daemon position, so the follow-ups re-query statelessly.
+
+-- daemon call item → LSP CallHierarchyItem (Function kind by default).
+local function lsp_call_item(root, it)
+  return {
+    name = it.name,
+    kind = symbol_kind(it.kind),
+    uri = path_to_uri(root, it.path),
+    range = daemon_range_to_lsp(it.full_range),
+    selectionRange = daemon_range_to_lsp(it.selection_range),
+  }
+end
+
+handlers["textDocument/prepareCallHierarchy"] = function(root, params, reply)
+  local p = lsp_pos_to_daemon(params.position)
+  daemon_request(root, "call_hierarchy", {
+    path = uri_to_path(params.textDocument.uri),
+    line = p.line,
+    col = p.col,
+  }, function(err, res)
+    if err then
+      reply(lsp_error(err))
+    elseif not res or not res.item then
+      reply(nil, nil)
+    else
+      reply(nil, { lsp_call_item(root, res.item) })
+    end
+  end)
+end
+
+-- incoming/outgoing share a re-query off the item's selectionRange. `field` is
+-- the daemon list ("incoming"/"outgoing"); `item_key` is the LSP relation field
+-- ("from"/"to"). Both relations carry `fromRanges` (the call sites).
+local function call_hierarchy_relatives(field, item_key)
+  return function(root, params, reply)
+    local item = params.item
+    if not item or not item.selectionRange then
+      reply(nil, {})
+      return
+    end
+    local p = lsp_pos_to_daemon(item.selectionRange.start)
+    daemon_request(root, "call_hierarchy", {
+      path = uri_to_path(item.uri),
+      line = p.line,
+      col = p.col,
+    }, function(err, res)
+      if err then
+        reply(lsp_error(err))
+        return
+      end
+      local out = {}
+      for _, rel in ipairs((res and res[field]) or {}) do
+        local from_ranges = {}
+        for _, r in ipairs(rel.ranges or {}) do
+          table.insert(from_ranges, daemon_range_to_lsp(r))
+        end
+        table.insert(out, { [item_key] = lsp_call_item(root, rel[item_key]), fromRanges = from_ranges })
+      end
+      reply(nil, out)
+    end)
+  end
+end
+
+handlers["callHierarchy/incomingCalls"] = call_hierarchy_relatives("incoming", "from")
+handlers["callHierarchy/outgoingCalls"] = call_hierarchy_relatives("outgoing", "to")
 
 handlers["textDocument/documentHighlight"] = function(root, params, reply)
   local p = lsp_pos_to_daemon(params.position)
