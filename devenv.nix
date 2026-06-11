@@ -377,6 +377,22 @@ in
     echo "═══ Wrote editors/tyo3.nvim/demo/codeaction/codeaction.gif ═══"
   '';
 
+  # Render the AST NAV demo (proj 28, Phase D): treewalker motion + textobject
+  # selection — the dock tracks the syntax tree, a textobject feeds the act path.
+  # nvim-treesitter(+textobjects)/treewalker/snacks are resolved from the local
+  # vim.pack opt checkout, and the python parser from the nix-store grammars, by
+  # the astnav init.lua (demo/pack.lua). Hermetic CI provisioning is Phase F.
+  scripts.demo-record-astnav.exec = ''
+    echo "═══ Recording tyo3.nvim AST NAV demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/astnav/astnav.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/astnav/astnav.gif ═══"
+  '';
+
   # ── Utility scripts ──────────────────────────────────────────
 
   scripts.clean.exec = ''

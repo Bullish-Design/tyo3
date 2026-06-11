@@ -57,4 +57,20 @@ function M.add(names)
   return missing
 end
 
+--- Prepend a treesitter *grammar* dir carrying the python parser to the rtp, and
+--- return it (or nil). AST nav (treewalker / textobjects) needs a live python
+--- parser, which a pristine `--clean` nvim lacks (it bundles c/lua/vim/markdown,
+--- not python). nixpkgs ships the compiled parsers under
+--- `/nix/store/*nvim-treesitter-grammars*/parser/python.so` — the same dir the
+--- headless verify harness puts on the rtp. (Hermetic CI provisioning is Phase F.)
+function M.grammars()
+  for _, p in ipairs(vim.fn.glob("/nix/store/*nvim-treesitter-grammars*", true, true)) do
+    if vim.fn.filereadable(p .. "/parser/python.so") == 1 then
+      vim.opt.runtimepath:prepend(p)
+      return p
+    end
+  end
+  return nil
+end
+
 return M
