@@ -83,6 +83,7 @@ end
 local function new_client(root, st)
   return rpc.new({
     socket = st.socket,
+    timeout_ms = config.get().request_timeout_ms,
     on_notification = function(method, params)
       require("tyo3").handle_notification(root, method, params)
     end,
