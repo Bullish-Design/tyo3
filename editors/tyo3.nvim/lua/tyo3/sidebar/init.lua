@@ -150,7 +150,10 @@ end
 --- Focus-accordion (WinEnter): when the user enters one of our tyo3_* views,
 --- expand it and collapse the other tyo3_* views.
 local function focus_accordion(win)
-  if not M._edgy or not M.bufs then
+  if not M._edgy or not M.bufs or not win or type(win) ~= "number" then
+    return
+  end
+  if not pcall(vim.api.nvim_win_is_valid, win) then
     return
   end
   local buf = vim.api.nvim_win_get_buf(win)
@@ -230,17 +233,20 @@ function M.setup(edgy)
     end
   else
     -- Not yet set up: merge into opts so edgy.setup builds them.
+    -- Write back to edgy_config.opts so deps.setup_edgy can pass them to edgy.setup.
+    -- edgy.config reads views directly from opts[pos] as an array, NOT from a
+    -- `views` sub-key.
     local ok, opts = pcall(function()
       return edgy_config.opts
     end)
-    if not ok then
+    if not ok or opts == nil then
       opts = {}
     end
     opts.right = opts.right or {}
-    opts.right.views = opts.right.views or {}
     for _, spec in ipairs(ours) do
-      table.insert(opts.right.views, spec)
+      table.insert(opts.right, spec)
     end
+    edgy_config.opts = opts
   end
 
   -- Install the focus-accordion WinEnter autocmd.
