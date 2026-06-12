@@ -74,14 +74,13 @@ Escape
 Sleep 600ms
 Type ":w" Enter
 Sleep 4s
-# Walk the durable needs_review WARN + the type error in one `]d` stream.
-Type "gg"
-Sleep 300ms
-Type "]d"
-Sleep 1800ms
-Type ":lua vim.diagnostic.open_float()" Enter
-Sleep 2200ms
+# The durable needs_review WARN + the type error both surface in the snacks
+# diagnostics picker — one cohesive, bordered list across namespaces (no raw
+# `:lua` float; the picker rhymes with the `gra` action picker below).
+Type ":TyO3Diagnostics" Enter
+Sleep 3400ms
 Escape
+Sleep 400ms
 # `gra` opens the action picker on show_label; Acknowledge re-authors the note
 # (the engine's acknowledge) so review_state goes clean and the statusline WARN
 # clears (E:1 W:1 → E:1). The acknowledge quickfix is the preferred action, so it

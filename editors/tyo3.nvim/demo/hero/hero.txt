@@ -382,7 +382,7 @@
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …633Q4RF5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …GSY87QMX
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -402,9 +402,9 @@
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -420,7 +420,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …633Q4RF5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …GSY87QMX
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -440,9 +440,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -458,7 +458,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …ZJWT8P6W
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …66DNQETA
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -478,9 +478,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -496,7 +496,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …ZJWT8P6W
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …66DNQETA
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -516,47 +516,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1 rev 5 · rescan
-~                                                                                         │~
-store.py                                                                                               10,1           All
-/def checkout                                                                                          [1/1]
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1   checkout
-    3 from money import usd                                                               │  2   ────────────────────────
-    4                                                                                     │    ────────────────
-    5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …633Q4RF5
-    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
-    8                                                                                     ├──────────────────────────────
-    9                                                                                     │  NOTES
-   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
-   11     return Item().label()                                                           │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1 📄 (no doc)
-~                                                                                         │  2 reference:
-~                                                                                         │  3   • User · workflow
-~                                                                                         │  4   • User · command referen
-~                                                                                         │    ce
-~                                                                                         │  5   • Dev · architecture
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
-~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -572,7 +534,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …633Q4RF5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …GSY87QMX
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -592,9 +554,47 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         ├──────────────────────────────
+~                                                                                         │  AFFECTED
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │~
+store.py                                                                                               6,1            All
+/def checkout                                                                                          [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                               │  IDENTITY
+    2 from catalog import Item                                                            │  1   checkout
+    3 from money import usd                                                               │  2   ────────────────────────
+    4                                                                                     │    ────────────────
+    5                                                                                     │  3   kind        function
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …GSY87QMX
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
+    8                                                                                     ├──────────────────────────────
+    9                                                                                     │  NOTES
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
+   11     return Item().label()                                                           │~
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         ├──────────────────────────────
+~                                                                                         │  DOCS
+~                                                                                         │  1 📄 (no doc)
+~                                                                                         │  2 reference:
+~                                                                                         │  3   • User · workflow
+~                                                                                         │  4   • User · command referen
+~                                                                                         │    ce
+~                                                                                         │  5   • Dev · architecture
+~                                                                                         ├──────────────────────────────
+~                                                                                         │  SUMMARY
+~                                                                                         │  1 ⟢ summary: summary<def che
+~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -610,7 +610,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …633Q4RF5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …GSY87QMX
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -630,9 +630,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -648,7 +648,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …633Q4RF5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …GSY87QMX
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -668,9 +668,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -686,7 +686,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …633Q4RF5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …GSY87QMX
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -706,9 +706,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -724,7 +724,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …633Q4RF5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …GSY87QMX
     7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
@@ -744,9 +744,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -762,7 +762,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …633Q4RF5
+        🏷  load-bearing checkout path                                                     │  4   durable id  …GSY87QMX
     6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
@@ -782,9 +782,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -800,7 +800,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …633Q4RF5
+        🏷  load-bearing checkout path                                                     │  4   durable id  …GSY87QMX
     6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
@@ -820,9 +820,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -838,7 +838,7 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …633Q4RF5
+        🏷  load-bearing checkout path                                                     │  4   durable id  …GSY87QMX
     6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
@@ -858,9 +858,9 @@ store.py                                                                        
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=54]
-~                                                                                         │  2 ⟢ summary: summary<def che
+~                                                                                         │  1 ⟢ summary: summary<def che
 ~                                                                                         │    ckout() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=54]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -982,7 +982,7 @@ store.py [+]                                                                    
 ~                                                                                         │  AFFECTED
 ~                                                                                         │  1 rev 5 · rescan
 ~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
-/tmp/claude-1000/tyo3-demo-wULrGp/shop/checkout.py [+]                                                 1,1            All
+/tmp/claude-1000/tyo3-demo-OydzZP/shop/checkout.py [+]                                                 1,1            All
 :e checkout.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
@@ -1020,7 +1020,7 @@ store.py [+]                                                                    
 ~                                                                                         │  AFFECTED
 ~                                                                                         │  1
 ~                                                                                         │~
-/tmp/claude-1000/tyo3-demo-wULrGp/shop/checkout.py [+]                                                 1,1            All
+/tmp/claude-1000/tyo3-demo-OydzZP/shop/checkout.py [+]                                                 1,1            All
 :e checkout.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
@@ -1058,7 +1058,7 @@ store.py [+]                                                                    
 ~                                                                                         │  AFFECTED
 ~                                                                                         │  1
 ~                                                                                         │~
-/tmp/claude-1000/tyo3-demo-wULrGp/shop/checkout.py [+]                                                 1,1            All
+/tmp/claude-1000/tyo3-demo-OydzZP/shop/checkout.py [+]                                                 1,1            All
 :e store.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
@@ -1218,7 +1218,7 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      ├──────────────────────────────
     9     return Item().label()                                                           │  NOTES
@@ -1238,9 +1238,9 @@ store.py [+]                                                                    
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1256,7 +1256,7 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      ├──────────────────────────────
     9     return Item().label()                                                           │  NOTES
@@ -1276,9 +1276,9 @@ store.py [+]                                                                    
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1294,7 +1294,7 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      ├──────────────────────────────
     9     return Item().label()                                                           │  NOTES
@@ -1314,9 +1314,9 @@ store.py [+]                                                                    
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1332,7 +1332,7 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  NOTES
@@ -1352,9 +1352,9 @@ store.py [+]                                                                    
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1370,7 +1370,7 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  NOTES
@@ -1390,9 +1390,9 @@ store.py [+]                                                                    
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1408,7 +1408,7 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  NOTES
@@ -1428,9 +1428,9 @@ store.py [+]                                                                    
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1446,7 +1446,7 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  NOTES
@@ -1466,9 +1466,9 @@ store.py [+]                                                                    
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1484,7 +1484,7 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  NOTES
@@ -1504,9 +1504,9 @@ store.py [+]                                                                    
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
+~                                                                                         │  1 ⟢ summary: summary<def sho
 ~                                                                                         │    w_label() -> str:>
+~                                                                                         │  2 ⟢ embed: vec[dim=51]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1522,12 +1522,12 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
+    8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
     9     return Item().price()                                                           │  1 🏷  keep this label stable
-~                                                                                         │~
+~                                                                                         │    ⚠
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1542,9 +1542,9 @@ W   8 def show_label() -> str:   ⟢ summary<>                                  
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
-~                                                                                         │    w_label() -> str:>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
+~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1552,7 +1552,7 @@ W   8 def show_label() -> str:   ⟢ summary<>                                  
 ~                                                                                         │  AFFECTED
 ~                                                                                         │  1 rev 5 · rescan
 ~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
-store.py [+]                                                                                       W:1 9,23           All
+store.py [+]                                                                                           9,23           All
 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
@@ -1560,12 +1560,12 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
+    8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
     9     return Item().price()                                                           │  1 🏷  keep this label stable
-~                                                                                         │~
+~                                                                                         │    ⚠
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1580,9 +1580,9 @@ W   8 def show_label() -> str:   ⟢ summary<>                                  
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
-~                                                                                         │    w_label() -> str:>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
+~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1590,7 +1590,7 @@ W   8 def show_label() -> str:   ⟢ summary<>                                  
 ~                                                                                         │  AFFECTED
 ~                                                                                         │  1 rev 5 · rescan
 ~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
-store.py [+]                                                                                       W:1 9,23           All
+store.py [+]                                                                                           9,23           All
 :w
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
@@ -1598,12 +1598,12 @@ store.py [+]                                                                    
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
+    8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
     9     return Item().price()                                                           │  1 🏷  keep this label stable
-~                                                                                         │~
+~                                                                                         │    ⚠
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1618,9 +1618,9 @@ W   8 def show_label() -> str:   ⟢ summary<>                                  
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
-~                                                                                         │    w_label() -> str:>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
+~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1628,7 +1628,7 @@ W   8 def show_label() -> str:   ⟢ summary<>                                  
 ~                                                                                         │  AFFECTED
 ~                                                                                         │  1 rev 5 · rescan
 ~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
-store.py                                                                                           W:1 9,23           All
+store.py                                                                                               9,23           All
 "store.py" 9L, 124B written
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
@@ -1636,12 +1636,12 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
 E   9     return Item().price()                                                           │  1 🏷  keep this label stable
-~                                                                                         │~
+~                                                                                         │    ⚠
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1656,9 +1656,9 @@ E   9     return Item().price()                                                 
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
-~                                                                                         │    w_label() -> str:>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
+~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1674,12 +1674,12 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
 E   9     return Item().price()                                                           │  1 🏷  keep this label stable
-~                                                                                         │~
+~                                                                                         │    ⚠
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1694,9 +1694,9 @@ E   9     return Item().price()                                                 
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<def sho
-~                                                                                         │    w_label() -> str:>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
+~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1704,91 +1704,15 @@ E   9     return Item().price()                                                 
 ~                                                                                         │  AFFECTED
 ~                                                                                         │  1 rev 5 · rescan
 ~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
-store.py                                                                                       E:1 W:1 1,21           All
-"store.py" 9L, 124B written
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1
-    3 from money import usd                                                               │~
-    4                                                                                     │~
-    5                                                                                     │~
-    6                                                                                     │~
-    7                                                                                     │~
-        🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9     return Item().price()                                                           │  1
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 1,21           All
-"store.py" 9L, 124B written
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1
-    3 from money import usd                                                               │~
-    4                                                                                     │~
-    5                                                                                     │~
-    6                                                                                     │~
-    7                                                                                     │~
-        🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9     return Item().price()                                                           │  1
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-"store.py" 9L, 124B written
+store.py                                                                                       E:1 W:1 9,23           All
+:TyO3Diagnostics
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
     2 from catalog import Item                                                            │  1   show_label
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
@@ -1808,25 +1732,215 @@ E   9     return Item().price()                                                 
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-"store.py" 9L, 124B written
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+store.py                                                                                       E:1 W:1 9,23           All
+:TyO3Diagnostics
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                               │  IDENTITY
+    2 from catalog import Item                                                            │  1   show_label
+    3 from money import usd                                                               │  2   ────────────────────────
+    4                                                                                     │    ────────────────
+╭─────────────────── Diagnostics Buffer ───────────────────╮╭──────────────────────── store.py ────────────────────────╮
+│                                                     2/2 ││    1 from book import Book                               │
+│──────────────────────────────────────────────────────────││    2 from catalog import Item                            │@
+│   Return type does not match returned value tyo3 (invali││    3 from money import usd                               │─
+│   needs review (intent changed) tyo3 󰈔 store.py:8       ││    4                                                     │
+│                                                          ││    5                                                     │
+│                                                          ││    6                                                     │
+│                                                          ││    7                                                     │
+│                                                          ││        🏷  keep this label stable                         │
+│                                                          ││    8 def show_label() -> str:   ⟢ summary<>              │
+│                                                          ││    9     return Item().price()                           │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │n
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+╰──────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+[Prompt]                                                                                               1,1            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                               │  IDENTITY
+    2 from catalog import Item                                                            │  1   show_label
+    3 from money import usd                                                               │  2   ────────────────────────
+    4                                                                                     │    ────────────────
+╭─────────────────── Diagnostics Buffer ───────────────────╮╭──────────────────────── store.py ────────────────────────╮
+│                                                     2/2 ││    1 from book import Book                               │
+│──────────────────────────────────────────────────────────││    2 from catalog import Item                            │@
+│   Return type does not match returned value tyo3 (invali││    3 from money import usd                               │─
+│   needs review (intent changed) tyo3 󰈔 store.py:8       ││    4                                                     │
+│                                                          ││    5                                                     │
+│                                                          ││    6                                                     │
+│                                                          ││    7                                                     │
+│                                                          ││        🏷  keep this label stable                         │
+│                                                          ││    8 def show_label() -> str:   ⟢ summary<>              │
+│                                                          ││    9     return Item().price()                           │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │n
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+╰──────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+[Prompt]                                                                                               1,1            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                               │  IDENTITY
+    2 from catalog import Item                                                            │  1   show_label
+    3 from money import usd                                                               │  2   ────────────────────────
+    4                                                                                     │    ────────────────
+╭─────────────────── Diagnostics Buffer ───────────────────╮╭──────────────────────── store.py ────────────────────────╮
+│                                                     2/2 ││    1 from book import Book                               │
+│──────────────────────────────────────────────────────────││    2 from catalog import Item                            │@
+│   Return type does not match returned value tyo3 (invali││    3 from money import usd                               │─
+│   needs review (intent changed) tyo3 󰈔 store.py:8       ││    4                                                     │
+│                                                          ││    5                                                     │
+│                                                          ││    6                                                     │
+│                                                          ││    7                                                     │
+│                                                          ││        🏷  keep this label stable                         │
+│                                                          ││    8 def show_label() -> str:   ⟢ summary<>              │
+│                                                          ││    9     return Item().price()                           │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │n
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+╰──────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+[Prompt]                                                                                               1,0-1          All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                               │  IDENTITY
+    2 from catalog import Item                                                            │  1   show_label
+    3 from money import usd                                                               │  2   ────────────────────────
+    4                                                                                     │    ────────────────
+╭─────────────────── Diagnostics Buffer ───────────────────╮╭──────────────────────── store.py ────────────────────────╮
+│                                                     2/2 ││    1 from book import Book                               │
+│──────────────────────────────────────────────────────────││    2 from catalog import Item                            │@
+│   Return type does not match returned value tyo3 (invali││    3 from money import usd                               │─
+│   needs review (intent changed) tyo3 󰈔 store.py:8       ││    4                                                     │
+│                                                          ││    5                                                     │
+│                                                          ││    6                                                     │
+│                                                          ││    7                                                     │
+│                                                          ││        🏷  keep this label stable                         │
+│                                                          ││    8 def show_label() -> str:   ⟢ summary<>              │
+│                                                          ││    9     return Item().price()                           │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │n
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+╰──────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+[Scratch] [-]                                                                                          1,11           Top
+E21: Cannot make changes, 'modifiable' is off
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
     2 from catalog import Item                                                            │  1   show_label
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
+    7                                                                                     │  5   location    /tmp/clau@@@
+        🏷  keep this label stable                                                         ├──────────────────────────────
+    8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
+    9     return Item().price()                                                           │  1 🏷  keep this label stable
+~                                                                                         │    ⚠
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         ├──────────────────────────────
+~                                                                                         │  DOCS
+~                                                                                         │  1 📄 (no doc)
+~                                                                                         │  2 reference:
+~                                                                                         │  3   • User · workflow
+~                                                                                         │  4   • User · command referen
+~                                                                                         │    ce
+~                                                                                         │  5   • Dev · architecture
+~                                                                                         ├──────────────────────────────
+~                                                                                         │  SUMMARY
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         │~
+~                                                                                         ├──────────────────────────────
+~                                                                                         │  AFFECTED
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+store.py                                                                                       E:1 W:1 9,12           All
+E21: Cannot make changes, 'modifiable' is off
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                                               │  IDENTITY
+    2 from catalog import Item                                                            │  1   show_label
+    3 from money import usd                                                               │  2   ────────────────────────
+    4                                                                                     │    ────────────────
+    5                                                                                     │  3   kind        function
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
@@ -1846,30 +1960,30 @@ E   9     return Item().price()                                                 
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-:lua vim.diagnostic.open_float()
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+store.py                                                                                       E:1 W:1 9,12           All
+E21: Cannot make changes, 'modifiable' is off
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
     2 from catalog import Item                                                            │  1   show_label
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9 Diagnostics:                                                                        │  1 🏷  keep this label stable
-~     1. needs review (intent changed)                                                    │    ⚠
+E   9     return Item().price()                                                           │  1 🏷  keep this label stable
+~                                                                                         │    ⚠
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
@@ -1884,291 +1998,63 @@ E   9 Diagnostics:                                                              
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-:lua vim.diagnostic.open_float()
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+store.py                                                                                       E:1 W:1 9,12           All
+E21: Cannot make changes, 'modifiable' is off
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
     2 from catalog import Item                                                            │  1   show_label
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9 Diagnostics:                                                                        │  1 🏷  keep this label stable
-~     1. needs review (intent changed)                                                    │    ⚠
+E   9     return Item().price()                                                           │  1 🏷  keep this label stable
+~                                                                                         │    ⚠
 ~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1 📄 (no doc)
-~                                                                                         │  2 reference:
-~                                                                                         │  3   • User · workflow
-~                                                                                         │  4   • User · command referen
-~                                                                                         │    ce
-~                                                                                         │  5   • Dev · architecture
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-:lua vim.diagnostic.open_float()
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1   show_label
-    3 from money import usd                                                               │  2   ────────────────────────
-    4                                                                                     │    ────────────────
-    5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
-    7                                                                                     │  5   location    /tmp/clau@@@
-        🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9 Diagnostics:                                                                        │  1 🏷  keep this label stable
-~     1. needs review (intent changed)                                                    │    ⚠
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1 📄 (no doc)
-~                                                                                         │  2 reference:
-~                                                                                         │  3   • User · workflow
-~                                                                                         │  4   • User · command referen
-~                                                                                         │    ce
-~                                                                                         │  5   • Dev · architecture
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-:lua vim.diagnostic.open_float()
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1   show_label
-    3 from money import usd                                                               │  2   ────────────────────────
-    4                                                                                     │    ────────────────
-    5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
-    7                                                                                     │  5   location    /tmp/clau@@@
-        🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9 Diagnostics:                                                                        │  1 🏷  keep this label stable
-~     1. needs review (intent changed)                                                    │    ⚠
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1 📄 (no doc)
-~                                                                                         │  2 reference:
-~                                                                                         │  3   • User · workflow
-~                                                                                         │  4   • User · command referen
-~                                                                                         │    ce
-~                                                                                         │  5   • Dev · architecture
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-/def show_label
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1   show_label
-    3 from money import usd                                                               │  2   ────────────────────────
-    4                                                                                     │    ────────────────
-    5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
-    7                                                                                     │  5   location    /tmp/clau@@@
-        🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9 Diagnostics:                                                                        │  1 🏷  keep this label stable
-~     1. needs review (intent changed)                                                    │    ⚠
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1 📄 (no doc)
-~                                                                                         │  2 reference:
-~                                                                                         │  3   • User · workflow
-~                                                                                         │  4   • User · command referen
-~                                                                                         │    ce
-~                                                                                         │  5   • Dev · architecture
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-/def show_label                                                                                      W [1/1]
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1   show_label
-    3 from money import usd                                                               │  2   ────────────────────────
-    4                                                                                     │    ────────────────
-    5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
-    7                                                                                     │  5   location    /tmp/clau@@@
-        🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9 Diagnostics:                                                                        │  1 🏷  keep this label stable
-~     1. needs review (intent changed)                                                    │    ⚠
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1 📄 (no doc)
-~                                                                                         │  2 reference:
-~                                                                                         │  3   • User · workflow
-~                                                                                         │  4   • User · command referen
-~                                                                                         │    ce
-~                                                                                         │  5   • Dev · architecture
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-/def show_label                                                                                      W [1/1]
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1   show_label
-    3 from money import usd                                                               │  2   ────────────────────────
-    4                                                                                     │    ────────────────
-    5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
-    7                                                                                     │  5   location    /tmp/clau@@@
-        🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9 Diagnostics:                                                                        │  1 🏷  keep this label stable
-~     1. needs review (intent changed)                                                    │    ⚠
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  DOCS
-~                                                                                         │  1 📄 (no doc)
-~                                                                                         │  2 reference:
-~                                                                                         │  3   • User · workflow
-~                                                                                         │  4   • User · command referen
-~                                                                                         │    ce
-~                                                                                         │  5   • Dev · architecture
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         │~
-~                                                                                         ├──────────────────────────────
-~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-/def show_label                                                                                      W [1/1]
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                                               │  IDENTITY
-    2 from catalog import Item                                                            │  1   show_label
-    3 from money import usd                                                               │  2   ────────────────────────
-    4                                                                                     │    ────────────────
-    5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
-    7                                                                                     │  5   location    /tmp/clau@@@
-        🏷  keep this label stable                                                         ├──────────────────────────────
-W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
-E   9 Diagnostics:                                                                        │  1 🏷  keep this label stable
-~     1. needs review (intent changed)                                                    │    ⚠
 ╭──────────────────────── Code Actions ────────────────────────╮                          │~
 │##   Quick fix                                               │                          │~
 │  [t ] tyo3: Acknowledge review (re-author)                   │                          │~
-│                                                              │                          │~
-│##   Refactor                                                │                          ├──────────────────────────────
-│  [tl] tyo3: Move `show_label` to…                            │                          │  DOCS
-│  [ti] tyo3: Simplify `show_label`                            │                          │  1 📄 (no doc)
-│                                                              │                          │  2 reference:
-│##   Source                                                  │                          │  3   • User · workflow
-│  [te] tyo3: Explain `show_label`                             │                          │  4   • User · command referen
-│  [ta] tyo3: Author `show_label` (intent)                     │                          │    ce
-│  [tc] tyo3: Write/edit doc                                   │                          │  5   • Dev · architecture
 │                                                              │                          ├──────────────────────────────
-╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯                          │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
+│##   Refactor                                                │                          │  DOCS
+│  [tl] tyo3: Move `show_label` to…                            │                          │  1 📄 (no doc)
+│  [ti] tyo3: Simplify `show_label`                            │                          │  2 reference:
+│                                                              │                          │  3   • User · workflow
+│##   Source                                                  │                          │  4   • User · command referen
+│  [te] tyo3: Explain `show_label`                             │                          │    ce
+│  [ta] tyo3: Author `show_label` (intent)                     │                          │  5   • Dev · architecture
+│  [tc] tyo3: Write/edit doc                                   │                          ├──────────────────────────────
+│                                                              │                          │  SUMMARY
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯                          │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
 [Scratch] [-]                                                                                          2,1            All
-/def show_label                                                                                      W [1/1]
+E21: Cannot make changes, 'modifiable' is off
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
     2 from catalog import Item                                                            │  1   show_label
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
@@ -2188,25 +2074,25 @@ E   9     return Item().price()                                                 
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                       E:1 W:1 8,1            All
-/def show_label                                                                                      W [1/1]
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+store.py                                                                                       E:1 W:1 9,12           All
+E21: Cannot make changes, 'modifiable' is off
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                                               │  IDENTITY
     2 from catalog import Item                                                            │  1   show_label
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6                                                                                     │  4   durable id  …ZJWT8P6W
+    6                                                                                     │  4   durable id  …66DNQETA
     7                                                                                     │  5   location    /tmp/clau@@@
         🏷  keep this label stable                                                         ├──────────────────────────────
     8 def show_label() -> str:   ⟢ summary<>                                              │  NOTES
@@ -2226,16 +2112,16 @@ E   9     return Item().price()                                                 
 ~                                                                                         │  5   • Dev · architecture
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  SUMMARY
-~                                                                                         │  1 ⟢ embed: vec[dim=51]
-~                                                                                         │  2 ⟢ summary: summary<>
+~                                                                                         │  1 ⟢ summary: summary<>
+~                                                                                         │  2 ⟢ embed: vec[dim=3]
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         │~
 ~                                                                                         ├──────────────────────────────
 ~                                                                                         │  AFFECTED
-~                                                                                         │  1
-~                                                                                         │~
-store.py                                                                                           E:1 8,1            All
+~                                                                                         │  1 rev 5 · rescan
+~                                                                                         │  2 rev 13 · Δ0 · affects {@@@
+store.py                                                                                           E:1 9,12           All
 [tyo3] review acknowledged
 ────────────────────────────────────────────────────────────────────────────────

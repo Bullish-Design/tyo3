@@ -35,6 +35,10 @@ cmd("TyO3Entities", function()
   require("tyo3.picker").entities()
 end, { desc = "Pick all known entities" })
 
+cmd("TyO3Diagnostics", function()
+  require("tyo3.picker").diagnostics()
+end, { desc = "Pick this buffer's diagnostics (type errors + durable layer state)" })
+
 cmd("TyO3Authored", function()
   require("tyo3.picker").authored()
 end, { desc = "Pick authored notes" })

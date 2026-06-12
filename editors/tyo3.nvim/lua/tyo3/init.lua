@@ -231,7 +231,18 @@ end
 function M.setup(opts)
   config.setup(opts)
   -- TyO3 owns the curated dependency stack (opt out via `manage = false`).
-  require("tyo3.deps").setup(config.get())
+  local cfg = config.get()
+  require("tyo3.deps").setup(cfg)
+  -- Own the diagnostic display too (the bridge pushes type errors + the durable
+  -- layer-state namespace into `vim.diagnostic`): a rounded float-on-jump that
+  -- matches tyo3's hover/explain floats, and severity-sorted signs. Gated on
+  -- `manage` — a `manage = false` user keeps their own `vim.diagnostic.config`.
+  if cfg.manage ~= false then
+    vim.diagnostic.config({
+      severity_sort = true,
+      jump = { float = { border = "rounded", source = true } },
+    })
+  end
   if not M._setup_done then
     require("tyo3.decorate").setup_highlights()
     M._setup_done = true

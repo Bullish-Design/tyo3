@@ -120,6 +120,21 @@ function M.entities()
   run_picker("TyO3 Entities", entity_entries())
 end
 
+--- Diagnostics for the current buffer, over snacks' built-in diagnostics picker.
+--- The snacks source reads `vim.diagnostic.get` across *all* namespaces, so it
+--- aggregates both the LSP type errors AND tyo3's durable layer-state namespace
+--- (`needs_review` / `orphaned`) in one bordered, searchable list — the cohesive
+--- "show me the issues on this file" surface, matching the entity/authored
+--- pickers and the `gra` action picker. Confirming jumps to the diagnostic.
+function M.diagnostics()
+  local ok, Snacks = pcall(require, "snacks")
+  if not ok or not Snacks.picker then
+    vim.notify("[tyo3] snacks.nvim is required for the diagnostics picker (see :checkhealth tyo3)", vim.log.levels.ERROR)
+    return
+  end
+  Snacks.picker.diagnostics_buffer()
+end
+
 --- The affected set of the most recent edit (from the panel's last delta).
 function M.affected()
   local sidebar = require("tyo3.sidebar")

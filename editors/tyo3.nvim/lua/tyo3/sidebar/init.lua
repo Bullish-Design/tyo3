@@ -419,6 +419,17 @@ function M.on_delta(_root, params)
   end
   M._rev_index[params.revision] = #M._affected_lines
   set_buffer_lines("tyo3_affected", render.affected_rows(M._affected_lines))
+  -- If this commit touched the entity we're showing, re-resolve its card so the
+  -- observe surface reflects the new state without waiting for a cursor move —
+  -- e.g. saving a drift onto a noted entity flips it to needs_review, and the
+  -- NOTES ⚠ should appear right then. (reload() re-renders via set_context, which
+  -- runs the accordion; the explicit call below covers the no-entity case.)
+  if M._entity and M._entity.durable_id then
+    local id = M._entity.durable_id
+    if vim.tbl_contains(changed, id) or vim.tbl_contains(affected, id) then
+      M.reload()
+    end
+  end
   -- Auto-open on the first delta so the affected-set log surfaces, then run the
   -- accordion (it acts on view windows, which open() creates).
   if not M.is_open() then

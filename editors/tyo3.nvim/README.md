@@ -209,6 +209,14 @@ namespace (`tyo3-layer`), so `]d` / `[d` / `setqflist` / Trouble / lualine
 navigate `needs_review` (WARN) and `orphaned` (HINT) entities for free. It's
 driven by the daemon's `review_state` verb and refreshed off the bus.
 
+Both streams ride `vim.diagnostic`, so they coexist on one buffer. With
+`manage = true`, `setup{}` configures `vim.diagnostic` to match the rest of the
+UI — a rounded float on `]d`/`[d` jumps (like the hover/explain floats) and
+severity-sorted signs — and `:TyO3Diagnostics` opens a snacks picker listing
+*all* of a buffer's diagnostics (type errors **and** durable layer state) in one
+bordered, searchable list. `manage = false` leaves your own `vim.diagnostic.config`
+untouched.
+
 `needs_review` is **durable level state**: a note on a `review_on_change` layer
 flags when the entity's body differs from the body as it was when the note was
 authored (the engine stamps that hash at author time). So the WARN survives a
@@ -275,6 +283,7 @@ keymaps = {
 | `:TyO3Affected` | Picker over the last edit's affected set; jump by identity. |
 | `:TyO3Entities` | Picker over all known entities. |
 | `:TyO3Authored` | Picker over entities carrying an authored note. |
+| `:TyO3Diagnostics` | snacks picker over this buffer's diagnostics — LSP type errors **and** the durable layer state (`needs_review`/`orphaned`) in one list. |
 | `:TyO3Diff <from_rev> [to_rev]` | Entity-level snapshot diff (added/removed/changed/moved). |
 | `:TyO3Start` / `:TyO3Stop` | Attach the daemon for this buffer / stop all session daemons. |
 | `:TyO3Reindex` / `:TyO3Gc` / `:TyO3Check` | One-shot daemon ops (rescan / gc orphans / type-check). |

@@ -232,6 +232,36 @@ do
   )
 end
 
+-- ── Regression (proj 28 follow-up): on_delta re-resolves the shown entity's ──
+-- card when the commit touched it. The write paths (run_verb/ack) refresh via
+-- refresh_after_write, but a `:w`-triggered commit (e.g. drifting a noted entity
+-- to needs_review) flows through the bus delta, not run_verb — so on_delta must
+-- reload the card too, or the NOTES ⚠ won't appear until a cursor move. Author a
+-- note via the raw `author` verb (no run_verb refresh), then fire the matching
+-- delta and assert NOTES picks it up.
+do
+  sidebar.set_context(card, bufnr)
+  local probe2 = "delta path probe"
+  local wrote2
+  require("tyo3").rpc(bufnr, "author", { layer = "intent", durable_id = card.durable_id, value = { note = probe2 } }, function()
+    wrote2 = true
+  end)
+  vim.wait(15000, function()
+    return wrote2
+  end, 50)
+  -- The raw author did not refresh the sidebar; the delta for this id should.
+  sidebar.on_delta(nil, { revision = 99, changed_ids = { card.durable_id }, affected_ids = {} })
+  local refreshed2 = vim.wait(15000, function()
+    local txt = table.concat(vim.api.nvim_buf_get_lines(sidebar.bufs["tyo3_notes"], 0, -1, false), "\n")
+    return txt:find(probe2, 1, true) ~= nil
+  end, 50)
+  check(
+    "on_delta re-resolves the shown entity when the commit touches it",
+    refreshed2,
+    table.concat(vim.api.nvim_buf_get_lines(sidebar.bufs["tyo3_notes"], 0, -1, false), "\n")
+  )
+end
+
 -- manage = false → set_context no-ops cleanly.
 local sidebar2 = require("tyo3.sidebar")
 -- reset state (re-require doesn't reset module state; just test the guard)
