@@ -23,6 +23,7 @@ Set Shell "bash"
 Set FontSize 16
 Set Width 1360
 Set Height 840
+Set Framerate 24
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
 
@@ -79,6 +80,11 @@ Sleep 4s
 # `:lua` float; the picker rhymes with the `gra` action picker below).
 Type ":TyO3Diagnostics" Enter
 Sleep 3400ms
+# TWO escapes to close the snacks picker: the first only exits the prompt's
+# insert mode (→ normal), the second closes it. One Esc leaves it open and the
+# acknowledge keys leak into the picker's scratch buffer (E21).
+Escape
+Sleep 500ms
 Escape
 Sleep 400ms
 # `gra` opens the action picker on show_label; Acknowledge re-authors the note

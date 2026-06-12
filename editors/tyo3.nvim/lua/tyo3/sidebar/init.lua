@@ -255,8 +255,11 @@ function M.setup(edgy)
     end)
     needs_setup = false
   else
-    -- edgy reads views from `opts[pos]` as an array (not an `opts.views` key).
-    edgy_opts = { right = ours }
+    -- edgy reads views from `opts[pos]` as an array (not an `opts.views` key);
+    -- `options.right.size` widens the edgebar past edgy's 30-col default so the
+    -- pane content is readable (config.sidebar_width).
+    local width = (require("tyo3.config").get().sidebar_width) or 50
+    edgy_opts = { right = ours, options = { right = { size = width } } }
     needs_setup = true
   end
 

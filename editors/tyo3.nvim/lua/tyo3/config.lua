@@ -11,6 +11,10 @@ M.defaults = {
   -- `manage = false` to own the stack yourself; TyO3 still works either way.
   -- See lua/tyo3/deps.lua.
   manage = true,
+  -- Width (columns) of the edgy accordion sidebar. The default panes (IDENTITY /
+  -- NOTES / DOCS / SUMMARY) carry wrapped prose + records, so the edgy default of
+  -- 30 truncates them; 50 keeps them readable. Only used when `manage ~= false`.
+  sidebar_width = 50,
   -- Buffer-local, project-scoped keymaps for the curated navigate/observe/act
   -- loop. Set a key to a string to rebind, or `false` to opt out; a whole
   -- sub-table set to `false` opts the feature out.

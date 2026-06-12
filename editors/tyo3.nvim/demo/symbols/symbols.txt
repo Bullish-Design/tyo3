@@ -377,7 +377,13 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────
-> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+>
+
+
+
+
+
+
 
 
 
@@ -454,7 +460,45 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-zYYe3S/shop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+> source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-ImYYuo/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 >
 
@@ -1746,7 +1790,7 @@ tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwr
 :qa!
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-zYYe3S/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-ImYYuo/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 > $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/symbols/init.lua store.py
 >

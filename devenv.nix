@@ -438,33 +438,6 @@ in
   # tapes (editors/tyo3.nvim/demo/<name>/*.tape) drive a real terminal nvim
   # through the plugin's verbs; setup.sh builds the synthetic shop project fresh.
   # CI-runnable (no display). See .scratch/projects/20-neovim-integration/DEMO_RECORDING.md.
-  scripts.demo-record.exec = ''
-    echo "═══ Recording tyo3.nvim demo (vhs) ═══"
-    cd "$DEVENV_ROOT"
-    if ! command -v vhs >/dev/null 2>&1; then
-      echo "vhs not found on PATH — is the devenv shell active?"
-      exit 1
-    fi
-    vhs editors/tyo3.nvim/demo/default/tour.tape
-    echo "── GIF done; recording asciinema cast ──"
-    # vhs 0.11 does not emit asciinema .cast natively, so the cast is recorded
-    # by a small dependency-free PTY driver running the same scripted scenes.
-    python editors/tyo3.nvim/demo/default/record_cast.py editors/tyo3.nvim/demo/default/tour.cast || true
-    echo "═══ Wrote editors/tyo3.nvim/demo/default/tour.gif + tour.cast ═══"
-  '';
-
-  # Render the comprehensive cursor-CONTEXT demo (context = "cursor").
-  scripts.demo-record-context.exec = ''
-    echo "═══ Recording tyo3.nvim CONTEXT demo (vhs) ═══"
-    cd "$DEVENV_ROOT"
-    if ! command -v vhs >/dev/null 2>&1; then
-      echo "vhs not found on PATH — is the devenv shell active?"
-      exit 1
-    fi
-    vhs editors/tyo3.nvim/demo/context/context.tape
-    echo "═══ Wrote editors/tyo3.nvim/demo/context/context.gif ═══"
-  '';
-
   # Render the short, looping HERO demo (the README advertisement): money shot
   # + one LSP wow + the Phase-2 review-ack code action, sidebar on throughout.
   scripts.demo-record-hero.exec = ''
@@ -549,6 +522,23 @@ in
     fi
     vhs editors/tyo3.nvim/demo/sidebar/sidebar.tape
     echo "═══ Wrote editors/tyo3.nvim/demo/sidebar/sidebar.gif ═══"
+  '';
+
+  # Render the long, wow-factor SHOWCASE tour (proj 28): kinetic AST navigation,
+  # the full `gra` action hub, durable identity (note + doc ride a move), the live
+  # affected-set/blast-radius, and the snacks diagnostics picker + review-ack —
+  # the sidebar narrating with every pane lit. The curated stack is resolved
+  # hermetically (TYO3_NVIM_DEPS) or from the local vim.pack opt dir by the
+  # showcase init.lua (demo/pack.lua).
+  scripts.demo-record-showcase.exec = ''
+    echo "═══ Recording tyo3.nvim SHOWCASE demo (vhs) ═══"
+    cd "$DEVENV_ROOT"
+    if ! command -v vhs >/dev/null 2>&1; then
+      echo "vhs not found on PATH — is the devenv shell active?"
+      exit 1
+    fi
+    vhs editors/tyo3.nvim/demo/showcase/showcase.tape
+    echo "═══ Wrote editors/tyo3.nvim/demo/showcase/showcase.gif ═══"
   '';
 
   # ── Utility scripts ──────────────────────────────────────────

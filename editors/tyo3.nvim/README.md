@@ -12,7 +12,13 @@
 the action picker on it, and acknowledge a durable `needs_review` flag — all on
 one function's durable identity. Regenerate with `devenv shell -- demo-record-hero`.*
 
-*Longer walkthroughs: the [**sidebar tour**](demo/sidebar/sidebar.gif) (the
+*The full ride — the [**showcase tour**](demo/showcase/showcase.gif): kinetic AST
+navigation, the action hub, durable identity (a note + doc ride a move across
+files), the live affected-set blast radius, and the diagnostics picker + review
+acknowledge — the sidebar narrating with every pane lit. Regenerate with
+`devenv shell -- demo-record-showcase`.*
+
+*Focused walkthroughs: the [**sidebar tour**](demo/sidebar/sidebar.gif) (the
 accordion observe surface), the [**AST-nav tour**](demo/astnav/astnav.gif)
 (treewalker motion + textobject select feeding the act path), and the
 [**action-hub tour**](demo/codeaction/codeaction.gif) — regenerate with

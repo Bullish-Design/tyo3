@@ -42,7 +42,7 @@ function M.note_rows(card)
         -- LLM-derived explanation (the `explain` layer): a 🤖-marked, wrapped
         -- mini-paragraph glued to the entity.
         local first = true
-        for _, l in ipairs(wrap(val.text, 44)) do
+        for _, l in ipairs(wrap(val.text, 46)) do
           table.insert(rows, (first and "🤖 " or "   ") .. l)
           first = false
         end
