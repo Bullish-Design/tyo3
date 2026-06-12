@@ -1144,17 +1144,37 @@ end
 -- authored layer), shows the text, then re-decorates + refreshes the layer-state
 -- diagnostics so the new record and its future needs_review surface.
 
+--- After a durable authored-state change (author / ack / explain / …), refresh
+--- the three surfaces that render it: buffer decorations, the layer-state
+--- `vim.diagnostic` namespace, and the sidebar's entity card. The card refresh
+--- is the non-obvious one: the NOTES `needs_review ⚠` is read off the entity
+--- card's `authored[layer].status`, and the card is otherwise only re-resolved
+--- on a cursor move — so without this, acknowledging (or authoring) leaves the ⚠
+--- stale until the cursor happens to move. `sidebar.reload()` re-resolves the
+--- shown entity over its source buffer and no-ops when the sidebar is off, so
+--- this is safe to call unconditionally.
+local function refresh_after_write(bufnr, root)
+  if not vim.api.nvim_buf_is_loaded(bufnr) then
+    return
+  end
+  pcall(function()
+    require("tyo3.decorate").apply(bufnr)
+  end)
+  M.refresh_layer_diagnostics(bufnr, root)
+  pcall(function()
+    require("tyo3.sidebar").reload()
+  end)
+end
+
 --- Run daemon *verb* with *params* for *bufnr* (project *root*); on success
---- re-decorate + refresh layer-state diagnostics (so a new/updated layer record
---- and its future needs_review surface), then `cb(err, res)`. The generic core
---- a spine plugin's command builds on — and what run_explain / tyo3.run use.
+--- re-decorate + refresh layer-state diagnostics + the sidebar card (so a
+--- new/updated layer record, its future needs_review, and the NOTES ⚠ surface),
+--- then `cb(err, res)`. The generic core a spine plugin's command builds on —
+--- and what run_explain / tyo3.run use.
 function M.run_verb(bufnr, root, verb, params, cb)
   daemon_request(root, verb, params, function(err, res)
-    if not err and res and vim.api.nvim_buf_is_loaded(bufnr) then
-      pcall(function()
-        require("tyo3.decorate").apply(bufnr)
-      end)
-      M.refresh_layer_diagnostics(bufnr, root)
+    if not err and res then
+      refresh_after_write(bufnr, root)
     end
     if cb then
       cb(err, res)
@@ -1224,12 +1244,9 @@ M.register_command("tyo3.ack", function(command, cmd_ctx)
       return
     end
     vim.schedule(function()
-      if vim.api.nvim_buf_is_loaded(bufnr) then
-        pcall(function()
-          require("tyo3.decorate").apply(bufnr)
-        end)
-        M.refresh_layer_diagnostics(bufnr, root)
-      end
+      -- Same post-write refresh as run_verb (ack is a re-author loop, not a
+      -- run_verb call): decorations + diagnostics + the sidebar NOTES ⚠.
+      refresh_after_write(bufnr, root)
       vim.notify("[tyo3] review acknowledged", vim.log.levels.INFO)
     end)
   end

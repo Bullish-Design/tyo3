@@ -206,6 +206,32 @@ sidebar.on_refinement(nil, { revision = 42, narrowed = { card.durable_id } })
 local alines2 = vim.api.nvim_buf_get_lines(sidebar.bufs["tyo3_affected"], 0, -1, false)
 check("refinement annotates existing line", alines2[1]:find("narrowed", 1, true) ~= nil, nil)
 
+-- ── Regression (proj 28 follow-up): a durable write on the shown entity ──────
+-- refreshes the sidebar card without a cursor move. Before the fix, run_verb /
+-- tyo3.ack re-decorated + refreshed the diagnostic namespace but NOT the sidebar,
+-- so the NOTES needs_review ⚠ (and a freshly authored note) stayed stale until
+-- the cursor happened to move. lsp.author_note → run_verb → refresh_after_write →
+-- sidebar.reload() now re-resolves the shown entity; assert NOTES picks up the
+-- new note with no manual set_context.
+do
+  local lsp = require("tyo3.lsp")
+  local root = require("tyo3").root_for_buf(bufnr)
+  sidebar.set_context(card, bufnr) -- show checkout; M._entity + M._source_buf set
+  local probe = "sidebar refresh probe"
+  lsp.author_note(bufnr, root, card.durable_id, "intent", { note = probe }, function() end)
+  -- Wait for the write AND the async sidebar.reload it triggers to land in NOTES
+  -- — no cursor move, no manual set_context.
+  local refreshed = vim.wait(30000, function()
+    local txt = table.concat(vim.api.nvim_buf_get_lines(sidebar.bufs["tyo3_notes"], 0, -1, false), "\n")
+    return txt:find(probe, 1, true) ~= nil
+  end, 50)
+  check(
+    "durable write refreshes sidebar NOTES without a cursor move",
+    refreshed,
+    table.concat(vim.api.nvim_buf_get_lines(sidebar.bufs["tyo3_notes"], 0, -1, false), "\n")
+  )
+end
+
 -- manage = false → set_context no-ops cleanly.
 local sidebar2 = require("tyo3.sidebar")
 -- reset state (re-require doesn't reset module state; just test the guard)
