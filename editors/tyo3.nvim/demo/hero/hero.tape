@@ -26,30 +26,30 @@ Set Height 840
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
 
-# ── Pre-warm OFF camera: build the project, open + reindex + open the sidebar ──
-# ── so the first on-camera beat is hot (no cold-start dead air on stage). ──
+# ── Pre-warm OFF camera: hide the WHOLE cold start (shell + build + launch + ──
+# ── reindex) and land on `checkout` so cursor-context auto-opens the sidebar ──
+# ── with IDENTITY tracking it — the first on-camera frame is a hot, ──
+# ── sidebar-open nvim. (No :TyO3Sidebar toggle: the sidebar auto-opens on ──
+# ── context, and a toggle here would CLOSE the reindex-opened bar.) ──
+Hide
 Type "source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR" Enter
 Sleep 2s
-Hide
 Type "$TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/hero/init.lua store.py" Enter
 Sleep 7s
 Type ":TyO3Reindex" Enter
 Sleep 3s
-Type ":TyO3Sidebar" Enter
-Sleep 2s
+Type "/def checkout" Enter
+Sleep 2500ms
 Show
 
-# ── Beat 1: NAVIGATE by structure — treewalker motion, the sidebar tracks ──
-# Land on the first entity, then walk the syntax tree to the next/prev neighbour
-# with <C-j>/<C-k>; the edgy IDENTITY view tracks the entity under the cursor.
-Type "gg"
-Sleep 800ms
+# ── Beat 1: NAVIGATE by structure — treewalker between the two functions; the ──
+# edgy sidebar IDENTITY tracks the entity under the cursor. Cursor starts on
+# `checkout` (sidebar showing it); <C-j> walks to the next sibling def
+# (show_label) and <C-k> back — IDENTITY re-resolves on each hop.
 Ctrl+j
-Sleep 1800ms
-Ctrl+j
-Sleep 1800ms
+Sleep 2200ms
 Ctrl+k
-Sleep 1800ms
+Sleep 2200ms
 
 # ── Beat 2: OBSERVE durable identity — note an entity, move it, the note rides ──
 Type "/def checkout" Enter
@@ -93,5 +93,7 @@ Sleep 2800ms
 Enter
 Sleep 3000ms
 
+# Hide the quit so the loop doesn't flash the bare shell between replays.
+Hide
 Type ":qa!" Enter
 Sleep 1s
