@@ -1,13 +1,17 @@
-# tyo3.nvim — HERO demo. The short (~35s), looping advertisement. Render with:
+# tyo3.nvim — HERO demo. The short (~38s), looping advertisement, in the
+# single-path snacks/sidebar idiom. Render with:
 #   devenv shell -- demo-record-hero
 #   (or: vhs editors/tyo3.nvim/demo/hero/hero.tape)
 #
-# Three beats, sidebar on throughout, tight pacing:
-#   1. the money shot — note an entity, atomically move it, the note rides along;
-#   2. durable review + a type error in ONE `]d` stream (the novel part);
-#   3. acknowledge the review straight from the code-action menu (Phase 2).
-# The cold pre-warm (build + open + reindex) is kept OFF camera with Hide/Show so
-# the first on-camera sync is hot. Sleeps wait past every async beat.
+# The navigate → observe → act loop, sidebar on throughout:
+#   1. NAVIGATE by structure — treewalker motion between entities; the edgy
+#      accordion sidebar tracks the entity under the cursor (IDENTITY expands).
+#   2. OBSERVE durable identity — author a note, atomically move the entity to
+#      another file; the note rides the move (the whole pitch). NOTES shows it.
+#   3. ACT — drift a noted entity so needs_review fires, walk it in the `]d`
+#      stream, then `gra` opens the action picker and Acknowledge clears the ⚠.
+# The cold pre-warm (build + open + reindex + sidebar) is kept OFF camera with
+# Hide/Show so the first on-camera beat is hot. Sleeps wait past every async beat.
 
 Output editors/tyo3.nvim/demo/hero/hero.gif
 Output editors/tyo3.nvim/demo/hero/hero.txt
@@ -22,30 +26,44 @@ Set Height 840
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
 
-# ── Pre-warm OFF camera: build the project, open + reindex so the first ──
-# ── on-camera sync is hot (no cold-start dead air on stage). ──
+# ── Pre-warm OFF camera: build the project, open + reindex + open the sidebar ──
+# ── so the first on-camera beat is hot (no cold-start dead air on stage). ──
 Type "source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR" Enter
 Sleep 2s
 Hide
 Type "$TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/hero/init.lua store.py" Enter
-Sleep 6s
+Sleep 7s
 Type ":TyO3Reindex" Enter
 Sleep 3s
+Type ":TyO3Sidebar" Enter
+Sleep 2s
 Show
 
-# ── Beat 1: the money shot — note an entity, move it, the note rides the move ──
-Type "/def checkout" Enter
-Sleep 1500ms
-Type ":TyO3Note load-bearing checkout path" Enter
+# ── Beat 1: NAVIGATE by structure — treewalker motion, the sidebar tracks ──
+# Land on the first entity, then walk the syntax tree to the next/prev neighbour
+# with <C-j>/<C-k>; the edgy IDENTITY view tracks the entity under the cursor.
+Type "gg"
+Sleep 800ms
+Ctrl+j
 Sleep 1800ms
+Ctrl+j
+Sleep 1800ms
+Ctrl+k
+Sleep 1800ms
+
+# ── Beat 2: OBSERVE durable identity — note an entity, move it, the note rides ──
+Type "/def checkout" Enter
+Sleep 1200ms
+Type ":TyO3Note load-bearing checkout path" Enter
+Sleep 2000ms
 Type ":TyO3Move checkout checkout.py" Enter
 Sleep 1800ms
 Type ":e checkout.py" Enter
 Sleep 2500ms
 
-# ── Beat 2: durable review + a type error surface in ONE `]d` stream ──
+# ── Beat 3: ACT — drift a noted entity, walk needs_review, acknowledge via gra ──
 Type ":e store.py" Enter
-Sleep 1200ms
+Sleep 1000ms
 Type "/def show_label" Enter
 Sleep 600ms
 Type ":TyO3Note keep this label stable" Enter
@@ -56,6 +74,7 @@ Escape
 Sleep 600ms
 Type ":w" Enter
 Sleep 4s
+# Walk the durable needs_review WARN + the type error in one `]d` stream.
 Type "gg"
 Sleep 300ms
 Type "]d"
@@ -63,14 +82,16 @@ Sleep 1800ms
 Type ":lua vim.diagnostic.open_float()" Enter
 Sleep 2200ms
 Escape
-
-# ── Beat 3: acknowledge the review from the code-action menu (Phase 2) ──
-Type "]d"
+# `gra` opens the action picker on show_label; Acknowledge re-authors the note
+# (the engine's acknowledge) so review_state goes clean and the statusline WARN
+# clears (E:1 W:1 → E:1). The acknowledge quickfix is the preferred action, so it
+# sorts to the top of the menu — <CR> applies it. Pause on the cleared state.
+Type "/def show_label" Enter
 Sleep 800ms
-Type ":lua vim.lsp.buf.code_action()" Enter
-Sleep 2200ms
-Type "1" Enter
-Sleep 2200ms
+Type "gra"
+Sleep 2800ms
+Enter
+Sleep 3000ms
 
 Type ":qa!" Enter
 Sleep 1s
