@@ -25,8 +25,8 @@ local function wrap(text, width)
   return out
 end
 
---- IDENTITY — the full card (name·kind, id, location, layers). Reuses
---- card.build_lines, the same formatter the :TyO3Inspect float used.
+--- IDENTITY — the entity's identity (name, kind, durable id, location, hash).
+--- Reuses card.build_lines; authored/derived layers live in NOTES / SUMMARY.
 function M.identity_rows(card)
   return require("tyo3.card").build_lines(card)
 end

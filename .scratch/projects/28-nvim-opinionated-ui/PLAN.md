@@ -141,10 +141,10 @@ end
 - ⚠API `setup_tiny_code_action`: `require("tiny-code-action").setup({ picker = {
   "buffer", opts = { hotkeys = true } } })` (the buffer-picker-with-hotkeys mode
   the user asked for).
-- README: a `lazy.nvim` spec with `dependencies = { "folke/snacks.nvim",
+- README: a `vim.pack.add` spec listing the deps ("folke/snacks.nvim",
   "folke/edgy.nvim", "rachartier/tiny-code-action.nvim", "nvim-treesitter/
   nvim-treesitter", "nvim-treesitter/nvim-treesitter-textobjects",
-  "aaronik/treewalker.nvim" }`.
+  "aaronik/treewalker.nvim").
 
 ### B.2 LSP bridge always-on — `lua/tyo3/lsp.lua`, `plugin/tyo3.lua`, `init.lua`
 
@@ -387,7 +387,7 @@ optional; the ack beat works offline.)
 
 ### F.3 README rewrite (`editors/tyo3.nvim/README.md`)
 
-- New install: the `lazy.nvim` spec with dependencies; nvim 0.12 floor.
+- New install: the `vim.pack.add` spec with dependencies; nvim 0.12 floor.
 - The single-path philosophy + the navigate/observe/act model.
 - Default keymaps (textobjects, treewalker, `<leader>a` action picker), the
   `manage`/`keymaps` opts.

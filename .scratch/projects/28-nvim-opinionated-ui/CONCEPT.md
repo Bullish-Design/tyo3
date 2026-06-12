@@ -127,7 +127,7 @@ Net: fewer code paths, fewer flags, one renderer per concern.
    (Simplify, via P6 `codeAction/resolve`) get a diff; note/doc/explain show the
    command/title. Decide whether to enrich the preview via `codeAction/resolve`
    for informational actions, or accept title-only (Phase C).
-5. **Loss of drop-in friendliness** — accepted. The install story (a `lazy.nvim`
+5. **Loss of drop-in friendliness** — accepted. The install story (a `vim.pack`
    dependency spec) becomes part of the deliverable.
 6. **callHierarchy capability-key quirk.** Type hierarchy needed literal nvim
    0.12 capability keys; verify whether `callHierarchy/incomingCalls` etc. need

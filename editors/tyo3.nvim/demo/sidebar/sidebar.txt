@@ -454,7 +454,7 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/tyo3-demo-YMMW6F/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-hQTcwM/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 >
 
@@ -724,8 +724,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …4X11541F
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …PG8GRGXX
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -762,8 +762,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …4X11541F
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …PG8GRGXX
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -800,8 +800,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …4X11541F
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …PG8GRGXX
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -838,8 +838,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …Q8JA874C
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …CF1VJA83
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -876,8 +876,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …Q8JA874C
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …CF1VJA83
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -914,8 +914,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …Q8JA874C
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …CF1VJA83
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -952,8 +952,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …4X11541F
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …PG8GRGXX
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -990,8 +990,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …4X11541F
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …PG8GRGXX
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -1028,8 +1028,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …4X11541F
-    7     return usd(Book().price())                                                      │  5   location    /tmp/tyo3@@@
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  4   durable id  …PG8GRGXX
+    7     return usd(Book().price())                                                      │  5   location    /tmp/clau@@@
     8                                                                                     ├──────────────────────────────
     9                                                                                     │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>                      │  1 (none)
@@ -1066,8 +1066,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …4X11541F
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …PG8GRGXX
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 (none)
@@ -1104,8 +1104,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …4X11541F
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …PG8GRGXX
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 (none)
@@ -1142,8 +1142,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …4X11541F
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …PG8GRGXX
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 (none)
@@ -1180,8 +1180,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …Q8JA874C
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …CF1VJA83
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 (none)
@@ -1218,8 +1218,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …Q8JA874C
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …CF1VJA83
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 (none)
@@ -1256,8 +1256,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …Q8JA874C
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …CF1VJA83
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 (none)
@@ -1294,8 +1294,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …4X11541F
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …PG8GRGXX
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 🏷  load-bearing checkout p
@@ -1332,8 +1332,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …4X11541F
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …PG8GRGXX
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 🏷  load-bearing checkout p
@@ -1370,8 +1370,8 @@ store.py                                                                        
     3 from money import usd                                                               │  2   ────────────────────────
     4                                                                                     │    ────────────────
     5                                                                                     │  3   kind        function
-        🏷  load-bearing checkout path                                                     │  4   durable id  …4X11541F
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/tyo3@@@
+        🏷  load-bearing checkout path                                                     │  4   durable id  …PG8GRGXX
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>                          │  5   location    /tmp/clau@@@
     7     return usd(Book().price())                                                      ├──────────────────────────────
     8                                                                                     │  NOTES
     9                                                                                     │  1 🏷  load-bearing checkout p
@@ -1404,7 +1404,7 @@ store.py                                                                        
 :qa!
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/tyo3-demo-YMMW6F/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-hQTcwM/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 > $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/sidebar/init.lua store.py
 >

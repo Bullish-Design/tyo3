@@ -85,19 +85,13 @@ function M.setup_edgy(_opts)
   vim.opt.laststatus = 3
   vim.opt.splitkeep = "screen"
 
-  -- sidebar.setup creates buffers + registers views (handles both pre-setup
-  -- and post-setup edgy scenarios).
-  require("tyo3.sidebar").setup(edgy)
-
-  -- If edgy hasn't been set up yet (test/demo path), call edgy.setup now
-  -- so it picks up the view specs we merged into edgy.config.opts.
-  -- If already set up (lazy.nvim path, did_setup guard), this is a no-op.
-  if not pcall(function() return require("edgy.config").did_setup end) then
-    return -- can't access config at all
-  end
-  if not require("edgy.config").did_setup then
-    local opts = require("edgy.config").opts or {}
-    edgy.setup(opts)
+  -- sidebar.setup creates the buffers + registers the views. It returns whether
+  -- edgy still needs setting up: in the common single-path case edgy isn't up
+  -- yet, so it hands back the view opts for us to run edgy.setup with; if edgy
+  -- was already set up (it injected into the live edgebar) this is a no-op.
+  local needs_setup, edgy_opts = require("tyo3.sidebar").setup(edgy)
+  if needs_setup then
+    edgy.setup(edgy_opts)
   end
 end
 

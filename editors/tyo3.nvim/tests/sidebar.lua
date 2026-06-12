@@ -228,11 +228,14 @@ do
     sidebar.bufs = {}
     sidebar._entity = nil
 
-    -- sidebar.setup registers views in edgy.config.opts (pre-setup path).
-    -- Then call edgy.setup to build the actual layout.
-    sidebar.setup(edgy)
-    local opts = require("edgy.config").opts or {}
-    edgy.setup(opts)
+    -- sidebar.setup returns whether edgy still needs setting up: `true, opts` on
+    -- the pre-setup path (run edgy.setup), or `false` when it injected into a
+    -- live edgebar (edgy may already be up from the plugin's own setup above).
+    local needs_setup, opts = sidebar.setup(edgy)
+    check("sidebar.setup returns a boolean signal", type(needs_setup) == "boolean", tostring(needs_setup))
+    if needs_setup then
+      edgy.setup(opts)
+    end
 
     check("sidebar.setup(edgy) sets _did_setup", sidebar._did_setup, nil)
 

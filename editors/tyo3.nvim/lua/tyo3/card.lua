@@ -1,8 +1,10 @@
--- tyo3.nvim — card → lines formatter.
+-- tyo3.nvim — card → IDENTITY lines formatter.
 --
 -- The daemon's `entity_at` returns a cross-layer "card" for the entity under the
--- cursor. `build_lines` renders the full card for the `:TyO3Inspect` float. (The
--- panel's CONTEXT section builds its own compact rows in panel.lua.)
+-- cursor. `build_lines` renders the *identity* of that card (name, kind, durable
+-- id, location, hash, last-affected revision) for the sidebar's IDENTITY view.
+-- The authored/derived layers are deliberately omitted here — they have their
+-- own NOTES / SUMMARY views, so duplicating them in IDENTITY would be redundant.
 
 local M = {}
 
@@ -13,27 +15,7 @@ local function short_id(id)
   return id
 end
 
--- Collapse an authored record's value down to a display string.
-local function authored_value(rec)
-  local val = rec.value
-  if type(val) == "table" and val.note then
-    return tostring(val.note)
-  elseif type(val) == "table" then
-    return vim.json.encode(val)
-  end
-  return tostring(val)
-end
-
--- Collapse a derived record's artifact down to a display string, or nil.
-local function derived_artifact(rec)
-  local art = rec.artifact
-  if art == nil or art == vim.NIL then
-    return nil
-  end
-  return tostring(art)
-end
-
---- Full card → lines, for the :TyO3Inspect float.
+--- Card → identity lines, for the sidebar IDENTITY view.
 function M.build_lines(card)
   local lines = {}
   local function add(s)
@@ -51,24 +33,6 @@ function M.build_lines(card)
   end
   if card.last_affected_revision ~= nil and card.last_affected_revision ~= vim.NIL then
     add("  affected@   rev " .. tostring(card.last_affected_revision))
-  end
-
-  local authored = card.authored or {}
-  if not vim.tbl_isempty(authored) then
-    add("")
-    add("  authored")
-    for layer, rec in pairs(authored) do
-      add(("    %s: %s  [%s]"):format(layer, authored_value(rec), rec.status))
-    end
-  end
-
-  local derived = card.derived or {}
-  if not vim.tbl_isempty(derived) then
-    add("")
-    add("  derived")
-    for layer, rec in pairs(derived) do
-      add(("    %s: %s  [%s]"):format(layer, derived_artifact(rec) or "—", rec.status))
-    end
   end
   return lines
 end

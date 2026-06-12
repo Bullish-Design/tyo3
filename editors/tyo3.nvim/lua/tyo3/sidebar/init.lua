@@ -60,37 +60,47 @@ local VIEW_TITLES = {
   tyo3_affected = "AFFECTED",
 }
 
---- Create one persistent scratch buffer per view.
+--- Create one persistent scratch buffer per view. Reuse an existing buffer of
+--- the same name if one is already around (a prior setup / plugin reload left
+--- it orphaned) — naming a buffer that already exists throws E95.
 local function create_buffers()
   for _, ft in ipairs(VIEW_FTS) do
     if not (M.bufs[ft] and vim.api.nvim_buf_is_valid(M.bufs[ft])) then
-      local buf = vim.api.nvim_create_buf(false, true)
-      vim.api.nvim_buf_set_name(buf, "TyO3://" .. VIEW_TITLES[ft])
+      local name = "TyO3://" .. VIEW_TITLES[ft]
+      local existing = vim.fn.bufnr("^" .. name .. "$")
+      local buf
+      if existing ~= -1 and vim.api.nvim_buf_is_valid(existing) then
+        buf = existing
+      else
+        buf = vim.api.nvim_create_buf(false, true)
+        pcall(vim.api.nvim_buf_set_name, buf, name) -- name is cosmetic; edgy joins by ft
+      end
       vim.bo[buf].buftype = "nofile"
       vim.bo[buf].bufhidden = "hide"
       vim.bo[buf].swapfile = false
+      vim.bo[buf].modifiable = false
       vim.bo[buf].filetype = ft
       M.bufs[ft] = buf
     end
   end
 end
 
---- Write *lines* into the buffer for *ft*.
+--- Write *lines* into the buffer for *ft*. The buffers are non-modifiable
+--- (read-only observe surface), so toggle modifiable around the write.
 local function set_buffer_lines(ft, lines)
   local buf = M.bufs[ft]
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return
   end
+  vim.bo[buf].modifiable = true
   pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
 end
 
 --- Clear all section buffers (used on clear_context).
 local function clear_all_buffers()
   for _, ft in ipairs(VIEW_FTS) do
-    local buf = M.bufs[ft]
-    if buf and vim.api.nvim_buf_is_valid(buf) then
-      pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false, {})
-    end
+    set_buffer_lines(ft, {})
   end
 end
 
@@ -203,60 +213,64 @@ end
 --- Register the five right-edge section views with edgy and install the
 --- accordion autocmd. Idempotent (guard: M._did_setup).
 ---
---- Handles two scenarios:
---- 1. edgy not yet set up (test/demo): merge view specs into edgy.config.opts
----    so a subsequent edgy.setup() picks them up.
---- 2. edgy already set up (lazy.nvim): inject View objects directly into the
----    live right edgebar.
+--- Handles two scenarios and tells the caller which one happened via the return
+--- value (edgy exposes no `did_setup`/`opts` field to probe, so we lean on the
+--- only reliable signal — whether a right edgebar already exists in the layout):
+--- 1. edgy not yet set up — the normal path: tyo3 owns the edgy setup (vim.pack
+---    only adds plugins to the rtp, it doesn't run their setup), so edgy is down
+---    when we get here. Returns `true, { right = specs }` for the caller to run
+---    `edgy.setup(opts)`.
+--- 2. edgy already set up (a right edgebar exists) — a re-entry/defensive path:
+---    inject View objects directly into the live edgebar; returns `false`.
+---
+--- @return boolean needs_setup, table|nil edgy_opts
 function M.setup(edgy)
   if M._did_setup then
-    return
+    return false, nil
   end
   M._edgy = edgy
 
   create_buffers()
   local ours = edgy_view_specs()
 
-  -- Try to add views to the live layout (edgy already set up). If the layout
-  -- doesn't exist yet, merge into opts so a later edgy.setup picks them up.
-  local edgy_config = require("edgy.config")
-  local layout_ok, layout = pcall(function()
-    return edgy_config.layout
-  end)
-  if layout_ok and layout and layout["right"] then
-    -- Live injection: add View objects to the existing right edgebar.
+  -- `config.layout` is `{}` until `edgy.setup` runs and builds an edgebar per
+  -- configured position, so a non-nil `layout["right"]` reliably means edgy is
+  -- already up with a right bar — inject into it live.
+  local layout = require("edgy.config").layout
+  local needs_setup, edgy_opts
+  if layout and layout["right"] then
     local edgebar = layout["right"]
     local View = require("edgy.view")
-    for _, spec in ipairs(ours) do
-      local view = View.new(spec, edgebar)
-      table.insert(edgebar.views, view)
+    local present = {} -- fts already in the edgebar (don't double-inject on reload)
+    for _, view in ipairs(edgebar.views) do
+      present[view.ft] = true
     end
-  else
-    -- Not yet set up: merge into opts so edgy.setup builds them.
-    -- Write back to edgy_config.opts so deps.setup_edgy can pass them to edgy.setup.
-    -- edgy.config reads views directly from opts[pos] as an array, NOT from a
-    -- `views` sub-key.
-    local ok, opts = pcall(function()
-      return edgy_config.opts
+    for _, spec in ipairs(ours) do
+      if not present[spec.ft] then
+        table.insert(edgebar.views, View.new(spec, edgebar))
+      end
+    end
+    pcall(function()
+      require("edgy.layout").update()
     end)
-    if not ok or opts == nil then
-      opts = {}
-    end
-    opts.right = opts.right or {}
-    for _, spec in ipairs(ours) do
-      table.insert(opts.right, spec)
-    end
-    edgy_config.opts = opts
+    needs_setup = false
+  else
+    -- edgy reads views from `opts[pos]` as an array (not an `opts.views` key).
+    edgy_opts = { right = ours }
+    needs_setup = true
   end
 
-  -- Install the focus-accordion WinEnter autocmd.
+  -- Install the focus-accordion WinEnter autocmd (grouped so a re-setup or
+  -- reload replaces it rather than stacking duplicates).
   vim.api.nvim_create_autocmd("WinEnter", {
+    group = vim.api.nvim_create_augroup("tyo3_sidebar_accordion", { clear = true }),
     callback = function(ev)
       focus_accordion(ev.win)
     end,
   })
 
   M._did_setup = true
+  return needs_setup, edgy_opts
 end
 
 -- ── Public API (panel-compatible) ───────────────────────────────────────────
@@ -281,13 +295,14 @@ function M.set_context(card, src_buf)
   set_buffer_lines("tyo3_docs", render.doc_rows(card))
   set_buffer_lines("tyo3_summary", render.summary_rows(card))
 
-  -- Drive the content-accordion: expand sections with data, collapse empty ones.
-  content_accordion()
-
-  -- Auto-open the sidebar on the first entity (mirror panel's auto-open).
+  -- Auto-open the sidebar on the first entity (mirror panel's auto-open), then
+  -- drive the content-accordion — the accordion lever acts on view *windows*, so
+  -- it must run after open() has created them, else the first entity shows the
+  -- static collapsed spec instead of the content-driven state.
   if not M.is_open() then
     M.open()
   end
+  content_accordion() -- expand sections with data, collapse empty ones
 end
 
 function M.clear_context()
@@ -404,11 +419,12 @@ function M.on_delta(_root, params)
   end
   M._rev_index[params.revision] = #M._affected_lines
   set_buffer_lines("tyo3_affected", render.affected_rows(M._affected_lines))
-  content_accordion()
-  -- Auto-open on the first delta so the affected-set log surfaces.
+  -- Auto-open on the first delta so the affected-set log surfaces, then run the
+  -- accordion (it acts on view windows, which open() creates).
   if not M.is_open() then
     M.open()
   end
+  content_accordion()
 end
 
 --- Handle a `derived` notification (AB3).
