@@ -38,11 +38,13 @@ local function report_and_exit(proj)
     vim.fn.delete(proj, "rf")
   end
   require("tyo3").shutdown()
-  if failed > 0 then
-    vim.cmd("cquit 1")
-  else
-    vim.cmd("qall!")
-  end
+  -- Hard-exit instead of `:qall!`. With the full curated stack on the rtp a
+  -- lingering libuv handle (a snacks/edgy/tiny-code-action timer) makes nvim's
+  -- orderly quit *block* — :qall enters the quit sequence and never returns, so
+  -- the gate's `timeout` SIGTERMs it (exit 124) despite every check passing. The
+  -- assertions have run and the summary is flushed above, so a libc exit() with
+  -- the right code is deterministic and correct for a headless one-shot spec.
+  os.exit(failed > 0 and 1 or 0)
 end
 
 -- ── Build a fresh shop project via the Python tour builder ──────────────────

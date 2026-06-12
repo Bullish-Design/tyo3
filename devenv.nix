@@ -33,9 +33,87 @@ let
   '';
   detailPrelude = mkDetailPrelude pytestLeanArgs;
   detailPreludePerTest = mkDetailPrelude pytestPerTestArgs;
+
+  # ── tyo3.nvim curated plugin stack (Phase F: hermetic provisioning) ──────────
+  #
+  # The single-path UI specs (picker/ast_nav/sidebar) and the demos need the six
+  # curated plugins + a python treesitter parser on the runtimepath. Provide them
+  # from Nix, pinned to the *exact* revs in the dev box's `vim.pack` opt dir that
+  # produced the working demos (GUIDE-phase-F §3.5) — so CI reproduces the recorded
+  # behaviour. All six are pure-lua plugins built with `buildVimPlugin` from a
+  # pinned `fetchFromGitHub`; the treesitter grammar is a separate `parser/*.so`
+  # dir. The store paths are pure, so this is a stable CI contract.
+  #
+  # ⚠nvim-treesitter (+textobjects) are pinned to their **main**-branch revs (not
+  # master) — the post-rewrite API the plugin's deps.lua targets. Don't swap these
+  # for the drifting `pkgs.vimPlugins.*`; the pins are the source of truth.
+  mkNvimPlugin = { name, owner, repo, rev, hash }:
+    pkgs.vimUtils.buildVimPlugin {
+      pname = name;
+      version = "0-unstable-${builtins.substring 0 7 rev}";
+      src = pkgs.fetchFromGitHub { inherit owner repo rev; sha256 = hash; };
+      # buildVimPlugin's nativeCheckInputs `require()` every lua module at build
+      # time (snacks/edgy/tiny-code-action/treesitter all have optional submodules
+      # that pull deps absent during this isolated build, and LuaCATS `_meta` stubs
+      # that error on require). We pin exact revs and load them at *runtime* where
+      # their deps coexist, so the build-time sanity check adds nothing but
+      # brittleness — `doCheck = false` drops the require + command check hooks
+      # (stdenv only adds nativeCheckInputs when doCheck is set).
+      doCheck = false;
+    };
+  tyo3NvimPlugins = [
+    (mkNvimPlugin {
+      name = "snacks.nvim"; owner = "folke"; repo = "snacks.nvim";
+      rev = "e6fd58c82f2f3fcddd3fe81703d47d6d48fc7b9f";
+      hash = "06v4v63xc818bc4csj49ri30my24hmpddhr2a2452q7jm10ijaim";
+    })
+    (mkNvimPlugin {
+      name = "edgy.nvim"; owner = "folke"; repo = "edgy.nvim";
+      rev = "ebb77fde6f5cb2745431c6c0fe57024f66471728";
+      hash = "1psavlldajgfvwx0jjhwdilccrhz38p880jsrddmrmfx9yq3yl5s";
+    })
+    (mkNvimPlugin {
+      name = "tiny-code-action.nvim"; owner = "rachartier"; repo = "tiny-code-action.nvim";
+      rev = "0d040ed81f7953118b81cd12681fcdfcac069803";
+      hash = "186d7zyrcb7n2bmqndy434jkl69ffrkwnc61v1nkgfjlxrw76psh";
+    })
+    (mkNvimPlugin {
+      name = "treewalker.nvim"; owner = "aaronik"; repo = "treewalker.nvim";
+      rev = "0b081bf6c6875cf3e478b633796a9e2b64b730e8";
+      hash = "14albx393qhsm7nckrlrm5a9hdasmx7wv5kk5msjpxvldm120g7r";
+    })
+    (mkNvimPlugin {
+      name = "nvim-treesitter"; owner = "nvim-treesitter"; repo = "nvim-treesitter";
+      rev = "4916d6592ede8c07973490d9322f187e07dfefac";
+      hash = "0wgwbxi6h99fsp901xysm0424lhgrh9fq1nlck02m53qbfs7l11x";
+    })
+    (mkNvimPlugin {
+      name = "nvim-treesitter-textobjects"; owner = "nvim-treesitter"; repo = "nvim-treesitter-textobjects";
+      rev = "851e865342e5a4cb1ae23d31caf6e991e1c99f1e";
+      hash = "03dbmmc1s63ygm11mn27sx3bg43ygcy12c40kdbc3giha8953skw";
+    })
+  ];
+  # A runtimepath dir carrying the python parser as `parser/python.so` — the file
+  # `vim.treesitter`/textobjects resolve for a python buffer (the AST specs +
+  # context.lua need it; a pristine `--clean` nvim bundles only c/lua/vim/markdown).
+  tyo3NvimPyGrammar = pkgs.runCommand "tyo3-nvim-ts-python-grammar" { } ''
+    mkdir -p $out/parser
+    ln -s ${pkgs.tree-sitter-grammars.tree-sitter-python}/parser $out/parser/python.so
+  '';
+  # The CI contract: `:`-joined plugin dirs + the grammar dir. bootstrap.lua
+  # (specs) and pack.lua (demos) both read it; the pristine headless nvim is the
+  # Nix-built neovim-unwrapped (never the PATH wrapper — see the demo setup.sh note).
+  tyo3NvimDeps = lib.concatStringsSep ":" (map toString tyo3NvimPlugins ++ [ (toString tyo3NvimPyGrammar) ]);
+  tyo3NvimBin = "${pkgs.neovim-unwrapped}/bin/nvim";
 in
 {
   env.GREET = "devenv";
+
+  # tyo3.nvim hermetic plugin stack (Phase F). Exported in every devenv shell so
+  # the Lua UI specs (via tests/bootstrap.lua) and the demos (via demo/pack.lua)
+  # resolve the pinned curated plugins + python grammar from the Nix store. Unset
+  # outside devenv, where both consumers fall back to the local vim.pack opt dir.
+  env.TYO3_NVIM_DEPS = tyo3NvimDeps;
 
   packages = [
     pkgs.git
@@ -203,6 +281,74 @@ in
     echo "═══ Running CI-style test suite ═══"
     cd "$DEVENV_ROOT"
     PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ -x --cov=tyo3 --cov-report=term-missing "$@" 2>&1
+    _ci_rc=$?
+    [ "$_ci_rc" -eq 0 ] || exit "$_ci_rc"
+    echo ""
+    echo "═══ Running tyo3.nvim Lua spec suite (test-nvim) ═══"
+    test-nvim
+  '';
+
+  # test-nvim: the tyo3.nvim Lua spec gate. Provisions the curated stack
+  # hermetically (TYO3_NVIM_DEPS, exported above from the pinned Nix plugins) and
+  # runs every headless spec — engine specs (dep-free) + the UI specs
+  # (picker/ast_nav/sidebar), which now find the stack instead of skipping. Fails
+  # non-zero on any spec failure. Folded into test-ci above.
+  #
+  # The pristine nvim is the Nix-built neovim-unwrapped (never the PATH wrapper,
+  # which injects user config even under --clean — see demo/setup.sh + the
+  # nvim-demo-pristine-binary note). bootstrap.lua puts TYO3_NVIM_DEPS on the rtp.
+  scripts.test-nvim.exec = ''
+    echo "═══ tyo3.nvim Lua spec suite (hermetic) ═══"
+    cd "$DEVENV_ROOT"
+    # The specs spawn the daemon (`python -m tyo3.daemon`), which imports the
+    # native extension — make sure it's built.
+    if ! ls src/tyo3/_native_impl*.so >/dev/null 2>&1; then
+      echo "── native extension missing; building (maturin develop) ──"
+      maturin develop 2>&1
+    fi
+    export PYTHONPATH="$DEVENV_ROOT/src''${PYTHONPATH:+:$PYTHONPATH}"
+    NVIM="${tyo3NvimBin}"
+    if [ ! -x "$NVIM" ]; then
+      echo "❌ pristine nvim not found at $NVIM"; exit 1
+    fi
+    echo "nvim:  $NVIM ($("$NVIM" --version | head -1))"
+    if [ -z "''${TYO3_NVIM_DEPS:-}" ]; then
+      echo "⚠ TYO3_NVIM_DEPS unset — UI specs will skip (run inside the devenv shell)."
+    else
+      echo "deps:  $TYO3_NVIM_DEPS"
+    fi
+    # Engine specs (dep-free) + UI specs (provisioned). picker has no headless
+    # spec (demo-only); ast_nav/sidebar carry the headless UI assertions.
+    specs="smoke context lsp lsp_nav lsp_codeaction review_dedup lsp_symbols ast_nav sidebar"
+    _failed=0
+    _ran=0
+    for t in $specs; do
+      _ran=$((_ran + 1))
+      echo ""
+      echo "── spec: $t ──"
+      _out="$(mktemp)"
+      timeout 240 "$NVIM" --headless --clean \
+        -u editors/tyo3.nvim/tests/minimal_init.lua \
+        -c "luafile editors/tyo3.nvim/tests/$t.lua" 2>&1 | tee "$_out"
+      _rc=''${PIPESTATUS[0]}
+      # Each spec `cquit 1`s on failure / `qall!`s clean, so the exit code is the
+      # primary signal; cross-check the spec's own "N failed" summary line.
+      _nfail="$(grep -oE '[0-9]+ failed' "$_out" | tail -1 | grep -oE '^[0-9]+')"
+      rm -f "$_out"
+      if [ "$_rc" -ne 0 ] || [ "''${_nfail:-0}" -ne 0 ]; then
+        echo "[SPEC FAIL] $t (exit=$_rc, failed=''${_nfail:-?})"
+        _failed=$((_failed + 1))
+      else
+        echo "[SPEC PASS] $t"
+      fi
+    done
+    echo ""
+    if [ "$_failed" -eq 0 ]; then
+      echo "═══ ✅ tyo3.nvim specs: $_ran ran, 0 failed ═══"
+    else
+      echo "═══ ❌ tyo3.nvim specs: $_ran ran, $_failed failed ═══"
+      exit 1
+    fi
   '';
 
   # ── Spine refactor scripts (REFINED_IMPLEMENTATION_PLAN, Phase 0+) ──
