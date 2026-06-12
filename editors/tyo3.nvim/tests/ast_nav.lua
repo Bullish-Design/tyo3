@@ -163,8 +163,6 @@ print(("tyo3.nvim ast_nav: %d checks, %d failed"):format(#results, failed))
 require("tyo3").shutdown()
 vim.fn.delete(proj, "rf")
 
-if failed > 0 then
-  vim.cmd("cquit 1")
-else
-  vim.cmd("qall!")
-end
+-- Hard-exit (not :qall): the full curated stack can leave a libuv handle that
+-- blocks nvim's orderly quit past the gate timeout. os.exit is deterministic.
+os.exit(failed > 0 and 1 or 0)

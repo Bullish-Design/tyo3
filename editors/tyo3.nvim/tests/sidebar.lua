@@ -26,11 +26,10 @@ local function report_and_exit()
   end
   print(("tyo3.nvim sidebar: %d checks, %d failed"):format(#results, failed))
   require("tyo3").shutdown()
-  if failed > 0 then
-    vim.cmd("cquit 1")
-  else
-    vim.cmd("qall!")
-  end
+  -- Hard-exit (not :qall): with the full curated stack on the rtp a lingering
+  -- libuv handle makes nvim's orderly quit block, so :qall never returns and the
+  -- gate's timeout SIGTERMs an otherwise-passing spec. os.exit is deterministic.
+  os.exit(failed > 0 and 1 or 0)
 end
 
 -- ── Build the shop project ──────────────────────────────────────────────────
