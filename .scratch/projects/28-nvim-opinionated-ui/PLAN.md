@@ -238,13 +238,61 @@ command (generalize the existing `tyo3.explain`/`tyo3.run`/`tyo3.ack` pattern):
 - tiny-code-action reads code actions from the attached LSP clients (our bridge),
   so the providers from C.1 flow in automatically; kinds give it icons/grouping.
 
-### C.3 Preview pane (decision from CONCEPT §5.4)
+### C.3 Preview pane (decision from CONCEPT §5.4) — RESOLVED (minimal by design)
 
 - Simplify already resolves to a diff (P6) → preview shows before/after.
 - For informational actions (author/doc/explain), **minimal**: rely on
   titles + kinds. *Optional enrichment:* extend `codeAction/resolve` to attach a
   small preview document (e.g. the entity card, or "will author on layer X") for
   non-edit actions — only if the picker renders it cleanly. Defer unless cheap.
+
+**Resolution: title-only, preview on demand (`K`).** Two things were tried and
+ruled out against the pinned picker (tiny-code-action `0d040ed`):
+
+1. *Resolve-document enrichment* (the original sketch) is **not buildable**: the
+   picker previews by searching the action ONLY for a WorkspaceEdit
+   (`changes`/`documentChanges` via `action.lua:find_changes`); there is no
+   custom-previewer / resolve-document hook in its `config.lua`. So the
+   informational/command actions (Author / Doc / Explain / Move / Acknowledge)
+   carry no edit to diff — they stay **title-only by design**.
+2. *`auto_preview = true`* (the tempting "cheap win") is **broken on this pin**:
+   the picker renders a resolved diff through a terminal channel (`nvim_open_term`,
+   even with the default `backend = "vim"`), and `auto_preview` re-renders into the
+   persistent preview buffer on every focus → `Terminal already connected to
+   buffer` once the menu is opened more than once (proven: a showcase recording
+   came back littered with that error + cascading `E486`/`E21` corruption). So
+   `auto_preview` stays **off**.
+
+3. *Manual `K` preview of Simplify* — what I initially fell back to — **also does
+   not render**, confirmed by a live smoke test (drove the real plugin via the
+   plain codeaction init; `/tmp/tyo3-smoke/`). In a clean context the Previewer
+   pane *does* open, but it reads **"No preview available for this action"** for
+   the full window. Reason: the **buffer** picker only previews an action that
+   already carries an inline WorkspaceEdit; it does NOT trigger `codeAction/resolve`
+   on preview (the resolve-on-preview path is in `base/previewer.lua`, used by the
+   *telescope* picker, not the buffer picker). Every tyo3 action either carries no
+   edit (Author/Doc/Explain/Move/Ack) or resolves lazily (Simplify) — so **all**
+   of them show "No preview available." (This vindicates the C.3 kickoff's
+   original premise, which I'd wrongly "corrected" mid-task.)
+
+What ships: the picker is **title-only by design and by pin-limitation** — there
+is no diff preview in the menu; Simplify's rewrite is seen on *apply*, not preview.
+`deps.setup_tiny_code_action` keeps `picker = { "buffer", opts = { hotkeys = true } }`
+with a comment recording why. The showcase stays title-only (the menu surfaces
+Simplify, then closes); its tape comment was corrected away from the old false
+"auto-previews" claim. NB on the **explain-float focus trap**: a first (messy)
+smoke test showed `E21` + leaked keys after Explain, but an *isolated* re-test
+(no `K`) **could not reproduce it** — the Explain float (`open_floating_preview`)
+does NOT steal focus (statusline stays on the code buffer) and acting again opens
+the menu cleanly. The earlier `E21` was `K`-previewer contamination: pressing `K`
+(the non-feature that shows "No preview available") leaves focus in a leftover
+picker scratch, which then poisons the next search/act. So the realistic
+explain→act path is fine; the demo's global-`<leader>c` recovery is belt-and-
+suspenders against generic picker-scratch focus drift, not a required fix. The
+hook-based injection path (a `User
+TinyCodeActionWindowEnterPreview` autocmd swapping the placeholder for the entity
+card / cached explanation) was likewise rejected as pin-fragile (private
+`buffer_utils` module) for marginal value. See memory `proj28-c3-preview-decision`.
 
 ### C.4 Delete
 
@@ -406,7 +454,11 @@ optional; the ack beat works offline.)
 1. **`entities()` picker fate** — retire in favor of `workspace/symbol` via
    `Snacks.picker.lsp_workspace_symbols`, or keep as a TyO3-flavored variant?
 2. **tiny-code-action preview enrichment** for non-edit actions (C.3) — minimal
-   titles, or `codeAction/resolve` previews?
+   titles, or `codeAction/resolve` previews? → **RESOLVED: minimal titles.** The
+   pinned picker only diffs WorkspaceEdits (no resolve-document hook), so non-edit
+   actions stay title-only; Simplify's diff previews on demand via `K`
+   (`auto_preview` is broken on this pin — terminal-reconnect bug). See the C.3
+   section above.
 3. **edgy accordion** mechanism (E.0 spike outcome) — native size API vs. custom
    controller vs. fixed-size fallback layout.
 4. **treesitter version** pin (`main` vs `master`) and the matching textobjects

@@ -61,7 +61,8 @@ local CAPS = {
   codeActionProvider = {
     -- Simplify carries `data` and no `edit`, resolved lazily via
     -- `codeAction/resolve` into a WorkspaceEdit — so the menu stays instant (no
-    -- LLM per keystroke) and tiny-code-action shows the rewrite diff on focus.
+    -- LLM per keystroke). The edit materializes on apply; the buffer picker does
+    -- not resolve-on-preview, so the menu is title-only (see deps.lua / C.3).
     resolveProvider = true,
     codeActionKinds = { "refactor.rewrite", "refactor.move", "quickfix", "source.tyo3" },
   },
@@ -465,8 +466,8 @@ M.register_code_action(function(ctx)
       },
     },
     -- Simplify is a rewrite: carry `data` and no `edit`, resolved lazily into a
-    -- WorkspaceEdit by `codeAction/resolve` so the menu stays instant and a
-    -- resolve-capable client (tiny-code-action) previews the diff on focus.
+    -- WorkspaceEdit by `codeAction/resolve` on apply. The buffer picker doesn't
+    -- resolve on preview, so there's no in-menu diff (see deps.lua / PLAN.md C.3).
     {
       title = ("tyo3: Simplify `%s`"):format(who),
       kind = "refactor.rewrite",

@@ -54,6 +54,19 @@ end
 -- it reads code actions from the attached LSP clients (our in-process bridge),
 -- so the providers registered in lsp.lua flow in automatically. The picker chrome
 -- is wired here; the providers/keymap are Phase C.
+--
+-- The menu is title-only: it does NOT diff-preview our actions (C.3, verified
+-- by a live smoke test). The buffer picker previews ONLY an action that already
+-- carries an inline WorkspaceEdit. Every tyo3 action either carries no edit
+-- (Author / Doc / Explain / Move / Acknowledge) or resolves its edit lazily via
+-- `codeAction/resolve` (Simplify) — and the buffer picker does NOT trigger that
+-- resolve on preview (the resolve-on-preview path lives in `base/previewer.lua`,
+-- used by the telescope picker, not the buffer picker). So `K` shows "No preview
+-- available" for ALL of them; Simplify's rewrite is seen on apply, not preview.
+-- `auto_preview = true` is additionally broken on this pin: the diff renders
+-- through a terminal channel and re-renders on every focus, throwing "Terminal
+-- already connected to buffer" once the menu is reopened. Hence: plain picker,
+-- hotkeys only. See PLAN.md C.3 / open-question 2.
 function M.setup_tiny_code_action(_opts)
   local ok, tca = pcall(require, "tiny-code-action")
   if not ok then

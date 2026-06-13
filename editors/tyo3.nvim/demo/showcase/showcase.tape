@@ -125,7 +125,8 @@ Enter
 Sleep 2300ms
 Escape
 Sleep 800ms
-# Simplify is index 0: the resolvable diff auto-previews. Close without applying.
+# Simplify (index 0): the resolvable refactor. The menu is title-only (the
+# rewrite materializes on apply, not preview); here we surface it and close.
 Space
 Type "c"
 Sleep 2000ms
