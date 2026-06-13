@@ -4,9 +4,14 @@
 --
 -- Single path (proj 28): the LSP code-action registry is the *one* "act on the
 -- entity" surface, driven through the tiny-code-action buffer picker (the default
--- `gra` keymap, bound buffer-local on attach). Author / Write doc / Move /
+-- `<leader>c` keymap, bound buffer-local on attach). Author / Write doc / Move /
 -- Explain·Simplify / Acknowledge all flow through it. This recording is the
 -- Phase-C verification that the real picker drives those providers end to end.
+
+-- Space is the leader, so the curated act surface (`<leader>c`) and hub
+-- (`<leader>t`) trigger as ` c` / ` t`. Set before any keymap binds.
+vim.g.mapleader = " "
+vim.g.maplocalleader = " "
 
 vim.opt.compatible = false
 vim.cmd("syntax enable")

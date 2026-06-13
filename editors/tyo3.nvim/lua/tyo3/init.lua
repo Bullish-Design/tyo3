@@ -102,6 +102,8 @@ function M.on_buf_enter(bufnr)
   -- AST navigation keymaps (Phase D): textobject select + treewalker motion,
   -- buffer-local, from config.keymaps (no-op under `manage = false`).
   require("tyo3.deps").bind_ast_keymaps(bufnr)
+  -- The hub keymap (`<leader>t`): the observe/ops sibling of the act surface.
+  require("tyo3.hub").bind_keymap(bufnr)
   -- Seed layer-state diagnostics once on open (refreshed thereafter off the bus).
   require("tyo3.lsp").refresh_layer_diagnostics(bufnr, root)
 end

@@ -1,57 +1,4 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────
-
+>
 
 
 
@@ -104,7 +51,60 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────
+>
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+>
 
 
 
@@ -498,7 +498,7 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-lhslUm/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-91rwSi/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 >
 
@@ -609,7 +609,7 @@ store.py                                                                        
 ~
 ~
 store.py                                                                                               1,1            All
-:TyO3Entities
+                                                                                                              <20>
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book
     2 from catalog import Item
@@ -647,7 +647,159 @@ store.py                                                                        
 ~
 ~
 store.py                                                                                               1,1            All
-:TyO3Entities
+                                                                                                              <20>
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~                  ╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │                                                                           9/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Entities         Browse all known entities                                     │
+~                  │ Affected set     The last edit's blast radius                                  │
+~                  │ Diagnostics      Type errors + durable layer state                             │
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │ Docs             Open the tyo3 documentation                                   │
+~                  │ Sidebar          Toggle the accordion sidebar                                  │
+~                  │ Reindex          Reindex the project (sync_all)                                │
+~                  │ Check            Type-check the project                                        │
+~                  │ Gc               Garbage-collect derived artifacts                             │
+~                  │                                                                                │
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+[Prompt]                                                                                               1,1            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~                  ╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │ Entities                                                                  2/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Entities         Browse all known entities                                     │
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+[Prompt]                                                                                               1,9            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~                  ╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │ Entities                                                                  2/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Entities         Browse all known entities                                     │
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+[Prompt]                                                                                               1,9            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book
+    2 from catalog import Item
+    3 from money import usd
+    4
+    5
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>
+    7     return usd(Book().price())
+    8
+    9
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>
+   11     return Item().label()
+~                  ╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │ Entities                                                                  2/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Entities         Browse all known entities                                     │
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+store.py                                                                                               1,1            All
+
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book
     2 from catalog import Item
@@ -663,8 +815,8 @@ store.py                                                                        
 ~                  ╭──────────────────────────────── TyO3 Entities ─────────────────────────────────╮
 ~                  │                                                                           2/2 │
 ~                  │────────────────────────────────────────────────────────────────────────────────│
-~                  │ checkout  [function]  /tmp/claude-1000/tyo3-demo-lhslUm/shop/store.py          │
-~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-lhslUm/shop/store.py        │
+~                  │ checkout  [function]  /tmp/claude-1000/tyo3-demo-91rwSi/shop/store.py          │
+~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-91rwSi/shop/store.py        │
 ~                  │                                                                                │
 ~                  │                                                                                │
 ~                  │                                                                                │
@@ -701,7 +853,7 @@ store.py                                                                        
 ~                  ╭──────────────────────────────── TyO3 Entities ─────────────────────────────────╮
 ~                  │ show_label                                                                1/2 │
 ~                  │────────────────────────────────────────────────────────────────────────────────│
-~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-lhslUm/shop/store.py        │
+~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-91rwSi/shop/store.py        │
 ~                  │                                                                                │
 ~                  │                                                                                │
 ~                  │                                                                                │
@@ -739,7 +891,7 @@ store.py                                                                        
 ~                  ╭──────────────────────────────── TyO3 Entities ─────────────────────────────────╮
 ~                  │ show_label                                                                1/2 │
 ~                  │────────────────────────────────────────────────────────────────────────────────│
-~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-lhslUm/shop/store.py        │
+~                  │ show_label  [function]  /tmp/claude-1000/tyo3-demo-91rwSi/shop/store.py        │
 ~                  │                                                                                │
 ~                  │                                                                                │
 ~                  │                                                                                │
@@ -805,9 +957,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 │  6   hash        897969931479
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -843,9 +995,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 │  6   hash        897969931479
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -875,15 +1027,15 @@ store.py                                                                        
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
 store.py                                                                                               10,1           All
-:TyO3Note
+                                                                                                              <20>
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 │  6   hash        897969931479
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -913,15 +1065,129 @@ store.py                                                                        
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
 store.py                                                                                               10,1           All
-:TyO3Note
+
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
-    3 from money import usd  ╭───────────── TyO3 intent note for show_label ──────────────╮──────────────────────────
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
+    8                                                                 │  6   hash        897969931479
+    9                                                                 │~
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
+   11     return Item().label()                                       │~
+~                                                                     │~
+╭──────────────────────── Code Actions ────────────────────────╮      │~
+│##   Refactor                                                │      │~
+│  [t ] tyo3: Simplify `show_label`                            │      │~
+│  [tl] tyo3: Move `show_label` to…                            │      │~
+│                                                              │      │~
+│##   Source                                                  │      │~
+│  [ta] tyo3: Author `show_label` (intent)                     │      │~
+│  [te] tyo3: Explain `show_label`                             │      │~
+│  [tc] tyo3: Write/edit doc                                   │      │~
+│                                                              │      │~
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯      │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+[Scratch] [-]                                                                                          2,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
+    8                                                                 │  6   hash        897969931479
+    9                                                                 │~
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
+   11     return Item().label()                                       │~
+~                                                                     │~
+╭──────────────────────── Code Actions ────────────────────────╮      │~
+│##   Refactor                                                │      │~
+│  [t ] tyo3: Simplify `show_label`                            │      │~
+│  [tl] tyo3: Move `show_label` to…                            │      │~
+│                                                              │      │~
+│##   Source                                                  │      │~
+│  [ta] tyo3: Author `show_label` (intent)                     │      │~
+│  [te] tyo3: Explain `show_label`                             │      │~
+│  [tc] tyo3: Write/edit doc                                   │      │~
+│                                                              │      │~
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯      │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+[Scratch] [-]                                                                                          6,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
+    8                                                                 │  6   hash        897969931479
+    9                                                                 │~
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
+   11     return Item().label()                                       │~
+~                                                                     │~
+╭──────────────────────── Code Actions ────────────────────────╮      │~
+│##   Refactor                                                │      │~
+│  [t ] tyo3: Simplify `show_label`                            │      │~
+│  [tl] tyo3: Move `show_label` to…                            │      │~
+│                                                              │      │~
+│##   Source                                                  │      │~
+│  [ta] tyo3: Author `show_label` (intent)                     │      │~
+│  [te] tyo3: Explain `show_label`                             │      │~
+│  [tc] tyo3: Write/edit doc                                   │      │~
+│                                                              │      │~
+╰───── Press <CR> to apply action │ K: preview │ q: quit ──────╯      │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+[Scratch] [-]                                                                                          6,1            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮──────────────────────────
     4                        │                                                           │nction
-    5                        ╰────────────────────────────────────────────────────────────╯SF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                        ╰────────────────────────────────────────────────────────────╯HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 │  6   hash        897969931479
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -955,11 +1221,49 @@ store.py                                                                        
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
-    3 from money import usd  ╭───────────── TyO3 intent note for show_label ──────────────╮──────────────────────────
+    3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮──────────────────────────
+    4                        │                                                           │nction
+    5                        ╰────────────────────────────────────────────────────────────╯HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
+    8                                                                 │  6   hash        897969931479
+    9                                                                 │~
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
+   11     return Item().label()                                       │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+[Prompt]                                                                                               1,1            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮──────────────────────────
     4                        │   keep this label stable                                  │nction
-    5                        ╰────────────────────────────────────────────────────────────╯SF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                        ╰────────────────────────────────────────────────────────────╯HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 │  6   hash        897969931479
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -993,11 +1297,11 @@ store.py                                                                        
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
-    3 from money import usd  ╭───────────── TyO3 intent note for show_label ──────────────╮──────────────────────────
+    3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮──────────────────────────
     4                        │   keep this label stable                                  │nction
-    5                        ╰────────────────────────────────────────────────────────────╯SF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                        ╰────────────────────────────────────────────────────────────╯HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 │  6   hash        897969931479
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -1033,9 +1337,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 │  6   hash        897969931479
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -1071,9 +1375,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
         🏷  keep this label stable                                     │  1 🏷  keep this label stable
@@ -1103,15 +1407,15 @@ store.py                                                                        
 ~                                                                     │  1
 ~                                                                     │~
 store.py                                                                                               10,1           All
-[tyo3] intent note authored
+[tyo3] intent authored
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
         🏷  keep this label stable                                     │  1 🏷  keep this label stable
@@ -1141,15 +1445,167 @@ store.py                                                                        
 ~                                                                     │  1
 ~                                                                     │~
 store.py                                                                                               10,1           All
-:TyO3Authored
+[tyo3] intent authored                                                                                        <20>
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
+    8                                                                 ├──────────────────────────────────────────────────
+    9                                                                 │  NOTES
+        🏷  keep this label stable                                     │  1 🏷  keep this label stable
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
+   11     return It╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │                                                                           9/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Entities         Browse all known entities                                     │
+~                  │ Affected set     The last edit's blast radius                                  │────────────────────
+~                  │ Diagnostics      Type errors + durable layer state                             │
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │ Docs             Open the tyo3 documentation                                   │
+~                  │ Sidebar          Toggle the accordion sidebar                                  │
+~                  │ Reindex          Reindex the project (sync_all)                                │
+~                  │ Check            Type-check the project                                        │
+~                  │ Gc               Garbage-collect derived artifacts                             │
+~                  │                                                                                │────────────────────
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~                                                                     │  1 ⟢ summary: summary<def show_label() -> str:>
+~                                                                     │  2 ⟢ embed: vec[dim=51]
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1
+~                                                                     │~
+store.py                                                                                               10,1           All
+[tyo3] intent authored
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
+    8                                                                 ├──────────────────────────────────────────────────
+    9                                                                 │  NOTES
+        🏷  keep this label stable                                     │  1 🏷  keep this label stable
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
+   11     return It╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │                                                                           9/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Entities         Browse all known entities                                     │
+~                  │ Affected set     The last edit's blast radius                                  │────────────────────
+~                  │ Diagnostics      Type errors + durable layer state                             │
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │ Docs             Open the tyo3 documentation                                   │
+~                  │ Sidebar          Toggle the accordion sidebar                                  │
+~                  │ Reindex          Reindex the project (sync_all)                                │
+~                  │ Check            Type-check the project                                        │
+~                  │ Gc               Garbage-collect derived artifacts                             │
+~                  │                                                                                │────────────────────
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~                                                                     │  1 ⟢ summary: summary<def show_label() -> str:>
+~                                                                     │  2 ⟢ embed: vec[dim=51]
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1
+~                                                                     │~
+[Prompt]                                                                                               1,1            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
+    8                                                                 ├──────────────────────────────────────────────────
+    9                                                                 │  NOTES
+        🏷  keep this label stable                                     │  1 🏷  keep this label stable
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
+   11     return It╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │ Authored                                                                  1/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │                                                                                │────────────────────
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │────────────────────
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~                                                                     │  1 ⟢ summary: summary<def show_label() -> str:>
+~                                                                     │  2 ⟢ embed: vec[dim=51]
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1
+~                                                                     │~
+[Prompt]                                                                                               1,9            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
+    8                                                                 ├──────────────────────────────────────────────────
+    9                                                                 │  NOTES
+        🏷  keep this label stable                                     │  1 🏷  keep this label stable
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
+   11     return It╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │ Authored                                                                  1/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │                                                                                │────────────────────
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │────────────────────
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~                                                                     │  1 ⟢ summary: summary<def show_label() -> str:>
+~                                                                     │  2 ⟢ embed: vec[dim=51]
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1
+~                                                                     │~
+[Prompt]                                                                                               1,9            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
         🏷  keep this label stable                                     │  1 🏷  keep this label stable
@@ -1179,15 +1635,15 @@ store.py                                                                        
 ~                                                                     │  1
 ~                                                                     │~
 store.py                                                                                               10,1           All
-:TyO3Authored
+
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
         🏷  keep this label stable                                     │  1 🏷  keep this label stable
@@ -1223,9 +1679,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
         🏷  keep this label stable                                     │  1 🏷  keep this label stable
@@ -1261,9 +1717,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
         🏷  keep this label stable                                     │  1 🏷  keep this label stable
@@ -1299,9 +1755,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …ASF1M0P9
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/store.py::show_label
+    5                                                                 │  4   durable id  …6HD5NFVN
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+    7     return usd(Book().price())                                  │    i/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
         🏷  keep this label stable                                     │  1 🏷  keep this label stable
@@ -1337,9 +1793,9 @@ store.py                                                                        
     2     def price(self) -> int:                                     │  1   show_label
     3         return 100                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5     def label(self) -> str:                                     │  4   durable id  …ASF1M0P9
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/store.py::show_label
+    5     def label(self) -> str:                                     │  4   durable id  …6HD5NFVN
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/store.py::show_label
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 🏷  keep this label stable
@@ -1375,9 +1831,9 @@ catalog.py                                                                      
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 100                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1413,9 +1869,9 @@ catalog.py                                                                      
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 100                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1451,9 +1907,9 @@ catalog.py                                                                      
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 100                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1489,9 +1945,9 @@ catalog.py                                                                      
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 100                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1527,9 +1983,9 @@ catalog.py                                                                      
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1565,9 +2021,9 @@ catalog.py [+]                                                                  
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1603,9 +2059,9 @@ catalog.py [+]                                                                  
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1632,8 +2088,8 @@ catalog.py [+]                                                                  
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
 catalog.py [+]                                                                                         3,18           All
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -1641,9 +2097,9 @@ catalog.py [+]                                                                  
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1670,8 +2126,8 @@ catalog.py [+]                                                                  
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
 catalog.py [+]                                                                                         3,18           All
 :w
 ────────────────────────────────────────────────────────────────────────────────
@@ -1679,9 +2135,9 @@ catalog.py [+]                                                                  
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1708,8 +2164,8 @@ catalog.py [+]                                                                  
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
 catalog.py                                                                                             3,18           All
 "catalog.py" 6L, 110B written
 ────────────────────────────────────────────────────────────────────────────────
@@ -1717,9 +2173,9 @@ catalog.py                                                                      
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1746,8 +2202,8 @@ catalog.py                                                                      
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
 catalog.py                                                                                             3,18           All
 "catalog.py" 6L, 110B written
 ────────────────────────────────────────────────────────────────────────────────
@@ -1755,9 +2211,9 @@ catalog.py                                                                      
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1784,18 +2240,18 @@ catalog.py                                                                      
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
 catalog.py                                                                                             3,18           All
-:TyO3Affected
+"catalog.py" 6L, 110B written                                                                                 <20>
 ────────────────────────────────────────────────────────────────────────────────
     1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
@@ -1822,34 +2278,34 @@ catalog.py                                                                      
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
 catalog.py                                                                                             3,18           All
-:TyO3Affected
+"catalog.py" 6L, 110B written                                                                                 <20>
 ────────────────────────────────────────────────────────────────────────────────
     1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
 ~                                                                     │~
-~                  ╭────────────────────────── TyO3 Affected (last edit) ───────────────────────────╮
-~                  │                                                                           5/5 │
+~                  ╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │                                                                           9/9 │
 ~                  │────────────────────────────────────────────────────────────────────────────────│
-~                  │ show_label                                                                     │
-~                  │ Item                                                                           │────────────────────
-~                  │ Item.price                                                                     │
-~                  │ …3JARXAHV                                                                      │
-~                  │ checkout                                                                       │
-~                  │                                                                                │
-~                  │                                                                                │
-~                  │                                                                                │
-~                  │                                                                                │
+~                  │ Entities         Browse all known entities                                     │
+~                  │ Affected set     The last edit's blast radius                                  │────────────────────
+~                  │ Diagnostics      Type errors + durable layer state                             │
+~                  │ Authored notes   Entities carrying an intent note                              │
+~                  │ Docs             Open the tyo3 documentation                                   │
+~                  │ Sidebar          Toggle the accordion sidebar                                  │
+~                  │ Reindex          Reindex the project (sync_all)                                │
+~                  │ Check            Type-check the project                                        │
+~                  │ Gc               Garbage-collect derived artifacts                             │
 ~                  │                                                                                │────────────────────
 ~                  ╰────────────────────────────────────────────────────────────────────────────────╯
 ~                                                                     │  1 (none)
@@ -1860,8 +2316,8 @@ catalog.py                                                                      
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
 [Prompt]                                                                                               1,1            All
 -- INSERT --
 ────────────────────────────────────────────────────────────────────────────────
@@ -1869,21 +2325,21 @@ catalog.py                                                                      
     2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
     3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …2GWZSQBX
-    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-~                                                                     │    m/shop/catalog.py::Item
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  NOTES
 ~                                                                     │  1 (none)
 ~                                                                     │~
-~                  ╭────────────────────────── TyO3 Affected (last edit) ───────────────────────────╮
-~                  │                                                                           5/5 │
+~                  ╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │ Affected                                                                  1/9 │
 ~                  │────────────────────────────────────────────────────────────────────────────────│
-~                  │ show_label                                                                     │
-~                  │ Item                                                                           │────────────────────
-~                  │ Item.price                                                                     │
-~                  │ …3JARXAHV                                                                      │
-~                  │ checkout                                                                       │
+~                  │ Affected set     The last edit's blast radius                                  │
+~                  │                                                                                │────────────────────
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
 ~                  │                                                                                │
 ~                  │                                                                                │
 ~                  │                                                                                │
@@ -1898,23 +2354,137 @@ catalog.py                                                                      
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
+[Prompt]                                                                                               1,9            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
+    3         return 250                                              │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        class_
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     │  1 (none)
+~                                                                     │~
+~                  ╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │ Affected                                                                  1/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Affected set     The last edit's blast radius                                  │
+~                  │                                                                                │────────────────────
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │────────────────────
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~                                                                     │  1 (none)
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
+[Prompt]                                                                                               1,9            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
+    3         return 250                                              │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        class_
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     │  1 (none)
+~                                                                     │~
+~                  ╭───────────────────────────────────── TyO3 ─────────────────────────────────────╮
+~                  │ Affected                                                                  1/9 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Affected set     The last edit's blast radius                                  │
+~                  │                                                                                │────────────────────
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │────────────────────
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~                                                                     │  1 (none)
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
 catalog.py                                                                                             3,17           All
 
 ────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                           │  IDENTITY
-    2 from catalog import Item                                        │  1   Item
-    3 from money import usd                                           │  2   ────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
+    3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5                                                                 │  4   durable id  …2GWZSQBX
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/catalog.py::Item
-    8                                                                 ├──────────────────────────────────────────────────
-    9                                                                 │  NOTES
-        🏷  keep this label stable                                     │  1 (none)
-   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
-   11     return Item().label()                                       │~
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     │  1 (none)
+~                                                                     │~
+~                  ╭────────────────────────── TyO3 Affected (last edit) ───────────────────────────╮
+~                  │                                                                           5/5 │
+~                  │────────────────────────────────────────────────────────────────────────────────│
+~                  │ Item.price                                                                     │
+~                  │ Item                                                                           │────────────────────
+~                  │ checkout                                                                       │
+~                  │ show_label                                                                     │
+~                  │ …KBCQGF3X                                                                      │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │
+~                  │                                                                                │────────────────────
+~                  ╰────────────────────────────────────────────────────────────────────────────────╯
+~                                                                     │  1 (none)
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
+[Prompt]                                                                                               1,1            All
+-- INSERT --
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
+    3         return 250                                              │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        class_
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     │  1 (none)
+~                                                                     │~
+~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1936,23 +2506,23 @@ catalog.py                                                                      
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
-store.py                                                                                               10,1           All
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
+catalog.py                                                                                             3,16           All
 
 ────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                           │  IDENTITY
-    2 from catalog import Item                                        │  1   Item
-    3 from money import usd                                           │  2   ────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
+    3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5                                                                 │  4   durable id  …2GWZSQBX
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/catalog.py::Item
-    8                                                                 ├──────────────────────────────────────────────────
-    9                                                                 │  NOTES
-        🏷  keep this label stable                                     │  1 (none)
-   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
-   11     return Item().label()                                       │~
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     │  1 (none)
+~                                                                     │~
+~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1974,23 +2544,61 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
-store.py                                                                                               10,1           All
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
+catalog.py                                                                                             2,5            All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
+    3         return 250                                              │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        class_
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     │  1 (none)
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     │  5   • Dev · architecture
+~                                                                     │  6   • Dev · durable identity
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     │  1 (none)
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
+catalog.py                                                                                             2,5            All
 :qa!
 ────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                           │  IDENTITY
-    2 from catalog import Item                                        │  1   Item
-    3 from money import usd                                           │  2   ────────────────────────────────────────
+    1 class Item:   ⟢ summary<class Item:>                            │  IDENTITY
+    2     def price(self) -> int:   ⟢ summary<def price(self) -> int:>│  1   Item
+    3         return 250                                              │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        class_
-    5                                                                 │  4   durable id  …2GWZSQBX
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-lhslU
-    7     return usd(Book().price())                                  │    m/shop/catalog.py::Item
-    8                                                                 ├──────────────────────────────────────────────────
-    9                                                                 │  NOTES
-        🏷  keep this label stable                                     │  1 (none)
-   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
-   11     return Item().label()                                       │~
+    5     def label(self) -> str:   ⟢ summary<def label(self) -> str:>│  4   durable id  …0CBE20N8
+    6         return "item"                                           │  5   location    /tmp/claude-1000/tyo3-demo-91rwS
+~                                                                     │    i/shop/catalog.py::Item
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  NOTES
+~                                                                     │  1 (none)
+~                                                                     │~
+~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -2012,13 +2620,13 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 20 · Δ2 · affects {show_label, Item, Item.
-~                                                                     │    price, …ARXAHV, checkout}  → narrowed {Item, I
-store.py                                                                                               10,1           All
+~                                                                     │  1 rev 23 · Δ2 · affects {Item.price, Item, check
+~                                                                     │    out, show_label, …CQGF3X}  → narrowed {Item.pr
+catalog.py                                                                                             2,5            All
 :qa!
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-lhslUm/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-91rwSi/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 > $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/picker/init.lua store.py
 >

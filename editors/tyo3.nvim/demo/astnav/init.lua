@@ -8,6 +8,11 @@
 -- *enclosing durable entity* as the cursor moves, so "syntax under the cursor,
 -- durable identity in the dock" lands. This recording is the Phase-D verification.
 
+-- Space is the leader, so the act surface (`<leader>c`) and hub (`<leader>t`)
+-- trigger as ` c` / ` t`. Set before any keymap binds.
+vim.g.mapleader = " "
+vim.g.maplocalleader = " "
+
 vim.opt.compatible = false
 vim.cmd("syntax enable")
 vim.cmd("filetype plugin indent on")

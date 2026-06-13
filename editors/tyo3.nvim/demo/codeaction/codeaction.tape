@@ -1,11 +1,11 @@
 # tyo3.nvim — CODE ACTION demo (proj 28, Phase C). The single "act on the entity"
-# surface: one keystroke (`gra`) opens the tiny-code-action buffer picker with
-# every action glued to the durable entity under the cursor. Render with:
+# surface: one keystroke (`<leader>c`) opens the tiny-code-action buffer picker
+# with every action glued to the durable entity under the cursor. Render with:
 #   devenv shell -- demo-record-codeaction
 #   (or: vhs editors/tyo3.nvim/demo/codeaction/codeaction.tape)
 #
 # Three beats:
-#   1. `gra` on `checkout` → the hub menu (Author / Write doc / Move / Explain /
+#   1. `<leader>c` on `checkout` → the act menu (Author / Write doc / Move / Explain /
 #      Simplify) — every provider in the registry, surfaced at once.
 #   2. pick Author `intent` → snacks vim.ui.input → author a durable note (its
 #      virtual text lands glued to the entity).
@@ -38,12 +38,13 @@ Sleep 8s
 Show
 
 # ── Beat 1: land on `checkout`, open the action hub with `gra` ──
-# `checkout` is the demo's load-bearing entrypoint; `gra` is the buffer-local
-# default the bridge binds on attach. The menu lists every registry provider,
+# `checkout` is the demo's load-bearing entrypoint; `<leader>c` is the buffer-local
+# act surface the bridge binds on attach. The menu lists every registry provider,
 # grouped (Refactor: Simplify/Move · Source: Author/Explain/Write doc).
 Type "/def checkout" Enter
 Sleep 1s
-Type "gra"
+Space
+Type "c"
 Sleep 3s
 
 # ── Beat 2: pick Author `intent`, then author a note via the snacks prompt ──
@@ -59,8 +60,9 @@ Sleep 1s
 Enter
 Sleep 3s
 
-# ── Beat 3: open the hub again, step to Explain → the offline-LLM prose float ──
-Type "gra"
+# ── Beat 3: open the act menu again, step to Explain → the offline-LLM prose float ──
+Space
+Type "c"
 Sleep 2s
 Type "jjjjj"
 Sleep 800ms

@@ -3,11 +3,16 @@
 -- The navigate → observe → act loop in the snacks/sidebar idiom (proj 28): the
 -- curated stack on the rtp (snacks/edgy/tiny-code-action/treesitter/treewalker),
 -- the edgy accordion sidebar tracking the cursor, the always-on LSP bridge (so
--- `]d` walks needs_review + the type error and `gra` opens the action picker).
+-- `]d` walks needs_review + the type error and `<leader>c` opens the act menu).
 -- Loads only the curated plugins (resolved by demo/pack.lua from TYO3_NVIM_DEPS
 -- inside devenv, else the local vim.pack opt dir) + tyo3.nvim, so the recording
 -- is identical on any machine / in CI. Launched as:
 --   nvim --clean -u editors/tyo3.nvim/demo/hero/init.lua store.py
+
+-- Space is the leader, so the act surface (`<leader>c`) and hub (`<leader>t`)
+-- trigger as ` c` / ` t`. Set before any keymap binds.
+vim.g.mapleader = " "
+vim.g.maplocalleader = " "
 
 vim.opt.compatible = false
 vim.cmd("syntax enable")
@@ -49,7 +54,7 @@ require("tyo3").setup({
   debounce_ms = 250,
   virtual_text = true,
   -- The cursor-context sidebar and the native LSP bridge (so `]d` walks
-  -- needs_review + the type error and `gra` opens the action picker with the
+  -- needs_review + the type error and `<leader>c` opens the act menu with the
   -- acknowledge quickfix) are always on now — no flags needed.
   context_debounce_ms = 100,
 })

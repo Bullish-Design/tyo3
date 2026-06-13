@@ -56,6 +56,10 @@ cmd("TyO3Sidebar", function()
   require("tyo3.sidebar").toggle()
 end, { desc = "Toggle the edgy accordion sidebar" })
 
+cmd("TyO3Hub", function()
+  require("tyo3.hub").open()
+end, { desc = "Open the tyo3 hub (views + ops, fuzzy-filtered)" })
+
 cmd("TyO3Start", function()
   local bufnr = vim.api.nvim_get_current_buf()
   require("tyo3").on_buf_enter(bufnr)

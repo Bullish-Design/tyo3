@@ -8,14 +8,16 @@
 # reindex — stay at real time; they're hidden and PlaybackSpeed doesn't touch them.)
 #
 #   ACT 1  navigate by structure — treewalker hops, the sidebar morphs to track.
-#   ACT 2  one surface to act — `gra` hub: Author / Write doc / Explain; bloom.
+#   ACT 2  one surface to act — `<leader>c`: Author / Write doc / Explain; bloom.
 #   ACT 3  WOW #1 — move the function across files; the note AND doc ride it.
-#   ACT 4  WOW #2 — change a shared method; the affected picker shows the blast
-#          radius, jump to one BY IDENTITY (into the moved file).
+#   ACT 4  WOW #2 — change a shared method; the affected picker (from the hub)
+#          shows the blast radius, jump to one BY IDENTITY (into the moved file).
 #   ACT 5  WOW #3 — it remembered: a drift flags needs_review; the diagnostics
-#          picker shows it next to a type error; one keystroke acknowledges.
+#          picker (from the hub) shows it next to a type error; one keystroke acks.
 #
-# j-counts (line-by-line incl. headers/blanks from Simplify):
+# Two keys carry every TyO3 interaction: `<leader>c` (act on this entity) and
+# `<leader>t` (the hub — views + ops). No `:TyO3*` command is typed on camera.
+# Act-menu j-counts (display lines incl. headers/blanks from Simplify):
 #   Simplify=0  Move=1  [blank]=2  ##Source=3  Author=4  Explain=5  Write doc=6.
 # Snacks pickers need TWO escapes to close (1st exits insert, 2nd closes).
 
@@ -83,7 +85,8 @@ Type "/def checkout" Enter
 Sleep 1300ms
 
 # ══ ACT 2 — One surface to act; the sidebar blooms ═══════════════════════════
-Type "gra"
+Space
+Type "c"
 Sleep 2300ms
 # Author (= 4).
 Type "jjjj"
@@ -95,7 +98,8 @@ Sleep 900ms
 Enter
 Sleep 2000ms
 # Write doc (= 6): markdown editor (bottom split); :w authors, :q returns.
-Type "gra"
+Space
+Type "c"
 Sleep 1300ms
 Type "jjjjjj"
 Sleep 900ms
@@ -112,7 +116,8 @@ Sleep 700ms
 Type "/def checkout" Enter
 Sleep 1300ms
 # Explain (= 5): the offline-LLM 🤖 prose.
-Type "gra"
+Space
+Type "c"
 Sleep 1300ms
 Type "jjjjj"
 Sleep 900ms
@@ -121,7 +126,8 @@ Sleep 2300ms
 Escape
 Sleep 800ms
 # Simplify is index 0: the resolvable diff auto-previews. Close without applying.
-Type "gra"
+Space
+Type "c"
 Sleep 2000ms
 Escape
 Sleep 800ms
@@ -129,7 +135,9 @@ Sleep 800ms
 Sleep 2600ms
 
 # ══ ACT 3 — WOW #1: durable identity (the note + doc ride a move) ════════════
-Type "gra"
+# <leader>c → Move (j, offset 1) → dest prompt.
+Space
+Type "c"
 Sleep 1300ms
 Type "j"
 Sleep 900ms
@@ -155,9 +163,14 @@ Sleep 800ms
 Type ":w" Enter
 # LAND IT: the affected closure lights up + the refinement narrows it.
 Sleep 2600ms
-# Jump to an affected entity BY IDENTITY via the picker (read the 5/5 list).
-Type ":TyO3Affected" Enter
-Sleep 2000ms
+# Jump to an affected entity BY IDENTITY via the hub → "Affected" (read the list).
+Space
+Type "t"
+Sleep 1300ms
+Type "Affected"
+Sleep 1100ms
+Enter
+Sleep 1800ms
 Type "checkout"
 Sleep 1000ms
 Enter
@@ -169,7 +182,18 @@ Type ":e store.py" Enter
 Sleep 800ms
 Type "/def show_label" Enter
 Sleep 800ms
-Type ":TyO3Note keep this label stable" Enter
+# Note show_label via <leader>c → Author (jjjj) — before any drift, so the menu
+# has no Quick-fix group yet; Author is at offset 4.
+Space
+Type "c"
+Sleep 1300ms
+Type "jjjj"
+Sleep 900ms
+Enter
+Sleep 1000ms
+Type "keep this label stable"
+Sleep 900ms
+Enter
 Sleep 1500ms
 Type "/\.label" Enter
 Sleep 500ms
@@ -179,18 +203,26 @@ Sleep 600ms
 Type ":w" Enter
 # LAND IT: the needs_review ⚠ appears in the sidebar NOTES.
 Sleep 2600ms
-# The snacks diagnostics picker: needs_review next to a real type error. TWO
-# escapes to close (1st exits insert → normal, 2nd closes — else keys leak in).
-Type ":TyO3Diagnostics" Enter
+# The snacks diagnostics picker (from the hub → "Diagnostics"): needs_review next
+# to a real type error. TWO escapes to close (1st exits insert → normal, 2nd
+# closes — else keys leak in).
+Space
+Type "t"
+Sleep 1300ms
+Type "Diagnostics"
+Sleep 1100ms
+Enter
 Sleep 2600ms
 Escape
 Sleep 400ms
 Escape
 Sleep 800ms
-# `gra` → Acknowledge (isPreferred → index 0).
+# `<leader>c` → Acknowledge: with needs_review live the menu prepends a Quick-fix
+# group and Acknowledge is the preferred action at offset 0 — <CR> applies it.
 Type "/def show_label" Enter
 Sleep 800ms
-Type "gra"
+Space
+Type "c"
 Sleep 1500ms
 Enter
 # LAND IT: the cleared state — no ⚠ in NOTES, E:1 in the statusline.

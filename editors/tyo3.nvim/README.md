@@ -41,9 +41,11 @@ loop:
   identity, authored notes, docs, derived summary, and the last edit's affected
   set. **Author a note on a function, move the function to another file — the
   note rides along.** That single moment is the whole pitch.
-- **Act** on the resolved entity through one surface — a code-action picker that
-  offers Author note / Write doc / Move / Explain / Simplify / Acknowledge
-  review, entity-gated so an off-entity position offers nothing.
+- **Act** on the resolved entity through one surface — `<leader>c` opens a
+  code-action picker offering Author note / Write doc / Move / Explain / Simplify
+  / Acknowledge review, entity-gated so an off-entity position offers nothing.
+  Everything else (browse entities, the affected set, diagnostics, the sidebar,
+  ops) lives one key away in the **hub** (`<leader>t`) — no `:TyO3*` to memorize.
 
 It is **not** another diagnostics source. It is a reactive, per-entity
 intelligence layer that rides Neovim's native machinery (`vim.lsp`,
@@ -144,12 +146,16 @@ buffers (so they don't leak into the rest of your editing). Rebind any leaf in
 | `af` / `if` | **Select** a function (outer / inner body) | operator, visual |
 | `ac` / `ic` | **Select** a class (outer / inner) | operator, visual |
 | `aa` / `ia` | **Select** a parameter (outer / inner) | operator, visual |
-| `gra` | **Act**: open the code-action picker on the entity under the cursor/selection | normal, visual |
+| `<leader>c` | **Act**: open the code-action picker on the entity under the cursor/selection | normal |
+| `<leader>t` | **Hub**: one picker for every view + op (Entities · Affected · Diagnostics · Authored · Docs · Sidebar · Reindex · Check · Gc) | normal |
 
-A textobject select feeds straight into the act path: `vif` then `gra` acts on
-exactly that function. The treewalker motion defaults **shadow** the `<C-hjkl>`
-window-move keys on project python buffers only; rebind in `keymaps.treewalker`
-or set it to `false`.
+Two keys carry every TyO3 interaction: `<leader>c` (**act** on the entity under
+the cursor) and `<leader>t` (the **hub** — fuzzy-filter to any view or op instead
+of recalling a `:TyO3*` command; the commands still exist). A textobject select
+feeds straight into the act path: `vif` then `<leader>c` acts on exactly that
+function. The treewalker motion defaults **shadow** the `<C-hjkl>` window-move
+keys on project python buffers only; rebind in `keymaps.treewalker` or set it to
+`false`.
 
 ## The sidebar (observe)
 
@@ -158,8 +164,9 @@ off the entity under your cursor into five vertically stacked, content-driven
 views — `IDENTITY` · `NOTES` · `DOCS` · `SUMMARY` · `AFFECTED`. As the cursor
 moves, the view with data for the current entity expands and empty views
 collapse to title height. `DOCS` shows the entity's authored markdown doc
-(durably linked by identity — it rides edits and moves). Toggle with
-`:TyO3Sidebar`; `:TyO3Inspect` opens it focused on `IDENTITY`. See the recorded
+(durably linked by identity — it rides edits and moves). Toggle from the hub
+(`<leader>t` → "Sidebar", or `:TyO3Sidebar`); `:TyO3Inspect` opens it focused on
+`IDENTITY`. See the recorded
 tour: [`demo/sidebar/sidebar.gif`](demo/sidebar/sidebar.gif).
 
 > edgy is a global window manager: when `manage` is on it sets `laststatus=3` and
@@ -167,9 +174,9 @@ tour: [`demo/sidebar/sidebar.gif`](demo/sidebar/sidebar.gif).
 > height). That's the opinionated-distribution tradeoff; `manage = false` leaves
 > your layout untouched.
 
-## The action hub (act)
+## The act surface (`<leader>c`)
 
-`gra` opens the **tiny-code-action** buffer picker over the entity under the
+`<leader>c` opens the **tiny-code-action** buffer picker over the entity under the
 cursor — the single "act on the entity" surface. It reads code actions from the
 attached in-process LSP bridge, so the offered actions are **entity-gated**: an
 off-entity position offers nothing rather than actions that fail when picked.
@@ -186,7 +193,17 @@ picker icons them distinctly:
   engine's acknowledge), clearing the WARN.
 
 Because the picker is just LSP code actions, `vim.lsp.buf.code_action()` and any
-code-action UI work too; `gra` is the curated entry point.
+code-action UI work too; `<leader>c` is the curated entry point.
+
+## The hub (`<leader>t`)
+
+`<leader>c` acts on *one* entity; `<leader>t` is its sibling for everything else —
+a single picker that fans out to every project/buffer view and op: **Entities**,
+**Affected** set, **Diagnostics**, **Authored** notes, **Docs**, **Sidebar**,
+**Reindex**, **Check**, **Gc**. Fuzzy-filter by intent (`aff` → Affected) instead
+of recalling a `:TyO3*` command name — the commands all still exist underneath,
+and spine plugins add entries with `require("tyo3.hub").register{ … }`. Recorded
+tour: [`demo/picker/picker.gif`](demo/picker/picker.gif).
 
 ## Native LSP bridge (always on)
 
@@ -207,7 +224,7 @@ rides *your* existing config and plugins for free.
 | type hierarchy (super / sub) | `prepareTypeHierarchy` + `typeHierarchy/supertypes`·`subtypes` | `type_hierarchy` |
 | `grn` (rename) | `textDocument/prepareRename` + `textDocument/rename` | `can_rename` + `rename` |
 | `]d` / `[d`, `vim.diagnostic`, Trouble, lualine | `textDocument/diagnostic` (pull) **and** `publishDiagnostics` (push, on bus deltas) | `check` |
-| `gra` / tiny-code-action / `vim.lsp.buf.code_action()` | `textDocument/codeAction` → client commands `tyo3.*` | `entity_at`, `explain`, `author`, … |
+| `<leader>c` / tiny-code-action / `vim.lsp.buf.code_action()` | `textDocument/codeAction` → client commands `tyo3.*` | `entity_at`, `explain`, `author`, … |
 
 Beyond LSP, the bridge publishes spine **layer state** — the durable-identity
 concepts that have no LSP vocabulary — into a dedicated `vim.diagnostic`
@@ -218,9 +235,9 @@ driven by the daemon's `review_state` verb and refreshed off the bus.
 Both streams ride `vim.diagnostic`, so they coexist on one buffer. With
 `manage = true`, `setup{}` configures `vim.diagnostic` to match the rest of the
 UI — a rounded float on `]d`/`[d` jumps (like the hover/explain floats) and
-severity-sorted signs — and `:TyO3Diagnostics` opens a snacks picker listing
-*all* of a buffer's diagnostics (type errors **and** durable layer state) in one
-bordered, searchable list. `manage = false` leaves your own `vim.diagnostic.config`
+severity-sorted signs — and the hub's **Diagnostics** entry (`<leader>t`, or
+`:TyO3Diagnostics`) opens a snacks picker listing *all* of a buffer's diagnostics
+(type errors **and** durable layer state) in one bordered, searchable list. `manage = false` leaves your own `vim.diagnostic.config`
 untouched.
 
 `needs_review` is **durable level state**: a note on a `review_on_change` layer
@@ -261,7 +278,8 @@ debounce window can read slightly stale state until the next sync.
 
 ```lua
 keymaps = {
-  code_action = "gra",
+  code_action = "<leader>c",  -- act on the entity under the cursor
+  hub         = "<leader>t",  -- the hub: views + ops (false to opt out)
   textobjects = {
     function_outer = "af",  function_inner = "if",
     class_outer    = "ac",  class_inner    = "ic",
@@ -278,8 +296,13 @@ keymaps = {
 
 ## Commands
 
+Every interaction is reachable from the keyboard without the cmdline — `<leader>c`
+(act) and `<leader>t` (the hub). These commands are the named equivalents: the
+hub calls them, and they stay available for scripting and discovery.
+
 | Command | Does |
 |---|---|
+| `:TyO3Hub` | Open the hub — one fuzzy-filtered picker for every view + op below (same as `<leader>t`). |
 | `:TyO3Sidebar` | Toggle the edgy accordion sidebar. |
 | `:TyO3Inspect` | Open the sidebar focused on the IDENTITY view for the entity under the cursor. |
 | `:TyO3Note [text]` | Author an intent note on the entity under the cursor (prompts if no text). |

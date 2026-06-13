@@ -10,8 +10,8 @@
 #   2. treewalker <C-j>/<C-k> between sibling functions → the dock TRACKS the tree
 #      (checkout ↔ show_label) — "syntax under the cursor, identity in the dock".
 #   3. <C-l> descends into the function body (dock still names the enclosing entity).
-#   4. `vaf` selects the whole function (textobject), then `gra` acts on exactly
-#      that node via the code-action hub. Selection → entity, for free.
+#   4. `vaf` selects the whole function (textobject), then `<leader>c` acts on
+#      exactly that node via the act menu. Selection → entity, for free.
 # The cold open + first index is kept OFF camera with Hide/Show.
 
 Output editors/tyo3.nvim/demo/astnav/astnav.gif
@@ -54,14 +54,15 @@ Sleep 2500ms
 Ctrl+L
 Sleep 2500ms
 
-# ── Beat 4: select the whole function (textobject), then act on it via `gra` ──
+# ── Beat 4: select the whole function (textobject), then act on it via `<leader>c` ──
 Type "/def checkout" Enter
 Sleep 800ms
 Type "vaf"
 Sleep 2500ms
 Escape
 Sleep 500ms
-Type "gra"
+Space
+Type "c"
 Sleep 3s
 Type "q"
 Sleep 800ms

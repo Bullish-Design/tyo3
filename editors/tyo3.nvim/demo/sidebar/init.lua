@@ -6,6 +6,11 @@
 -- AFFECTED sections in vertically stacked accordion views. As you move through
 -- code, the section with data expands and empty sections collapse to title height.
 
+-- Space is the leader, so the act surface (`<leader>c`) and hub (`<leader>t`)
+-- trigger as ` c` / ` t`. Set before any keymap binds.
+vim.g.mapleader = " "
+vim.g.maplocalleader = " "
+
 vim.opt.compatible = false
 vim.cmd("syntax enable")
 vim.cmd("filetype plugin indent on")

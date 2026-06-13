@@ -1,14 +1,14 @@
-# tyo3.nvim — PICKER demo (proj 28, Phase B). The single-path, snacks-backed
-# pickers + prompt, navigating by durable identity. Render with:
+# tyo3.nvim — HUB demo (proj 28). One keyboard surface — the hub (`<leader>t`) —
+# reaches every TyO3 view; notes are authored from the act surface (`<leader>c`).
+# No `:TyO3*` command is ever typed. Render with:
 #   devenv shell -- demo-record-picker
 #   (or: vhs editors/tyo3.nvim/demo/picker/picker.tape)
 #
-# Four beats, each one TyO3 surface that now rides snacks (no telescope /
-# vim.ui.select fallback):
-#   1. :TyO3Entities  — pick any decorated entity → jump by identity;
-#   2. :TyO3Note      — author a note via the snacks `vim.ui.input` prompt;
-#   3. :TyO3Authored  — pick the note back from the snacks picker → jump;
-#   4. :TyO3Affected  — edit, then pick the last edit's affected set.
+# Four beats:
+#   1. <leader>t → "Entities" → pick a decorated entity → jump by identity;
+#   2. <leader>c → Author → snacks prompt → author a note on the entity;
+#   3. <leader>t → "Authored" → pick the note back → jump;
+#   4. edit Item.price, then <leader>t → "Affected" → the last edit's closure.
 # The cold open + first index is kept OFF camera with Hide/Show. Sleeps wait past
 # every async daemon round-trip.
 
@@ -36,35 +36,53 @@ Type "$TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/picker/init.lua store.py" Ente
 Sleep 8s
 Show
 
-# ── Beat 1: :TyO3Entities — pick a decorated entity, jump by identity ──
-# The snacks picker lists every entity seen so far; filtering to "show_label"
-# and confirming jumps to its *current* range (decorate-fresh, proj 27).
-Type ":TyO3Entities" Enter
-Sleep 2s
+# ── Beat 1: hub → "Entities" → pick a decorated entity, jump by identity ──
+# One key opens the hub; "Entities" filters the hub to that view and <CR> opens
+# it. The entities picker lists every entity seen so far; filtering to
+# "show_label" and confirming jumps to its *current* range (decorate-fresh).
+Space
+Type "t"
+Sleep 1500ms
+Type "Entities"
+Sleep 1200ms
+Enter
+Sleep 1800ms
 Type "show_label"
-Sleep 2s
+Sleep 1800ms
 Enter
 Sleep 2500ms
 
-# ── Beat 2: :TyO3Note — author a note through the snacks vim.ui.input prompt ──
-# No argument ⇒ TyO3 prompts; the prompt is snacks' input float now.
-Type ":TyO3Note" Enter
+# ── Beat 2: <leader>c → Author → author a note through the snacks prompt ──
+# The cursor landed on show_label from the jump; the act menu opens on it. Step
+# to Author (jjjj), confirm, and the snacks prompt takes the note.
+Space
+Type "c"
+Sleep 1500ms
+Type "jjjj"
+Sleep 800ms
+Enter
 Sleep 1500ms
 Type "keep this label stable"
 Sleep 1s
 Enter
 Sleep 2500ms
 
-# ── Beat 3: :TyO3Authored — pick the note back from the snacks picker ──
-Type ":TyO3Authored" Enter
-Sleep 2500ms
+# ── Beat 3: hub → "Authored" → pick the note back, jump ──
+Space
+Type "t"
+Sleep 1500ms
+Type "Authored"
+Sleep 1200ms
+Enter
+Sleep 2000ms
 Enter
 Sleep 2000ms
 
-# ── Beat 4: edit Item.price, then :TyO3Affected — pick the last edit's closure ──
+# ── Beat 4: edit Item.price, then hub → "Affected" → the last edit's closure ──
 # Open catalog.py and change the price literal (100 → 250) — a real structural
 # edit whose closure reaches checkout. `/100` lands on the literal so `ciw` swaps
-# just the value (catalog.py has no other 100).
+# just the value (catalog.py has no other 100). `:e`/`:w` are plain editor
+# mechanics; the TyO3 view is reached from the hub.
 Type ":e catalog.py" Enter
 Sleep 1500ms
 Type "/100" Enter
@@ -74,8 +92,13 @@ Escape
 Sleep 500ms
 Type ":w" Enter
 Sleep 4s
-Type ":TyO3Affected" Enter
-Sleep 2500ms
+Space
+Type "t"
+Sleep 1500ms
+Type "Affected"
+Sleep 1200ms
+Enter
+Sleep 2000ms
 Enter
 Sleep 2000ms
 

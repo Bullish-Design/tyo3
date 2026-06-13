@@ -1104,7 +1104,7 @@ end
 -- safety net falls back to native `vim.lsp.buf.code_action`. The picker reads
 -- code actions from the attached LSP clients, so our providers flow in for free.
 -- Buffer-local, so re-binding on re-enter is idempotent. `config.keymaps.code_action`
--- defaults to "gra"; a string rebinds, `false` opts out.
+-- defaults to "<leader>c"; a string rebinds, `false` opts out.
 local function bind_code_action_keymap(bufnr)
   local keymaps = require("tyo3.config").get().keymaps or {}
   local key = keymaps.code_action

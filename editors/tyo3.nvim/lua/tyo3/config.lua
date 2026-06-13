@@ -19,10 +19,18 @@ M.defaults = {
   -- loop. Set a key to a string to rebind, or `false` to opt out; a whole
   -- sub-table set to `false` opts the feature out.
   keymaps = {
-    -- Open the tiny-code-action buffer picker — the "act on the entity" surface
-    -- (Author / Write doc / Move / Explain·Simplify / Acknowledge). Overrides
-    -- nvim's native `gra` on project python buffers with the curated picker.
-    code_action = "gra",
+    -- The ACT surface: open the tiny-code-action buffer picker to act on the
+    -- entity under the cursor (Author / Write doc / Move / Explain·Simplify /
+    -- Acknowledge). Buffer-local on project python buffers. `<leader>c`
+    -- ("code") deliberately avoids nvim's native `gra` so it never falls
+    -- through to the default `vim.lsp.buf.code_action()`.
+    code_action = "<leader>c",
+    -- The HUB surface: open the tyo3 picker — one keyboard entry point to every
+    -- project/buffer-scoped view and op (Entities / Affected / Diagnostics /
+    -- Authored / Docs / Sidebar / Reindex / Check / Gc). Fuzzy-filter by intent
+    -- instead of recalling a `:TyO3*` command name (the commands still exist).
+    -- The sibling of `code_action`: act-on-this-entity vs. observe-the-project.
+    hub = "<leader>t",
     -- AST node SELECTIONS (treesitter-textobjects, operator-pending + visual).
     -- `vif` selects a function body; feeds straight into the entity-resolving
     -- code-action path, so `vif` then `gra` acts on exactly that function.

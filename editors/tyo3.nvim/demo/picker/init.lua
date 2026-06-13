@@ -2,10 +2,16 @@
 -- for the snacks-backed picker recording. Launched as:
 --   nvim -u editors/tyo3.nvim/demo/picker/init.lua store.py
 --
--- Single path (proj 28): the three TyO3 pickers (:TyO3Entities / :TyO3Authored /
--- :TyO3Affected) and the `vim.ui.input` prompt for :TyO3Note all route through
--- snacks — there is no telescope / `vim.ui.select` fallback. This recording is
--- the Phase-B verification that the rewrite actually drives end to end.
+-- Single path (proj 28): every TyO3 view is reached from ONE keyboard surface —
+-- the hub (`<leader>t`). It fuzzy-filters to Entities / Authored / Affected (and
+-- Diagnostics / Docs / Sidebar / ops), then opens that snacks picker; notes are
+-- authored from the act surface (`<leader>c`). No `:TyO3*` command is typed.
+-- This recording verifies the hub drives the pickers end to end.
+
+-- Space is the leader, so the act surface (`<leader>c`) and hub (`<leader>t`)
+-- trigger as ` c` / ` t`. Set before any keymap binds.
+vim.g.mapleader = " "
+vim.g.maplocalleader = " "
 
 vim.opt.compatible = false
 vim.cmd("syntax enable")
