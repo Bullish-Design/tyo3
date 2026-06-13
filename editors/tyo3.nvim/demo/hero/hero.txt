@@ -425,9 +425,9 @@
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -446,8 +446,8 @@
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -463,9 +463,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -484,8 +484,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -501,9 +501,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -522,8 +522,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def show_label() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=51]
+~                                                                     │  1 ⟢ embed: vec[dim=51]
+~                                                                     │  2 ⟢ summary: summary<def show_label() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -539,9 +539,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -560,8 +560,46 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def show_label() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=51]
+~                                                                     │  1 ⟢ embed: vec[dim=51]
+~                                                                     │  2 ⟢ summary: summary<def show_label() -> str:>
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1 rev 5 · rescan
+~                                                                     │~
+store.py                                                                                               10,1           All
+/def checkout                                                                                          [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   checkout
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …38NFMC0C
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::checkout
+    8                                                                 ├──────────────────────────────────────────────────
+    9                                                                 │  NOTES
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
+   11     return Item().label()                                       │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     │  1 📄 (no doc)
+~                                                                     │  2 reference:
+~                                                                     │  3   • User · workflow
+~                                                                     │  4   • User · command reference
+~                                                                     │  5   • Dev · architecture
+~                                                                     │  6   • Dev · durable identity
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -577,9 +615,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -598,46 +636,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  AFFECTED
-~                                                                     │  1 rev 5 · rescan
-~                                                                     │~
-store.py                                                                                               6,1            All
-/def checkout                                                                                          [1/1]
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                           │  IDENTITY
-    2 from catalog import Item                                        │  1   checkout
-    3 from money import usd                                           │  2   ────────────────────────────────────────
-    4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::checkout
-    8                                                                 ├──────────────────────────────────────────────────
-    9                                                                 │  NOTES
-   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
-   11     return Item().label()                                       │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  DOCS
-~                                                                     │  1 📄 (no doc)
-~                                                                     │  2 reference:
-~                                                                     │  3   • User · workflow
-~                                                                     │  4   • User · command reference
-~                                                                     │  5   • Dev · architecture
-~                                                                     │  6   • Dev · durable identity
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -653,9 +653,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -674,8 +674,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -691,9 +691,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -712,8 +712,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -729,9 +729,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -750,8 +750,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -767,9 +767,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7     return usd(Book().price())                                  │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7     return usd(Book().price())                                  │    0/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -788,8 +788,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -805,9 +805,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    0/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
     9                                                                 │  1 🏷  load-bearing checkout path
@@ -826,8 +826,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -843,9 +843,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    0/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
     9                                                                 │  1 🏷  load-bearing checkout path
@@ -864,8 +864,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -881,9 +881,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E3RCBDAS
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    P/shop/store.py::checkout
+    5                                                                 │  4   durable id  …38NFMC0C
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    0/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
     9                                                                 │  1 🏷  load-bearing checkout path
@@ -902,8 +902,8 @@ store.py                                                                        
 ~                                                                     │  6   • Dev · durable identity
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -948,8 +948,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 5 · rescan
-~                                                                     │  2 rev 13 · Δ0 · affects {checkout}  → narrowe@@@
+~                                                                     │  1
+~                                                                     │~
 store.py [+]                                                                                           6,0-1          All
 [tyo3] moved checkout → checkout.py (identity preserved)
 ────────────────────────────────────────────────────────────────────────────────
@@ -986,8 +986,8 @@ store.py [+]                                                                    
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 5 · rescan
-~                                                                     │  2 rev 13 · Δ0 · affects {checkout}  → narrowe@@@
+~                                                                     │  1
+~                                                                     │~
 store.py [+]                                                                                           6,0-1          All
 :e checkout.py
 ────────────────────────────────────────────────────────────────────────────────
@@ -1024,9 +1024,9 @@ store.py [+]                                                                    
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  AFFECTED
-~                                                                     │  1 rev 5 · rescan
-~                                                                     │  2 rev 13 · Δ0 · affects {checkout}  → narrowe@@@
-/tmp/claude-1000/tyo3-demo-0NzvjP/shop/checkout.py [+]                                                 1,1            All
+~                                                                     │  1
+~                                                                     │~
+/tmp/claude-1000/tyo3-demo-9kMTS0/shop/checkout.py [+]                                                 1,1            All
 :e checkout.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
@@ -1064,7 +1064,7 @@ store.py [+]                                                                    
 ~                                                                     │  AFFECTED
 ~                                                                     │  1
 ~                                                                     │~
-/tmp/claude-1000/tyo3-demo-0NzvjP/shop/checkout.py [+]                                                 1,1            All
+/tmp/claude-1000/tyo3-demo-9kMTS0/shop/checkout.py [+]                                                 1,1            All
 :e checkout.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
@@ -1102,7 +1102,7 @@ store.py [+]                                                                    
 ~                                                                     │  AFFECTED
 ~                                                                     │  1
 ~                                                                     │~
-/tmp/claude-1000/tyo3-demo-0NzvjP/shop/checkout.py [+]                                                 1,1            All
+/tmp/claude-1000/tyo3-demo-9kMTS0/shop/checkout.py [+]                                                 1,1            All
 :e store.py
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
@@ -1261,9 +1261,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  ├──────────────────────────────────────────────────
     9     return Item().label()                                       │  NOTES
 ~                                                                     │  1 (none)
@@ -1299,9 +1299,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  ├──────────────────────────────────────────────────
     9     return Item().label()                                       │  NOTES
 ~                                                                     │  1 (none)
@@ -1337,9 +1337,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  ├──────────────────────────────────────────────────
     9     return Item().label()                                       │  NOTES
 ~                                                                     │  1 (none)
@@ -1375,9 +1375,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  NOTES
     9     return Item().label()                                       │  1 🏷  keep this label stable
@@ -1413,9 +1413,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  NOTES
     9     return Item().label()                                       │  1 🏷  keep this label stable
@@ -1451,9 +1451,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  NOTES
     9     return Item().label()                                       │  1 🏷  keep this label stable
@@ -1489,9 +1489,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  NOTES
     9     return Item().price()                                       │  1 🏷  keep this label stable
@@ -1527,9 +1527,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
     8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  NOTES
     9     return Item().price()                                       │  1 🏷  keep this label stable
@@ -1565,11 +1565,11 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
-    8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  NOTES
+    8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
     9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
 ~                                                                     │~
 ~                                                                     │~
@@ -1603,47 +1603,9 @@ store.py [+]                                                                    
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
-        🏷  keep this label stable                                     ├──────────────────────────────────────────────────
-    8 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  NOTES
-    9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  DOCS
-~                                                                     │  1 📄 (no doc)
-~                                                                     │  2 reference:
-~                                                                     │  3   • User · workflow
-~                                                                     │  4   • User · command reference
-~                                                                     │  5   • Dev · architecture
-~                                                                     │  6   • Dev · durable identity
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<>
-~                                                                     │  2 ⟢ embed: vec[dim=3]
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  AFFECTED
-~                                                                     │  1 rev 5 · rescan
-~                                                                     │  2 rev 13 · Δ0 · affects {checkout}  → narrowe@@@
-store.py [+]                                                                                           9,23           All
-:w
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                           │  IDENTITY
-    2 from catalog import Item                                        │  1   show_label
-    3 from money import usd                                           │  2   ────────────────────────────────────────
-    4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
     8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
     9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -1672,16 +1634,54 @@ store.py [+]                                                                    
 ~                                                                     │  AFFECTED
 ~                                                                     │  1 rev 5 · rescan
 ~                                                                     │  2 rev 13 · Δ0 · affects {checkout}  → narrowe@@@
-store.py                                                                                               9,23           All
+store.py [+]                                                                                       W:1 9,23           All
+:w
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   show_label
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
+        🏷  keep this label stable                                     ├──────────────────────────────────────────────────
+W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
+    9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     │  1 📄 (no doc)
+~                                                                     │  2 reference:
+~                                                                     │  3   • User · workflow
+~                                                                     │  4   • User · command reference
+~                                                                     │  5   • Dev · architecture
+~                                                                     │  6   • Dev · durable identity
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     │  1 ⟢ summary: summary<>
+~                                                                     │  2 ⟢ embed: vec[dim=3]
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1 rev 5 · rescan
+~                                                                     │  2 rev 13 · Δ0 · affects {checkout}  → narrowe@@@
+store.py                                                                                           W:1 9,23           All
 "store.py" 9L, 124B written
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -1717,9 +1717,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -1755,9 +1755,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -1794,7 +1794,7 @@ store.py                                                                        
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
 ╭─────────────────── Diagnostics Buffer ───────────────────╮╭──────────────────────── store.py ────────────────────────╮
-│                                                     2/2 ││    1 from book import Book                               │j
+│                                                     2/2 ││    1 from book import Book                               │S
 │──────────────────────────────────────────────────────────││    2 from catalog import Item                            │
 │   Return type does not match returned value tyo3 (invali││    3 from money import usd                               │─
 │   needs review (intent changed) tyo3 󰈔 store.py:8       ││    4                                                     │
@@ -1832,7 +1832,7 @@ store.py                                                                        
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
 ╭─────────────────── Diagnostics Buffer ───────────────────╮╭──────────────────────── store.py ────────────────────────╮
-│                                                     2/2 ││    1 from book import Book                               │j
+│                                                     2/2 ││    1 from book import Book                               │S
 │──────────────────────────────────────────────────────────││    2 from catalog import Item                            │
 │   Return type does not match returned value tyo3 (invali││    3 from money import usd                               │─
 │   needs review (intent changed) tyo3 󰈔 store.py:8       ││    4                                                     │
@@ -1870,7 +1870,7 @@ store.py                                                                        
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
 ╭─────────────────── Diagnostics Buffer ───────────────────╮╭──────────────────────── store.py ────────────────────────╮
-│                                                     2/2 ││    1 from book import Book                               │j
+│                                                     2/2 ││    1 from book import Book                               │S
 │──────────────────────────────────────────────────────────││    2 from catalog import Item                            │
 │   Return type does not match returned value tyo3 (invali││    3 from money import usd                               │─
 │   needs review (intent changed) tyo3 󰈔 store.py:8       ││    4                                                     │
@@ -1907,47 +1907,47 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
-        🏷  keep this label stable                                     ├──────────────────────────────────────────────────
-    8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
-    9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  DOCS
-~                                                                     │  1 📄 (no doc)
-~                                                                     │  2 reference:
-~                                                                     │  3   • User · workflow
-~                                                                     │  4   • User · command reference
-~                                                                     │  5   • Dev · architecture
-~                                                                     │  6   • Dev · durable identity
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<>
-~                                                                     │  2 ⟢ embed: vec[dim=3]
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  AFFECTED
+╭─────────────────── Diagnostics Buffer ───────────────────╮╭──────────────────────── store.py ────────────────────────╮
+│                                                     2/2 ││    1 from book import Book                               │S
+│──────────────────────────────────────────────────────────││    2 from catalog import Item                            │
+│   Return type does not match returned value tyo3 (invali││    3 from money import usd                               │─
+│   needs review (intent changed) tyo3 󰈔 store.py:8       ││    4                                                     │
+│                                                          ││    5                                                     │
+│                                                          ││    6                                                     │
+│                                                          ││    7                                                     │
+│                                                          ││        🏷  keep this label stable                         │
+│                                                          ││    8 def show_label() -> str:   ⟢ summary<>              │
+│                                                          ││    9     return Item().price()                           │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │
+│                                                          ││~                                                         │─
+╰──────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
 ~                                                                     │  1 rev 5 · rescan
 ~                                                                     │  2 rev 13 · Δ0 · affects {checkout}  → narrowe@@@
-store.py                                                                                       E:1 W:1 9,23           All
+[Prompt]                                                                                               1,0-1          All
 
 ────────────────────────────────────────────────────────────────────────────────
     1 from book import Book                                           │  IDENTITY
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
     9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -1983,9 +1983,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -2021,9 +2021,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -2059,9 +2059,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -2097,9 +2097,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -2135,9 +2135,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -2173,9 +2173,9 @@ E   9     return Item().price()                                       │  1 �
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
 W   8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable ⚠
@@ -2211,9 +2211,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …NBMQJZ4E
-    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-0Nzvj
-    7                                                                 │    P/shop/store.py::show_label
+    5                                                                 │  4   durable id  …GYM4QVAQ
+    6                                                                 │  5   location    /tmp/claude-1000/tyo3-demo-9kMTS
+    7                                                                 │    0/shop/store.py::show_label
         🏷  keep this label stable                                     ├──────────────────────────────────────────────────
     8 def show_label() -> str:   ⟢ summary<>                          │  NOTES
 E   9     return Item().price()                                       │  1 🏷  keep this label stable

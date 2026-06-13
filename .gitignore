@@ -243,3 +243,4 @@ rust/target/
 
 .env.*
 .tyo3/
+editors/tyo3.nvim/demo/*/frames/

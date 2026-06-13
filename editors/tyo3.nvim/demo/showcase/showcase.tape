@@ -20,7 +20,9 @@
 # Snacks pickers need TWO escapes to close (1st exits insert, 2nd closes).
 
 Output editors/tyo3.nvim/demo/showcase/showcase.gif
+Output editors/tyo3.nvim/demo/showcase/showcase.webm
 Output editors/tyo3.nvim/demo/showcase/showcase.txt
+Output editors/tyo3.nvim/demo/showcase/frames/ # a directory of frames as a PNG sequence
 
 Require nvim
 Require python

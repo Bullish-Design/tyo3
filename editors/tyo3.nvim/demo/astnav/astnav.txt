@@ -498,7 +498,7 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-tJx8XY/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-oIhwWc/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 >
 
@@ -653,9 +653,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -691,9 +691,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -729,9 +729,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …YAWG9QA4
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::show_label
+    5                                                                 │  4   durable id  …G5KRE8CR
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -750,8 +750,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def show_label() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=51]
+~                                                                     │  1 ⟢ embed: vec[dim=51]
+~                                                                     │  2 ⟢ summary: summary<def show_label() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -767,9 +767,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   show_label
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …YAWG9QA4
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::show_label
+    5                                                                 │  4   durable id  …G5KRE8CR
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::show_label
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -788,8 +788,46 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def show_label() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=51]
+~                                                                     │  1 ⟢ embed: vec[dim=51]
+~                                                                     │  2 ⟢ summary: summary<def show_label() -> str:>
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1
+~                                                                     │~
+store.py                                                                                               10,1           All
+/def checkout                                                                                          [1/1]
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   checkout
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
+    8                                                                 ├──────────────────────────────────────────────────
+    9                                                                 │  NOTES
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
+   11     return Item().label()                                       │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     │  5   • Dev · architecture
+~                                                                     │  6   • Dev · durable identity
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -805,9 +843,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -826,8 +864,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -843,9 +881,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -864,46 +902,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  AFFECTED
-~                                                                     │  1
-~                                                                     │~
-store.py                                                                                               6,1            All
-/def checkout                                                                                          [1/1]
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                           │  IDENTITY
-    2 from catalog import Item                                        │  1   checkout
-    3 from money import usd                                           │  2   ────────────────────────────────────────
-    4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
-    8                                                                 ├──────────────────────────────────────────────────
-    9                                                                 │  NOTES
-   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
-   11     return Item().label()                                       │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  DOCS
-~                                                                     │  5   • Dev · architecture
-~                                                                     │  6   • Dev · durable identity
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -919,9 +919,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -940,8 +940,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -957,9 +957,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -978,8 +978,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -995,9 +995,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1016,8 +1016,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1033,9 +1033,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1054,8 +1054,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1071,9 +1071,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1092,8 +1092,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1109,9 +1109,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1130,46 +1130,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  AFFECTED
-~                                                                     │  1
-~                                                                     │~
-store.py                                                                                               7,30           All
--- VISUAL --                                                                                                  2
-────────────────────────────────────────────────────────────────────────────────
-    1 from book import Book                                           │  IDENTITY
-    2 from catalog import Item                                        │  1   checkout
-    3 from money import usd                                           │  2   ────────────────────────────────────────
-    4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
-    8                                                                 ├──────────────────────────────────────────────────
-    9                                                                 │  NOTES
-   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
-   11     return Item().label()                                       │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  DOCS
-~                                                                     │  5   • Dev · architecture
-~                                                                     │  6   • Dev · durable identity
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     │~
-~                                                                     ├──────────────────────────────────────────────────
-~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1185,9 +1147,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1206,8 +1168,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1223,9 +1185,47 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
+    8                                                                 ├──────────────────────────────────────────────────
+    9                                                                 │  NOTES
+   10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
+   11     return Item().label()                                       │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  DOCS
+~                                                                     │  5   • Dev · architecture
+~                                                                     │  6   • Dev · durable identity
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  SUMMARY
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     │~
+~                                                                     ├──────────────────────────────────────────────────
+~                                                                     │  AFFECTED
+~                                                                     │  1
+~                                                                     │~
+store.py                                                                                               7,30           All
+
+────────────────────────────────────────────────────────────────────────────────
+    1 from book import Book                                           │  IDENTITY
+    2 from catalog import Item                                        │  1   checkout
+    3 from money import usd                                           │  2   ────────────────────────────────────────
+    4                                                                 │  3   kind        function
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10╭──────────────────────── Code Actions ────────────────────────╮ │  1 (none)
@@ -1244,8 +1244,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1261,9 +1261,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1282,8 +1282,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1299,9 +1299,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1320,8 +1320,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1337,9 +1337,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1358,8 +1358,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1375,9 +1375,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …E68SVWB3
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-tJx8X
-    7     return usd(Book().price())                                  │    Y/shop/store.py::checkout
+    5                                                                 │  4   durable id  …87WQR5HS
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-oIhwW
+    7     return usd(Book().price())                                  │    c/shop/store.py::checkout
     8                                                                 ├──────────────────────────────────────────────────
     9                                                                 │  NOTES
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │  1 (none)
@@ -1396,8 +1396,8 @@ store.py                                                                        
 ~                                                                     │~
 ~                                                                     ├──────────────────────────────────────────────────
 ~                                                                     │  SUMMARY
-~                                                                     │  1 ⟢ summary: summary<def checkout() -> str:>
-~                                                                     │  2 ⟢ embed: vec[dim=54]
+~                                                                     │  1 ⟢ embed: vec[dim=54]
+~                                                                     │  2 ⟢ summary: summary<def checkout() -> str:>
 ~                                                                     │~
 ~                                                                     │~
 ~                                                                     │~
@@ -1410,7 +1410,7 @@ store.py                                                                        
 :qa!
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-tJx8XY/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-oIhwWc/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 > $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/astnav/init.lua store.py
 >

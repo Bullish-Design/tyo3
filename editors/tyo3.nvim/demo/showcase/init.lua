@@ -60,3 +60,25 @@ vim.api.nvim_create_autocmd("FileType", {
     pcall(vim.treesitter.start, ev.buf, "python")
   end,
 })
+
+-- ── Robust `gra` for the scripted demo ───────────────────────────────────────
+-- tyo3's `gra` (the action hub) is buffer-local to python buffers, so it wins
+-- there. nvim 0.11+ also ships a GLOBAL default `gra` → vim.lsp.buf.code_action().
+-- An async beat (the explain float / the action picker's scratch buffer) can
+-- leave the cursor in a non-python scratch buffer between scripted keystrokes;
+-- the next `gra` then falls through to that global default and errors
+-- ("codeAction not supported"). Override the global `gra` to RECOVER: jump focus
+-- back to the python code window and re-fire `gra` (which now hits the
+-- buffer-local tyo3 map). Only ever triggers off a python buffer, so it never
+-- shadows the real action hub. Invisible — no cmdline, no tape changes.
+vim.keymap.set("n", "gra", function()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local cfg = vim.api.nvim_win_get_config(win)
+    local buf = vim.api.nvim_win_get_buf(win)
+    if cfg.relative == "" and vim.bo[buf].filetype == "python" then
+      vim.api.nvim_set_current_win(win)
+      vim.api.nvim_feedkeys("gra", "m", false) -- re-fire; now hits the buffer-local map
+      return
+    end
+  end
+end, { desc = "tyo3 demo: recover `gra` to the python code window" })

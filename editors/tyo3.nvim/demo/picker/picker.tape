@@ -13,6 +13,7 @@
 # every async daemon round-trip.
 
 Output editors/tyo3.nvim/demo/picker/picker.gif
+Output editors/tyo3.nvim/demo/picker/picker.webm
 Output editors/tyo3.nvim/demo/picker/picker.txt
 
 Require nvim

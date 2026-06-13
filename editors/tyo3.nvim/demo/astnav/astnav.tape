@@ -15,6 +15,7 @@
 # The cold open + first index is kept OFF camera with Hide/Show.
 
 Output editors/tyo3.nvim/demo/astnav/astnav.gif
+Output editors/tyo3.nvim/demo/astnav/astnav.webm
 Output editors/tyo3.nvim/demo/astnav/astnav.txt
 
 Require nvim

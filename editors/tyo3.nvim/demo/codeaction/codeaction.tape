@@ -14,6 +14,7 @@
 # every async daemon round-trip.
 
 Output editors/tyo3.nvim/demo/codeaction/codeaction.gif
+Output editors/tyo3.nvim/demo/codeaction/codeaction.webm
 Output editors/tyo3.nvim/demo/codeaction/codeaction.txt
 
 Require nvim

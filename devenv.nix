@@ -105,6 +105,17 @@ let
   # Nix-built neovim-unwrapped (never the PATH wrapper — see the demo setup.sh note).
   tyo3NvimDeps = lib.concatStringsSep ":" (map toString tyo3NvimPlugins ++ [ (toString tyo3NvimPyGrammar) ]);
   tyo3NvimBin = "${pkgs.neovim-unwrapped}/bin/nvim";
+  # Re-encode a vhs webm output (path in $WEBM) to a sane size: vhs emits a huge
+  # default bitrate; VP9 CRF 36 is ~70% smaller and visually identical for a
+  # screencast (e.g. showcase 2.5M → ~800K). No-op if the file/ffmpeg is missing.
+  reencodeWebm = ''
+    if [ -f "$WEBM" ] && command -v ffmpeg >/dev/null 2>&1; then
+      echo "── re-encoding $WEBM (VP9 crf40 @12fps) ──"
+      ffmpeg -y -hide_banner -loglevel error -i "$WEBM" -r 12 -c:v libvpx-vp9 -crf 40 -b:v 0 \
+        -deadline good -cpu-used 2 -row-mt 1 -an "$WEBM.tmp.webm" \
+        && mv "$WEBM.tmp.webm" "$WEBM"
+    fi
+  '';
 in
 {
   env.GREET = "devenv";
@@ -122,6 +133,7 @@ in
     pkgs.mold            # Fast linker (replaces GNU ld for Rust LTO builds)
     pkgs.sccache         # Compiler cache for Rust (survives cargo clean)
     pkgs.vhs             # Scripted terminal recordings (tyo3.nvim demo: tour.tape → gif/cast)
+    pkgs.ffmpeg          # Re-encode vhs webm outputs to a sane size (demo-record post-step)
   ];
 
   # ── Languages (Rust + Python) ──────────────────────────────
@@ -448,6 +460,8 @@ in
       exit 1
     fi
     vhs editors/tyo3.nvim/demo/hero/hero.tape
+    WEBM=editors/tyo3.nvim/demo/hero/hero.webm
+    ${reencodeWebm}
     echo "═══ Wrote editors/tyo3.nvim/demo/hero/hero.gif ═══"
   '';
 
@@ -462,6 +476,8 @@ in
       exit 1
     fi
     vhs editors/tyo3.nvim/demo/symbols/symbols.tape
+    WEBM=editors/tyo3.nvim/demo/symbols/symbols.webm
+    ${reencodeWebm}
     echo "═══ Wrote editors/tyo3.nvim/demo/symbols/symbols.gif ═══"
   '';
 
@@ -477,6 +493,8 @@ in
       exit 1
     fi
     vhs editors/tyo3.nvim/demo/picker/picker.tape
+    WEBM=editors/tyo3.nvim/demo/picker/picker.webm
+    ${reencodeWebm}
     echo "═══ Wrote editors/tyo3.nvim/demo/picker/picker.gif ═══"
   '';
 
@@ -493,6 +511,8 @@ in
       exit 1
     fi
     vhs editors/tyo3.nvim/demo/codeaction/codeaction.tape
+    WEBM=editors/tyo3.nvim/demo/codeaction/codeaction.webm
+    ${reencodeWebm}
     echo "═══ Wrote editors/tyo3.nvim/demo/codeaction/codeaction.gif ═══"
   '';
 
@@ -509,6 +529,8 @@ in
       exit 1
     fi
     vhs editors/tyo3.nvim/demo/astnav/astnav.tape
+    WEBM=editors/tyo3.nvim/demo/astnav/astnav.webm
+    ${reencodeWebm}
     echo "═══ Wrote editors/tyo3.nvim/demo/astnav/astnav.gif ═══"
   '';
 
@@ -521,6 +543,8 @@ in
       exit 1
     fi
     vhs editors/tyo3.nvim/demo/sidebar/sidebar.tape
+    WEBM=editors/tyo3.nvim/demo/sidebar/sidebar.webm
+    ${reencodeWebm}
     echo "═══ Wrote editors/tyo3.nvim/demo/sidebar/sidebar.gif ═══"
   '';
 
@@ -538,6 +562,8 @@ in
       exit 1
     fi
     vhs editors/tyo3.nvim/demo/showcase/showcase.tape
+    WEBM=editors/tyo3.nvim/demo/showcase/showcase.webm
+    ${reencodeWebm}
     echo "═══ Wrote editors/tyo3.nvim/demo/showcase/showcase.gif ═══"
   '';
 

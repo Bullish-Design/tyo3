@@ -14,6 +14,7 @@
 # Hide/Show so the first on-camera beat is hot. Sleeps wait past every async beat.
 
 Output editors/tyo3.nvim/demo/hero/hero.gif
+Output editors/tyo3.nvim/demo/hero/hero.webm
 Output editors/tyo3.nvim/demo/hero/hero.txt
 
 Require nvim

@@ -12,6 +12,7 @@
 # queries are instant. Sleeps wait past every async daemon round-trip.
 
 Output editors/tyo3.nvim/demo/symbols/symbols.gif
+Output editors/tyo3.nvim/demo/symbols/symbols.webm
 Output editors/tyo3.nvim/demo/symbols/symbols.txt
 
 Require nvim

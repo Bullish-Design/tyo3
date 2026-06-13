@@ -16,6 +16,7 @@
 #      checkout path".
 
 Output editors/tyo3.nvim/demo/sidebar/sidebar.gif
+Output editors/tyo3.nvim/demo/sidebar/sidebar.webm
 Output editors/tyo3.nvim/demo/sidebar/sidebar.txt
 
 Require nvim
