@@ -1,16 +1,16 @@
-"""Focused unit tests for the pure ``CodeGraph.apply_code_delta`` applier (Phase 4.1).
+"""Focused unit tests for the pure ``CodeGraph.apply_code_delta`` applier.
 
 The applier is a **pure** function of ``(graph, code_delta)`` — no FFI, no
 session, no snapshot — so these tests drive it with hand-built ``CodeDeltaDto``
-dicts and assert structural outcomes directly. They pin the four properties the
-Phase 4 guide §4.1 calls out:
+dicts and assert structural outcomes directly.
 
-* a full delta then an incremental ``nodes_upserted`` of one changed node leaves
-  the rest of the graph identical;
-* a ``nodes_moved`` entry changes only the node's file/range and leaves its
-  edges intact (same DurableId, no edge churn — §5.5);
-* an ``edges_removed`` for an IMPORTS edge prunes ``_file_importers``;
-* a ``rescan=true`` delta replaces the whole graph.
+After Project 31 (#1) the applier only ever receives a *full* delta (the
+``rescan`` shape ``full_code_delta()`` emits): every graph is built on demand, so
+the incremental machinery (revision-gating, node/edge removals, in-place re-emit,
+moves) was retired. These tests pin the two properties that remain:
+
+* a full delta builds the expected graph + secondary indexes (``_file_importers``);
+* a second full delta replaces the whole graph wholesale.
 """
 
 from __future__ import annotations
@@ -108,111 +108,6 @@ def test_full_delta_builds_expected_graph():
     assert g.revision == 1
     # reverse-dep index: main.py imports models.py
     assert g._file_importers["models.py"] == {"main.py"}
-
-
-def test_incremental_upsert_leaves_rest_identical():
-    g = _seed_graph()
-    before = {n.durable_id: n.model_dump(mode="json") for n in [g._graph[i] for i in g._graph.node_indices()]}
-
-    # Re-emit only `save` with a new content hash (a body edit).
-    changed = _node(_SAVE, "save", "models.py", kind="method", qn="User.save", content_hash="deadbeef")
-    g.apply_code_delta(
-        {
-            "revision": 2,
-            "rescan": False,
-            "nodes_upserted": [changed],
-            "nodes_removed": [],
-            "nodes_moved": [],
-            "edges_added": [],
-            "edges_removed": [],
-        }
-    )
-
-    after = {n.durable_id: n.model_dump(mode="json") for n in [g._graph[i] for i in g._graph.node_indices()]}
-
-    assert after[_SAVE]["content_hash"] == "deadbeef"
-    # Every other node is byte-identical.
-    for did in before:
-        if did != _SAVE:
-            assert after[did] == before[did], f"node {did} changed unexpectedly"
-    assert g.revision == 2
-    # Edges untouched: User still contains save.
-    assert any(n.durable_id == _SAVE for n in g.children(_USER))
-
-
-def test_stale_incremental_delta_is_noop():
-    g = _seed_graph()  # revision 1
-    changed = _node(_SAVE, "save", "models.py", kind="method", qn="User.save", content_hash="STALE")
-    # revision 1 <= current 1 → stale, must be ignored.
-    g.apply_code_delta(
-        {
-            "revision": 1,
-            "rescan": False,
-            "nodes_upserted": [changed],
-            "nodes_removed": [],
-            "nodes_moved": [],
-            "edges_added": [],
-            "edges_removed": [],
-        }
-    )
-    assert g.symbol(_SAVE).content_hash == "abc"
-    assert g.revision == 1
-
-
-def test_moved_node_updates_location_only_and_keeps_edges():
-    g = _seed_graph()
-    save_edges_before = g.children(_USER)
-    assert any(n.durable_id == _SAVE for n in save_edges_before)
-
-    # Move `run` to a new file/range (same id, unchanged body).
-    g.apply_code_delta(
-        {
-            "revision": 2,
-            "rescan": False,
-            "nodes_upserted": [],
-            "nodes_removed": [],
-            "nodes_moved": [
-                {
-                    "durable_id": _RUN,
-                    "file": "app.py",
-                    "range": _rng(10, 1, 12, 1),
-                    "name_range": _rng(10, 5, 10, 8),
-                }
-            ],
-            "edges_added": [],
-            "edges_removed": [],
-        }
-    )
-
-    run = g.symbol(_RUN)
-    assert run.file == "app.py"
-    assert run.range.start.line == 10
-    # The reference edge run -> User survives the move (no edge churn).
-    refs = {tgt.durable_id for tgt, _ in g.references_from(_RUN)}
-    assert _USER in refs
-    # File index moved.
-    assert _RUN in {n.durable_id for n in g.symbols_in_file("app.py")}
-    assert _RUN not in {n.durable_id for n in g.symbols_in_file("main.py")}
-
-
-def test_edges_removed_prunes_file_importers():
-    g = _seed_graph()
-    assert g._file_importers["models.py"] == {"main.py"}
-
-    g.apply_code_delta(
-        {
-            "revision": 2,
-            "rescan": False,
-            "nodes_upserted": [],
-            "nodes_removed": [],
-            "nodes_moved": [],
-            "edges_added": [],
-            "edges_removed": [_edge(_MOD_MAIN, _MOD_MODELS, "imports", file="main.py")],
-        }
-    )
-
-    assert "main.py" not in g._file_importers.get("models.py", set())
-    assert g._importers_of({"models.py"}) == set()
 
 
 def test_rescan_replaces_whole_graph():
