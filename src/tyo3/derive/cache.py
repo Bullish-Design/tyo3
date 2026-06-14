@@ -73,13 +73,21 @@ class ArtifactCache:
         self._store.delete(key.to_store_key())
 
     def gc(self, reachable_keys: set[str]) -> None:
-        """Delete artifacts not in *reachable_keys*.
+        """Delete artifacts whose store key is not in *reachable_keys*.
 
-        *reachable_keys* should be the set of store keys (``input_hash:version``)
-        for all currently-referenced artifacts. Only removes keys from this
-        specific generator_version space.
+        *reachable_keys* are full store keys (``input_hash:generator_version``)
+        for the one generator_version being collected; keys for other versions
+        are not passed in and so are retained (rollback support). A store with
+        no ``iter_keys`` (e.g. the vector store) is a no-op. Empty
+        *reachable_keys* deletes nothing (safe).
         """
-        # Collect all store keys currently in the store.
-        # For FsStore, we need to walk the directory tree.
-        # For now, this is a no-op — GC is invoked explicitly via session.gc().
-        pass
+        iter_keys = getattr(self._store, "iter_keys", None)
+        if iter_keys is None:
+            return
+        versions = {k.split(":", 1)[1] for k in reachable_keys if ":" in k}
+        for key in list(iter_keys()):
+            parts = key.split(":", 1)
+            if len(parts) != 2 or parts[1] not in versions:
+                continue  # malformed or a different generator_version — retained
+            if key not in reachable_keys:
+                self.delete(CacheKey.from_store_key(key))

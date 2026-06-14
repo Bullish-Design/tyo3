@@ -1,10 +1,21 @@
-"""Filesystem artifact store backend."""
+"""Filesystem artifact store backend.
+
+On-disk layout is *structural content-addressing*: an artifact for store key
+``<input_hash>:<generator_version>`` lives at
+``root/<version_enc>/<input_hash[:2]>/<input_hash>``. The path *is* the key, so
+the key space is enumerable (``iter_keys``) and GC needs no reverse lookup. Each
+``generator_version`` is its own subtree (version isolation / rollback).
+
+(The format changed from the prior opaque ``sha256(key)`` sharding; old caches
+are abandoned, not migrated — derived artifacts are regenerable.)
+"""
 
 from __future__ import annotations
 
-import hashlib
 import os
+from collections.abc import Iterator
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 from tyo3.exceptions import StoreBackendBroken
 
@@ -46,8 +57,27 @@ class FsStore:
             pass
 
     def _path(self, key: str) -> Path:
-        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
-        return self.root / digest[:2] / digest[2:4] / digest
+        input_hash, _, version = key.partition(":")
+        vdir = quote(version, safe="")
+        shard = input_hash[:2] if len(input_hash) >= 2 else "_"
+        return self.root / vdir / shard / input_hash
+
+    def iter_keys(self) -> Iterator[str]:
+        """Yield every store key held, reconstructed from the path layout
+        (``root/<version_enc>/<shard>/<input_hash>``)."""
+        if not self.root.exists():
+            return
+        for vdir in self.root.iterdir():
+            if not vdir.is_dir():
+                continue
+            version = unquote(vdir.name)
+            for shard in vdir.iterdir():
+                if not shard.is_dir():
+                    continue
+                for f in shard.iterdir():
+                    # In-flight `put` writes a sibling `.tmp` in the same shard.
+                    if f.is_file() and f.suffix != ".tmp":
+                        yield f"{f.name}:{version}"
 
 
 __all__ = ["FsStore"]
