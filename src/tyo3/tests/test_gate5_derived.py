@@ -737,11 +737,12 @@ path = "cache/upper"
         session.gc()  # should not raise
 
 
-def test_gc_preserves_active_and_prior_versions():
-    """GC with orphans policy only removes truly unreferenced artifacts.
+def test_gc_evicts_orphans_and_preserves_active_and_prior_versions():
+    """GC with orphans policy removes only truly unreferenced artifacts.
 
-    Active-version artifacts and prior-version artifacts (rollback targets)
-    are preserved.
+    Orphans in the collected generator_version are deleted; reachable artifacts
+    and artifacts from other (uncollected) versions — rollback targets — are
+    preserved.
     """
     import shutil
     import tempfile
@@ -756,19 +757,103 @@ def test_gc_preserves_active_and_prior_versions():
     # Put artifacts.
     cache.put(CacheKey("h1", "v1"), b"a1")
     cache.put(CacheKey("h2", "v1"), b"a2")
-    cache.put(CacheKey("h3", "v1"), b"a3")  # orphan
-    cache.put(CacheKey("h1", "v2"), b"a1_v2")  # prior version
+    cache.put(CacheKey("h3", "v1"), b"a3")  # orphan (same version)
+    cache.put(CacheKey("h1", "v2"), b"a1_v2")  # prior version (uncollected)
 
-    # h1 and h2 are reachable in current v1; h3 is orphan.
-    reachable = {"h1:v1", "h2:v1"}
-    # GC is idempotent — no crash.
-    # Currently GC is a no-op for FsStore (deferred full impl).
-    cache.gc(reachable)
+    # h1 and h2 are reachable in current v1; h3 is orphan. v2 is not collected.
+    cache.gc({"h1:v1", "h2:v1"})
 
-    # All artifacts still present (GC is deferred).
-    assert cache.get(CacheKey("h1", "v1")) == b"a1"
-    assert cache.get(CacheKey("h2", "v1")) == b"a2"
+    assert cache.get(CacheKey("h1", "v1")) == b"a1"  # reachable → retained
+    assert cache.get(CacheKey("h2", "v1")) == b"a2"  # reachable → retained
+    assert cache.get(CacheKey("h3", "v1")) is None  # orphan → deleted
+    assert cache.get(CacheKey("h1", "v2")) == b"a1_v2"  # other version → retained
+
+    # Empty reachable set deletes nothing (collects no versions — safe).
+    cache.put(CacheKey("h3", "v1"), b"a3")
+    cache.gc(set())
     assert cache.get(CacheKey("h3", "v1")) == b"a3"
-    assert cache.get(CacheKey("h1", "v2")) == b"a1_v2"
 
     shutil.rmtree(d, ignore_errors=True)
+
+
+def test_fs_store_iter_keys_round_trips():
+    """``iter_keys`` reconstructs exactly the put keys, including a
+    generator_version with a URL-unsafe char (exercises quote/unquote)."""
+    import shutil
+    import tempfile
+
+    from tyo3.stores.fs import FsStore
+
+    d = tempfile.mkdtemp()
+    store = FsStore(d)
+    keys = {
+        "aa11:v1",
+        "bb22:v1",
+        "aa11:v2",
+        "cc33:feature/x:dirty",  # ':' and '/' in the generator_version
+    }
+    for k in keys:
+        store.put(k, k.encode())
+
+    assert set(store.iter_keys()) == keys
+    # Round-trip get works through the structural layout.
+    for k in keys:
+        assert store.get(k) == k.encode()
+
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_session_gc_deletes_orphan_artifact(tmp_path):
+    """End-to-end: ``session.gc()`` evicts an unreachable derived artifact while
+    retaining the reachable one (store with ``gc = "orphans"``)."""
+    from tyo3 import TyO3Session
+    from tyo3.derive.cache import CacheKey
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "echo_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv"
+serving = "block"
+
+[generators.echo_gen]
+type = "python"
+callable = "tyo3.tests.test_gate5_derived:echo_generator"
+
+[stores.kv]
+backend = "fs"
+path = "cache/upper"
+gc = "orphans"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id
+        # serving="block" → reading materialises (produces + caches) foo's artifact.
+        assert session.derived("upper", foo_id).artifact is not None
+
+        dag = session._get_derivation()
+        layer = dag.layer("upper")
+        # Inject an unreachable orphan in the same generator_version space.
+        orphan = CacheKey("0" * 32, layer.generator_version)
+        layer.cache.put(orphan, b"orphan-junk")
+        assert layer.cache.has(orphan)
+
+        session.gc()
+
+        assert not layer.cache.has(orphan)  # unreachable → evicted
+        assert session.derived("upper", foo_id).artifact is not None  # reachable → kept

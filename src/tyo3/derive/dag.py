@@ -617,31 +617,14 @@ def _kind_for_id(snapshot: Snapshot, durable_id: str) -> str:
 
 
 def _gc_store(layer: DerivedLayer, reachable_keys: set[str]) -> None:
-    """Delete unreachable artifacts from a layer's backing store.
+    """Delete unreachable artifacts in this layer's generator_version space.
 
-    Walks the store's key space and deletes keys not in *reachable_keys*.
-    Only affects the layer's current generator_version space (keys for
-    other versions are preserved for rollback).
+    Delegates to ``ArtifactCache.gc``, which enumerates keys via the backend's
+    ``iter_keys``. A backend without ``iter_keys`` (the vector store) is a safe
+    no-op. Keys for other generator_versions are not in *reachable_keys* and are
+    preserved for rollback.
     """
-    store = layer.cache._store
-    # For FsStore, walk the directory tree to find all keys.
-    from pathlib import Path
-
-    if hasattr(store, "root"):
-        root = Path(store.root)
-        if root.exists():
-            for path in root.rglob("*"):
-                if not path.is_file() or path.suffix == ".tmp":
-                    continue
-                # Decode the path back to a store key.
-                # FsStore uses sha256 hex dirs: root/dd/dd/digest
-                rel = path.relative_to(root)
-                parts = rel.parts
-                if len(parts) == 3 and len(parts[0]) == 2 and len(parts[1]) == 2:
-                    # `parts[2]` is the content digest. Reverse-lookup from digest
-                    # to store key is not implemented yet, so GC for filesystem
-                    # stores is deferred to the full implementation.
-                    pass
+    layer.cache.gc(reachable_keys)
 
 
 def _entity_source(snapshot: Snapshot, durable_id: str) -> str:

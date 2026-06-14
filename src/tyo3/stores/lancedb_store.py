@@ -11,7 +11,12 @@ from typing import Any
 
 
 class LanceDbStore:
-    """VectorStore backed by LanceDB (lazy import)."""
+    """VectorStore backed by LanceDB (lazy import).
+
+    Note: this backend intentionally exposes no ``iter_keys``, so
+    ``ArtifactCache.gc`` is a deliberate no-op for vector layers — orphan GC of
+    the vector store is unimplemented (not silently broken).
+    """
 
     def __init__(
         self,
