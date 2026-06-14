@@ -1,10 +1,10 @@
 //! The code-delta wire contract (Phase 2, §5.4).
 //!
 //! These DTOs describe the precise set of node/edge upserts, removals, and moves
-//! a commit makes to the native code layer. They pythonize cleanly (field names
-//! match the Python `CodeGraph.apply_code_delta` applier exactly) and are
-//! designed to **nest** into the Phase 3 `CommitDelta` as its `code_delta` field
-//! — they hold no back-reference to `SyncResultDto`.
+//! that reconstruct the native code layer. They pythonize cleanly (field names
+//! match the Python `CodeGraph.apply_code_delta` applier exactly). They are
+//! produced on demand by `full_code_delta()` for build-on-demand graph
+//! construction; they are **not** nested into `CommitDelta` (Project 31, #2).
 //!
 //! Field tiers (mirrors `parity_oracle.py`): `durable_id`, `name`,
 //! `qualified_name`, `kind`, `file`, `range`, `content_hash`, and `external` are

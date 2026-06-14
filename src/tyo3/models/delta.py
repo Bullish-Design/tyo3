@@ -4,13 +4,17 @@
 ``CommitDeltaDto``.  Where the legacy ``SyncResult`` carried file-path strings,
 this carries **entity DurableIds**: ``created_ids`` / ``changed_ids`` /
 ``deleted_ids`` (``changed`` means the content hash changed — never "a path
-rebind happened"), a structured ``moved`` (``id`` + old/new location), the
-transitively ``affected_ids``, and the **nested** Phase 2 ``code_delta``.
+rebind happened"), a structured ``moved`` (``id`` + old/new location), and the
+transitively ``affected_ids``.
+
+The structural code delta is no longer carried here (Project 31, #2): the native
+``CodeLayer`` still maintains ``reverse_deps`` in-commit (computing
+``affected_ids``), but graph consumers build on demand from ``full_code_delta()``
+rather than replaying a per-commit structural diff.
 
 The path-shaped ``created`` / ``changed`` / ``deleted`` / ``touched_files``
 fields are **metadata** (the files the write synthesised events for), kept for
-file-interest bus matching and for the still-path-shaped post-commit helpers
-that Phases 6–7 will rewrite.  They are never an id substitute (§5.4).
+file-interest bus matching.  They are never an id substitute (§5.4).
 """
 
 from __future__ import annotations
@@ -44,9 +48,6 @@ class CommitDelta(BaseModel):
     moved: list[MovedEntity] = Field(default_factory=list)
     authored_ids: list[str] = Field(default_factory=list)
     affected_ids: list[str] = Field(default_factory=list)
-
-    # ── nested structural delta (the native CodeDeltaDto, carried as a dict) ──
-    code_delta: dict | None = None
 
     # ── path-shaped metadata (NOT ids) ──────────────────────────────────
     # Directly-edited files (project-relative). The bus's file-interest surface.

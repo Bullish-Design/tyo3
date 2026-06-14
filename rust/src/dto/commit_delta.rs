@@ -11,14 +11,16 @@
 //!   - `affected_ids` — the transitive closure of `changed ∪ deleted` under the
 //!     code layer's reverse-dependency index, computed at the source
 //!     (container-granular, never-miss)
-//!   - `code_delta` — the structural `CodeDeltaDto`, **nested** (not duplicated)
 //!
 //! `touched_files` and the per-category `created`/`changed`/`deleted` path lists are
 //! **metadata only** — the file paths the write synthesised events for. They exist
 //! for file-interest bus matching (Phase 6) and human readability, and must never
 //! stand in for an entity id (§5.4).
-
-use crate::dto::CodeDeltaDto;
+//!
+//! The structural `CodeDeltaDto` is **not** carried here. The native `CodeLayer`
+//! still maintains `reverse_deps` in-commit (that is what computes `affected_ids`),
+//! but the per-commit structural diff is no longer emitted: graph consumers build
+//! on demand from `full_code_delta()` (Project 31, #2).
 
 /// A structured move: same `id`, unchanged body, new location.
 ///
@@ -52,20 +54,6 @@ pub struct CommitDeltaDto {
     /// Transitive closure of `changed ∪ deleted` under `reverse_deps` — the
     /// container-granular, never-miss affected set computed in-commit.
     pub affected_ids: Vec<String>,
-
-    // ── nested structural delta ──────────────────────────────────────────
-    /// Three-state structural delta (§5.3):
-    ///   - `None` (absent)        → no structural delta was computed this commit
-    ///     ⇒ the consumer rebuilds the head graph from a full native delta;
-    ///   - `Some(empty)`          → computed, nothing changed (e.g. a
-    ///     whitespace-only edit) ⇒ a clean no-op apply;
-    ///   - `Some(populated)`      → the incremental delta ⇒ apply it.
-    ///
-    /// `build_commit_delta` emits `None` only for writes that don't reconcile the
-    /// code layer (e.g. `author`); a structural edit always carries `Some` (an
-    /// empty delta for a cosmetic edit). Pythonizes to `None` / a dict, matching
-    /// Python `CommitDelta.code_delta: dict | None`.
-    pub code_delta: Option<CodeDeltaDto>,
 
     // ── path-shaped metadata (NOT ids — for bus file-interest + readability) ─
     /// Union of the path-level created/changed/deleted strings, **project-relative**
@@ -104,17 +92,9 @@ pub struct CommitDeltaDto {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::{CodeEdgeDto, CodeNodeDto, PositionDto, RangeDto};
-
-    fn range(sl: u32, sc: u32, el: u32, ec: u32) -> RangeDto {
-        RangeDto {
-            start: PositionDto { line: sl, column: sc },
-            end: PositionDto { line: el, column: ec },
-        }
-    }
 
     #[test]
-    fn commit_delta_round_trips_with_nested_code_delta_and_python_field_names() {
+    fn commit_delta_round_trips_id_level_and_path_metadata_with_python_field_names() {
         let delta = CommitDeltaDto {
             revision: 9,
             created_ids: vec!["01CREATED".into()],
@@ -129,34 +109,6 @@ mod tests {
             }],
             authored_ids: vec![],
             affected_ids: vec!["01CHANGED".into(), "01DELETED".into()],
-            code_delta: Some(CodeDeltaDto {
-                revision: 9,
-                rescan: false,
-                nodes_upserted: vec![CodeNodeDto {
-                    durable_id: "01CHANGED".into(),
-                    name: "foo".into(),
-                    qualified_name: "foo".into(),
-                    kind: "function".into(),
-                    file: "a.py".into(),
-                    range: range(1, 1, 2, 1),
-                    name_range: Some(range(1, 5, 1, 8)),
-                    content_hash: Some("beef".into()),
-                    content_hashes: std::collections::HashMap::new(),
-                    external: false,
-                    package: None,
-                }],
-                nodes_removed: vec![],
-                nodes_moved: vec![],
-                edges_added: vec![CodeEdgeDto {
-                    source_id: "<module>a.py".into(),
-                    destination_id: "01CHANGED".into(),
-                    kind: "defines".into(),
-                    role: None,
-                    file: None,
-                    range: None,
-                }],
-                edges_removed: vec![],
-            }),
             touched_files: vec!["a.py".into()],
             affected_files: vec!["a.py".into(), "b.py".into()],
             created: vec![],
@@ -182,8 +134,8 @@ mod tests {
         assert_eq!(json["moved"][0]["id"], "01MOVED");
         assert_eq!(json["moved"][0]["old_file"], "a.py");
         assert_eq!(json["moved"][0]["new_file"], "b.py");
-        // the code delta is nested, not hoisted.
-        assert_eq!(json["code_delta"]["nodes_upserted"][0]["durable_id"], "01CHANGED");
+        // the structural code delta is no longer nested in the commit delta.
+        assert!(json.get("code_delta").is_none());
         // touched files are path-shaped metadata, kept separate from ids.
         assert_eq!(json["touched_files"][0], "a.py");
         // affected files are the project-relative files of the affected closure,
@@ -196,21 +148,5 @@ mod tests {
         assert_eq!(back.revision, 9);
         assert_eq!(back.changed_ids, vec!["01CHANGED".to_string()]);
         assert_eq!(back.moved.len(), 1);
-        assert_eq!(back.code_delta.unwrap().nodes_upserted.len(), 1);
-    }
-
-    #[test]
-    fn absent_code_delta_pythonizes_to_null_not_empty_dict() {
-        // The deferred-producer path emits `None`; it must serialise to JSON
-        // null (Python `None`), NOT an empty `{}` dict — the consumer keys
-        // rebuild-vs-noop on absence, so absent must be distinguishable from
-        // "computed, empty".
-        let delta = CommitDeltaDto {
-            revision: 3,
-            code_delta: None,
-            ..Default::default()
-        };
-        let json = serde_json::to_value(&delta).unwrap();
-        assert!(json["code_delta"].is_null());
     }
 }
