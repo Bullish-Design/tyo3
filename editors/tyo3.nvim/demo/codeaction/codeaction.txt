@@ -498,7 +498,7 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-TJqg2N/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-uNrbhA/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 >
 
@@ -653,9 +653,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -691,9 +691,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -729,9 +729,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -767,9 +767,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
 ╭──────────────────────── Code Actions ────────────────────────╮      │~
 │##   Refactor                                                │tr:>  │~
@@ -805,9 +805,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
 ╭──────────────────────── Code Actions ────────────────────────╮      │~
 │##   Refactor                                                │tr:>  │~
@@ -843,9 +843,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
 ╭──────────────────────── Code Actions ────────────────────────╮      │~
 │##   Refactor                                                │tr:>  │~
@@ -881,9 +881,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮──────────────────────────
     4                        │                                                           │nction
-    5                        ╰────────────────────────────────────────────────────────────╯NN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                        ╰────────────────────────────────────────────────────────────╯8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -919,9 +919,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮──────────────────────────
     4                        │                                                           │nction
-    5                        ╰────────────────────────────────────────────────────────────╯NN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                        ╰────────────────────────────────────────────────────────────╯8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -957,9 +957,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮──────────────────────────
     4                        │   load-bearing checkout path                              │nction
-    5                        ╰────────────────────────────────────────────────────────────╯NN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                        ╰────────────────────────────────────────────────────────────╯8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -995,9 +995,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd  ╭─────────────────────── intent note ────────────────────────╮──────────────────────────
     4                        │   load-bearing checkout path                              │nction
-    5                        ╰────────────────────────────────────────────────────────────╯NN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                        ╰────────────────────────────────────────────────────────────╯8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -1033,9 +1033,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    7     return usd(Book().price())                                  │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    7     return usd(Book().price())                                  │    A/shop/store.py::checkout
     8                                                                 │  6   hash        242267316063
     9                                                                 │~
    10 def show_label() -> str:   ⟢ summary<def show_label() -> str:>  │~
@@ -1071,9 +1071,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
     9                                                                 │  1 🏷  load-bearing checkout path
@@ -1109,9 +1109,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
     9                                                                 │  1 🏷  load-bearing checkout path
@@ -1147,9 +1147,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
     9                                                                 │  1 🏷  load-bearing checkout path
@@ -1185,9 +1185,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
 ╭──────────────────────── Code Actions ────────────────────────╮      │  1 🏷  load-bearing checkout path
@@ -1223,9 +1223,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
 ╭──────────────────────── Code Actions ────────────────────────╮      │  1 🏷  load-bearing checkout path
@@ -1261,9 +1261,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
 ╭──────────────────────── Code Actions ────────────────────────╮      │  1 🏷  load-bearing checkout path
@@ -1299,9 +1299,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7     return usd(Book().price())                                  ├──────────────────────────────────────────────────
     8                                                                 │  NOTES
     9                                                                 │  1 🏷  load-bearing checkout path
@@ -1337,9 +1337,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7 ╭───────────────────────────tyo3: explain────────────────────────────╮─────────────────────────────────────────────
     8 │Prices a single book for sale — the load-bearing purchase path.     │TES
     9 │checkout constructs a Book, reads its inherited price(), and        │  load-bearing checkout path
@@ -1375,9 +1375,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7 ╭───────────────────────────tyo3: explain────────────────────────────╮─────────────────────────────────────────────
     8 │Prices a single book for sale — the load-bearing purchase path.     │TES
     9 │checkout constructs a Book, reads its inherited price(), and        │  load-bearing checkout path
@@ -1413,9 +1413,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7 ╭───────────────────────────tyo3: explain────────────────────────────╮─────────────────────────────────────────────
     8 │Prices a single book for sale — the load-bearing purchase path.     │TES
     9 │checkout constructs a Book, reads its inherited price(), and        │  load-bearing checkout path
@@ -1451,9 +1451,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7 ╭───────────────────────────tyo3: explain────────────────────────────╮─────────────────────────────────────────────
     8 │Prices a single book for sale — the load-bearing purchase path.     │TES
     9 │checkout constructs a Book, reads its inherited price(), and        │  load-bearing checkout path
@@ -1489,9 +1489,9 @@ store.py                                                                        
     2 from catalog import Item                                        │  1   checkout
     3 from money import usd                                           │  2   ────────────────────────────────────────
     4                                                                 │  3   kind        function
-    5                                                                 │  4   durable id  …PNN07EG2
-        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-TJqg2
-    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    N/shop/store.py::checkout
+    5                                                                 │  4   durable id  …Z8F8ZR4G
+        🏷  load-bearing checkout path                                 │  5   location    /tmp/claude-1000/tyo3-demo-uNrbh
+    6 def checkout() -> str:   ⟢ summary<def checkout() -> str:>      │    A/shop/store.py::checkout
     7 ╭───────────────────────────tyo3: explain────────────────────────────╮─────────────────────────────────────────────
     8 │Prices a single book for sale — the load-bearing purchase path.     │TES
     9 │checkout constructs a Book, reads its inherited price(), and        │  load-bearing checkout path
@@ -1524,7 +1524,7 @@ store.py                                                                        
 :qa!
 ────────────────────────────────────────────────────────────────────────────────
 > source editors/tyo3.nvim/demo/setup.sh && cd $TYO3_DEMO_DIR
-tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-TJqg2N/shop
+tyo3 demo project ready: /tmp/claude-1000/tyo3-demo-uNrbhA/shop
 tyo3 demo nvim:          /nix/store/f5l29nrlmqsjfm8gwnd4038izih7k25z-neovim-unwrapped-0.12.2/bin/nvim
 > $TYO3_NVIM --clean -u $TYO3_PLUGIN_DIR/demo/codeaction/init.lua store.py
 >
