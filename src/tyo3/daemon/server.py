@@ -54,8 +54,21 @@ def default_socket_path(root: str | Path) -> Path:
     resolved = str(Path(root).resolve())
     digest = hashlib.sha1(resolved.encode()).hexdigest()[:16]
     base = os.environ.get("XDG_RUNTIME_DIR")
-    parent = Path(base) / "tyo3" if base else Path(tempfile.gettempdir()) / "tyo3"
+    if base:
+        parent = Path(base) / "tyo3"
+    else:
+        # Shared-/tmp fallback: a uid suffix keeps each user's daemon dir
+        # distinct, so `exist_ok=True` can never reuse a dir owned by another
+        # user. We still restrict the dir to the owner below.
+        parent = Path(tempfile.gettempdir()) / f"tyo3-{os.getuid()}"
     parent.mkdir(parents=True, exist_ok=True)
+    # Owner-only: the daemon RPC surface (file edits/reads, LLM calls) must not
+    # be reachable by other local users. AF_UNIX connect permission is gated by
+    # the socket file (chmod'd 0600 in _bind); the 0700 parent is defence in depth.
+    try:
+        os.chmod(parent, 0o700)
+    except OSError:
+        pass
     return parent / f"{digest}.sock"
 
 
@@ -211,6 +224,11 @@ class DaemonServer:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(str(self._socket_path))
+        # Owner-only connect permission (AF_UNIX is gated by the socket file).
+        try:
+            os.chmod(self._socket_path, 0o600)
+        except OSError:
+            pass
         sock.listen(16)
         sock.settimeout(0.5)  # so the accept loop can observe _shutdown
         self._server_sock = sock
