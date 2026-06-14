@@ -28,9 +28,12 @@ def test_session_graph_updates_after_edit(tmp_path: StdPath) -> None:
 
         result = session.edit("a.py", "x = 1\ny = 2\n")
 
-        assert session.graph is graph
-        assert graph.revision == result.revision
-        assert "y" in _node_names(graph)
+        # Build-on-demand (Project 31 #1b): the commit dropped the prior graph;
+        # the next access rebuilds a fresh graph at the new revision.
+        new_graph = session.graph
+        assert new_graph is not graph
+        assert new_graph.revision == result.revision
+        assert "y" in _node_names(new_graph)
 
 
 def test_snapshot_graph_is_pinned_across_head_edits(tmp_path: StdPath) -> None:

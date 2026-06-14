@@ -1,10 +1,11 @@
-"""Tests for incremental HEAD-graph updates via the native code delta (Phase 4).
+"""Tests for the build-on-demand HEAD graph (Project 31, #1b).
 
-The live HEAD graph (``session.graph``) is maintained across writes by the native
-post-commit path (``_apply_graph_delta`` → ``apply_code_delta`` / a full-delta
-rebuild). These tests assert that the incrementally-maintained head graph stays
-**structurally equal** to a fresh native ``CodeGraph.build`` of the same revision
-— the cutover's core guarantee. (The pure applier itself is unit-tested in
+The HEAD graph (``session.graph``) is no longer maintained incrementally across
+writes: each commit drops it (``_invalidate_head_snap``) and the next access
+rebuilds it on demand from a full native ``full_code_delta()``. These tests
+assert that the rebuilt head graph is **structurally equal** to a fresh native
+``CodeGraph.build`` of the same revision — the on-demand build is correct after
+every write kind. (The pure applier itself is unit-tested in
 ``test_graph_apply_code_delta.py``; producer↔legacy parity in
 ``test_final_parity_oracle.py``.)
 """
@@ -44,15 +45,19 @@ def _assert_structurally_equal(a: CodeGraph, b: CodeGraph) -> None:
     )
 
 
-# ── Core parity tests: incrementally-maintained head == fresh native build ──
+# ── Core parity tests: on-demand head graph == fresh native build ──────────
+#
+# Each test reads ``s.graph`` *after* the mutation, so it exercises the
+# build-on-demand rebuild at the new revision (the head graph captured before a
+# write is intentionally dropped by the commit).
 
 
 def test_changed_file_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User:\n    def save(self): ...\n")
     (tmp_path / "app.py").write_text("from models import User\n\n\ndef run():\n    return User().save()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = s.graph  # live HEAD graph (native projection)
         s.edit("models.py", "class User:\n    def save(self): ...\n    def load(self): ...\n")
+        g = s.graph  # rebuilt on demand at the new revision
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -60,9 +65,9 @@ def test_changed_file_equals_rebuild(tmp_path: StdPath) -> None:
 def test_created_file_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "app.py").write_text("X = 1\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = s.graph
         sync = s.edit("helpers.py", "def helper():\n    return 42\n")  # Created
         assert sync.created, "expected a created file in the delta"
+        g = s.graph
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -71,10 +76,10 @@ def test_deleted_file_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User: ...\n")
     (tmp_path / "app.py").write_text("from models import User\nu = User()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = s.graph
         (tmp_path / "app.py").unlink()
         sync = s.sync_path("app.py")
         assert sync.deleted, "expected a deleted file in the delta"
+        g = s.graph
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -84,8 +89,8 @@ def test_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User:\n    def save(self): ...\n")
     (tmp_path / "app.py").write_text("from models import User\n\n\ndef run():\n    return User().save()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = s.graph
         s.edit("models.py", "class User:\n    def save(self): ...\n    def extra(self): ...\n")
+        g = s.graph
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -98,9 +103,9 @@ def test_revalidates_inbound_cross_file_edges(tmp_path: StdPath) -> None:
 def test_rescan_equals_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = s.graph
         sync = s.sync_all()
         assert sync.rescan
+        g = s.graph
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
 
@@ -116,13 +121,13 @@ def test_importers_index_populated_after_build(tmp_path: StdPath) -> None:
         assert "app.py" in g._file_importers.get("models.py", set())
 
 
-def test_importers_index_survives_edit(tmp_path: StdPath) -> None:
+def test_importers_index_populated_after_edit(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User: ...\n")
     (tmp_path / "app.py").write_text("from models import User\nu = User()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = s.graph
         s.edit("models.py", "class User:\n    name: str\n")
-        assert "app.py" in g._file_importers.get("models.py", set())  # maintained, not lost
+        g = s.graph  # rebuilt on demand — index repopulated wholesale
+        assert "app.py" in g._file_importers.get("models.py", set())
 
 
 # ── Sequence ─────────────────────────────────────────────────────────────
@@ -132,12 +137,26 @@ def test_edit_sequence_matches_rebuild(tmp_path: StdPath) -> None:
     (tmp_path / "models.py").write_text("class User: ...\n")
     (tmp_path / "app.py").write_text("from models import User\nu = User()\n")
     with TyO3Session(str(tmp_path)) as s:
-        g = s.graph
         for text in (
             "class User:\n    a: int\n",
             "class User:\n    a: int\n    b: int\n",
             "class User:\n    b: int\n",
         ):
             s.edit("models.py", text)
+        g = s.graph
         rebuilt = CodeGraph.build(s)
         _assert_structurally_equal(g, rebuilt)
+
+
+def test_graph_rebuilt_after_each_commit(tmp_path: StdPath) -> None:
+    """``session.graph`` reflects the new revision after every write — and is a
+    distinct instance (build-on-demand drops the prior graph)."""
+    (tmp_path / "m.py").write_text("class User: ...\n")
+    with TyO3Session(str(tmp_path)) as s:
+        g0 = s.graph
+        rev0 = g0.revision
+        s.edit("m.py", "class User:\n    def save(self): ...\n")
+        g1 = s.graph
+        assert g1 is not g0, "head graph must be rebuilt (not the same maintained instance)"
+        assert g1.revision == s.head and g1.revision != rev0
+        _assert_structurally_equal(g1, CodeGraph.build(s))

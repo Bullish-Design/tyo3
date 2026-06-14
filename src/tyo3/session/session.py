@@ -207,11 +207,18 @@ class TyO3Session(_ReadOps):
 
     @property
     def graph(self):
-        """The live HEAD graph — a pure projection of the native code delta.
+        """The HEAD graph — a pure projection of the native code delta, built
+        **on demand**.
 
-        Built (and rebuilt) by applying ``full_code_delta()`` to a fresh
-        ``CodeGraph``: no read-surface walk, no identity priming, no session
-        write. Reading it never advances ``head`` (§5.3 / §5.9).
+        Built by applying ``full_code_delta()`` (a full/``rescan`` delta over the
+        current head state) to a fresh ``CodeGraph``: no read-surface walk, no
+        identity priming, no session write. Reading it never advances ``head``
+        (§5.3 / §5.9).
+
+        **Not stable across commits.** The graph is cached only until the next
+        write, which drops it (``_invalidate_head_snap``); the following access
+        rebuilds it on demand at the new revision. A caller that needs a graph
+        pinned across a write must take a ``snapshot()`` instead.
         """
         self._check_open()
         if self._head_graph is None:
@@ -219,31 +226,22 @@ class TyO3Session(_ReadOps):
         return self._head_graph
 
     def _rebuild_head_graph_from_native(self) -> None:
-        """(Re)build the live HEAD graph from a full native code delta.
+        """Build the HEAD graph from a full native code delta.
 
         A pure projection: apply ``full_code_delta()`` (a full/``rescan`` delta
-        over the current head state) to the live HEAD ``CodeGraph``. A rescan
-        delta clears-and-rebuilds the graph **in place**, so the head-graph
-        instance is stable across commits (callers may hold a reference to it);
-        a fresh ``CodeGraph`` is allocated only on first materialisation. Shared
-        by the lazy ``graph`` property and the post-commit rebuild branch (the
-        deferred-producer path). Mutates no native state — ``full_code_delta()``
-        is a pure read of the head.
+        over the current head state) to a fresh ``CodeGraph``. Mutates no native
+        state — ``full_code_delta()`` is a pure read of the head. Called lazily
+        by the ``graph`` property whenever the cached graph is absent (first
+        access, or the first access after a write dropped it).
         """
         from tyo3.graph import CodeGraph
 
-        g = self._head_graph
-        if g is None:
-            g = CodeGraph()
-            g._root = self._root
-            self._head_graph = g
+        g = CodeGraph()
+        g._root = self._root
         g.apply_code_delta(self._inner.full_code_delta())
         # Read-only diagnostics refresh (check() is a read, never sync_all).
         g.refresh_diagnostics(self, root=self._root)
-
-    def _head_graph_or_none(self) -> Any:
-        """Return the live HEAD graph if materialized; never build it."""
-        return self._head_graph
+        self._head_graph = g
 
     def _get_derivation(self):
         """Lazily build the DerivationDAG from session config."""
@@ -390,14 +388,20 @@ class TyO3Session(_ReadOps):
         return self._head_snap
 
     def _invalidate_head_snap(self) -> None:
-        """Drop the cached head snapshot reference after a mutation so the
-        next read re-pins at the new revision.
+        """Drop the cached head snapshot **and head graph** after a mutation so
+        the next read re-pins / rebuilds at the new revision.
+
+        Dropping ``_head_graph`` is what makes ``session.graph`` build-on-demand:
+        the graph is no longer maintained incrementally across commits, so each
+        write invalidates it and the next ``graph`` access rebuilds it from a
+        full native delta at the new revision (Project 31, #1b).
 
         Does NOT forcibly close the old native snapshot — any in-flight read
         that already grabbed it may finish; Python drops it when the last
         reference is gone. This trades prompt cache cleanup for thread safety
         (Phase 5 §5.1)."""
         self._head_snap = None
+        self._head_graph = None
 
     # ── Snapshot ─────────────────────────────────────────────────────
 
@@ -418,7 +422,6 @@ class TyO3Session(_ReadOps):
             root=self._root,
             config=self._config,
             layers=self._effective_layers,
-            head_graph_getter=self._head_graph_or_none,
             derivation_getter=self._get_derivation,
             async_worker_getter=self._get_async_worker,
         )
@@ -576,8 +579,9 @@ class TyO3Session(_ReadOps):
         pending (or every event was for a path with a live overlay buffer,
         which the buffer wins).
 
-        Like the explicit write methods, this advances the revision and
-        updates the live HEAD graph (if materialised)."""
+        Like the explicit write methods, this advances the revision and routes
+        through the one post-commit hook (which drops the head graph so the next
+        ``session.graph`` read rebuilds at the new revision)."""
         self._check_open()
         try:
             native_result = self._inner.poll_changes()
@@ -608,58 +612,6 @@ class TyO3Session(_ReadOps):
         except Exception as e:
             raise InternalTyError(f"Unexpected error in _inject_changes(): {e}") from e
 
-    def _apply_graph_delta(self, result: CommitDelta) -> None:
-        """Update the materialized HEAD graph from the native code delta (§5.3).
-
-        The pure graph applier (Phase 4); derived invalidation is a separate
-        post-commit step (``_schedule_derived``), not done here.
-
-        An **authored-only** write (only ``authored_ids``, no code churn)
-        touches no code/edge structure, so this is a no-op for it — that is what
-        lets ``author`` route through the one ``_after_commit`` hook without
-        mutating the code graph (§6.2).
-
-        Three-state on ``result.code_delta`` (Phase 4):
-          * ``None`` (absent) — no structural delta was computed this commit ⇒
-            **rebuild** the head graph from a full native delta. This is the
-            deferred-producer path and is taken on every materialised-graph
-            code commit today.
-          * present, empty — computed, nothing changed structurally (e.g. a
-            whitespace-only edit) ⇒ a clean **no-op** apply.
-          * present, populated — the incremental delta ⇒ **apply** it,
-            revision-gated.
-        """
-        if self._head_graph is None:
-            return
-        # An authored write carries no code structure — never mutate the graph
-        # (its code_delta is None like the deferred-producer rebuild path, so it
-        # must be discriminated by its id shape, not by code_delta).
-        if self._is_authored_only(result):
-            return
-        code_delta = result.code_delta
-        if code_delta is None:
-            self._rebuild_head_graph_from_native()
-            return
-        # Present delta — incremental apply, revision-gated. A revision *gap*
-        # (the delta skips revisions) can't be applied incrementally, so rebuild
-        # from a fresh full delta; the in-order case applies (a stale delta is an
-        # internal no-op inside apply_code_delta).
-        cur = self._head_graph.revision
-        new_rev = code_delta.get("revision")
-        if cur is not None and new_rev is not None and new_rev > cur + 1:
-            self._rebuild_head_graph_from_native()
-        else:
-            self._head_graph.apply_code_delta(code_delta)
-
-    @staticmethod
-    def _is_authored_only(delta: CommitDelta) -> bool:
-        """True for a pure authored write: it carries ``authored_ids`` but no
-        code churn (no created/changed/deleted/moved ids and no rescan), so it
-        must not mutate the code graph."""
-        return bool(delta.authored_ids) and not (
-            delta.created_ids or delta.changed_ids or delta.deleted_ids or delta.moved or delta.rescan
-        )
-
     def _schedule_derived(self, delta: CommitDelta) -> None:
         """Schedule derived-layer invalidation from the id-level delta (§5.7).
 
@@ -673,12 +625,14 @@ class TyO3Session(_ReadOps):
     def _after_commit(self, delta: CommitDelta, *, touched_layer_names: tuple[str, ...] = ()) -> None:
         """The single post-commit path every write funnels through (§6.1/§6.3).
 
-        Invalidate the head snapshot (so the next read re-pins at the new
-        revision), apply the native code delta to the head graph, schedule
-        derived invalidation, then publish to the bus — in that order. Because
-        every write method calls exactly this, no path can diverge and every
-        committed revision publishes (closes defect #6: ``discard`` forgetting
-        to publish).
+        Invalidate the head snapshot **and drop the head graph** (so the next
+        read re-pins / rebuilds at the new revision), schedule derived
+        invalidation, then publish to the bus — in that order. The head graph is
+        build-on-demand (Project 31, #1b): it is dropped here, not maintained
+        incrementally, and rebuilt lazily on the next ``session.graph`` access.
+        Because every write method calls exactly this, no path can diverge and
+        every committed revision publishes (closes defect #6: ``discard``
+        forgetting to publish).
 
         ``touched_layer_names`` is the specific authored layer name(s) — passed
         only by ``author()`` — threaded to ``_publish_delta`` so the published
@@ -686,7 +640,6 @@ class TyO3Session(_ReadOps):
         other writer unchanged.
         """
         self._invalidate_head_snap()
-        self._apply_graph_delta(delta)
         self._schedule_derived(delta)
         self._publish_delta(delta, touched_layer_names)
         # Async precision refinement (Phase 9) — strictly *after* primary

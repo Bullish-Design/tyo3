@@ -179,7 +179,6 @@ class Snapshot(_ReadOps):
         root: StdPath,
         config: TyConfig | None = None,
         layers: dict | None = None,
-        head_graph_getter: Any | None = None,
         derivation_getter: Any | None = None,
         async_worker_getter: Any | None = None,
     ) -> None:
@@ -191,7 +190,6 @@ class Snapshot(_ReadOps):
         # the native config layers when not supplied, so a Snapshot built without
         # an effective table (e.g. directly in a test) still resolves layers.
         self._effective_layers: dict = layers if layers is not None else (dict(config.layers) if config else {})
-        self._head_graph_getter = head_graph_getter
         self._derivation_getter = derivation_getter
         # Lazily resolves the session's off-actor recompute worker for AB3
         # ``serving="stale"`` background produce. ``None`` ⇒ no async serving
@@ -286,13 +284,6 @@ class Snapshot(_ReadOps):
         """
         self._check_open()
         if self._graph is not None:
-            return self._graph
-
-        # Fast path: if the live HEAD graph is already materialised at exactly
-        # this revision, pin a copy of it (avoids recomputing the frozen delta).
-        head_graph = self._head_graph_getter() if self._head_graph_getter is not None else None
-        if head_graph is not None and head_graph.revision == self.revision:
-            self._graph = head_graph._pin_at(self.revision)
             return self._graph
 
         from tyo3.graph import CodeGraph
@@ -543,15 +534,14 @@ class LatestView(_ReadOps):
         return self._inner
 
     def graph(self):
-        """A **non-canonical, floating** code-graph projection of the live HEAD.
+        """A **floating** code-graph projection of the live HEAD.
 
         Returns an *immutable, point-in-time copy* pinned at the current head
-        revision — deliberately **not** the canonical mutable HEAD graph. Each
-        call re-pins the newest head (the floating contract), and the returned
-        graph never mutates under the caller. A floating view must not hand out a
-        mutable reference to the canonical graph (Phase 11.2); for the canonical
-        maintained head graph use ``session.graph``, and for a consistent pinned
-        graph use ``session.snapshot().graph()``. Reading it never advances head.
+        revision. Each call re-reads ``session.graph`` (built on demand at the
+        current revision, Project 31 #1b) and pins a copy of it, so the returned
+        graph never mutates under the caller. For a build-on-demand head graph
+        use ``session.graph``; for a consistent pinned graph use
+        ``session.snapshot().graph()``. Reading it never advances head.
         """
         self._check_open()
         if self._session is None:
