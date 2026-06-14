@@ -106,12 +106,16 @@ def test_base_class_edit_reports_subclass(tmp_path: StdPath) -> None:
 
 
 def test_normal_edit_is_scoped_not_full_rescan(tmp_path: StdPath) -> None:
-    """A normal single-file edit re-derives only the dirty scope (§6.4): the
-    emitted ``code_delta`` is incremental (``rescan = False``) and every node it
-    touches belongs to the edited file — unrelated files are never re-analyzed.
+    """A normal single-file edit re-derives only the dirty scope (§6.4): it is
+    incremental (``rescan = False``) and reconciliation is bounded to the edited
+    file — unrelated files are never re-analyzed.
 
     This guards the perf contract (the full producer is the ~100x trap) with a
-    deterministic structural assertion rather than a flaky wall-clock bound.
+    deterministic structural assertion rather than a flaky wall-clock bound. The
+    structural ``code_delta`` this once inspected was retired (Project 31, #2);
+    scoping is now asserted via the public ``identity_scope_files`` debug counter
+    (1 for a one-file scoped edit; 0 on a full rescan, which has no scope) and the
+    id-level delta, which the bounded producer drives from the same scope.
     """
     (tmp_path / "a.py").write_text("x = 1\n")
     (tmp_path / "b.py").write_text("y = 2\n")
@@ -123,16 +127,15 @@ def test_normal_edit_is_scoped_not_full_rescan(tmp_path: StdPath) -> None:
         s.edit("a.py", "x = 1\n# warm\n")
         delta = s.edit("a.py", "x = 1\ndef helper():\n    return 7\n")
 
-        cd = delta.code_delta
-        assert cd is not None, "code_delta must be present (None is retired in Phase 6)"
-        assert not cd.get("rescan"), "a normal edit must be incremental, not a full rescan"
-
-        touched = list(cd.get("nodes_upserted") or []) + list(cd.get("nodes_moved") or [])
-        files = {n["file"] for n in touched}
-        assert files <= {"a.py"}, f"scoped edit touched files outside the dirty scope: {sorted(files)}"
-        assert any(n.get("name") == "helper" for n in (cd.get("nodes_upserted") or [])), (
-            "the new helper() node should be in the incremental delta"
+        assert not delta.rescan, "a normal edit must be incremental, not a full rescan"
+        assert delta.identity_scope_files == 1, (
+            f"a scoped one-file edit reconciles exactly the edited file, got "
+            f"identity_scope_files={delta.identity_scope_files}"
         )
+        # The new helper() is minted and maps to the edited file; the bounded
+        # producer never reaches the untouched files' entities.
+        created = _affected_names(s, delta.created_ids)
+        assert "helper" in created, f"new helper() should be a created id, got {sorted(created)}"
 
 
 def test_deleted_base_reports_dependents_from_prior_layer(tmp_path: StdPath) -> None:

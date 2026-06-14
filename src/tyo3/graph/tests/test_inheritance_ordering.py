@@ -169,12 +169,11 @@ class TestInheritanceOrderingIncremental:
         """Edit all three files in one batch — OVERRIDES survives in both orders."""
         _write_fixture(tmp_path)
         with TyO3Session(str(tmp_path)) as s:
-            g = s.graph  # native HEAD graph, maintained across edits
-
             # Edit all three files (append a comment so they register as CHANGED).
             edited = _edit_all(suffix="edited")
-            s.edit_many(edited)  # drives the native post-commit head-graph update
+            s.edit_many(edited)
 
+            g = s.graph  # rebuilt on demand at the post-edit revision
             exists = _check_override_a_greet_to_c(g)
             assert exists, (
                 f"STATUS=LIVE: OVERRIDES edge A.greet→C.greet missing "
@@ -187,12 +186,11 @@ class TestInheritanceOrderingIncremental:
         regardless of processing order."""
         _write_fixture(tmp_path)
         with TyO3Session(str(tmp_path)) as s:
-            g = s.graph  # native HEAD graph, maintained across edits
-
             for round_num in range(3):
                 suffix = f"round{round_num}"
                 s.edit_many(_edit_all(suffix=suffix))
 
+                g = s.graph  # rebuilt on demand each round
                 exists = _check_override_a_greet_to_c(g)
                 assert exists, (
                     f"STATUS=LIVE: OVERRIDES edge A.greet→C.greet missing "

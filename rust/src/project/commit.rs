@@ -142,12 +142,10 @@ pub(crate) struct IdentityDelta {
 /// Assemble the public `CommitDeltaDto` from the id-level identity classes and
 /// the path-shaped metadata the write method produced.
 ///
-/// The nested `code_delta` (§6.2) is the minimal incremental delta from the
-/// in-commit producer (`produce_layer` → `CodeLayer::diff_from`): `Some({…})`
-/// for a structural change, `Some({})` for a cosmetic edit (applier no-op), and
-/// a full rescan-flagged delta on `rescan` / cold start. `None` is only carried
-/// by writes that don't reconcile (e.g. `author`). `touched_files` is the union
-/// of the path-level created/changed/deleted strings — metadata only.
+/// The structural code delta is not carried (Project 31, #2): the in-commit
+/// producer still runs to maintain `reverse_deps` / `affected_ids`, but graph
+/// consumers build on demand from `full_code_delta()`. `touched_files` is the
+/// union of the path-level created/changed/deleted strings — metadata only.
 // Assembles the commit delta from distinct, independently-sourced components; a
 // params struct would duplicate `CommitDeltaDto`'s own shape.
 #[allow(clippy::too_many_arguments)]
@@ -158,7 +156,6 @@ pub(crate) fn build_commit_delta(
     changed: Vec<String>,
     deleted: Vec<String>,
     identity: IdentityDelta,
-    code_delta: Option<dto::CodeDeltaDto>,
     rescan: bool,
     project_changed: bool,
     custom_stdlib_changed: bool,
@@ -183,7 +180,6 @@ pub(crate) fn build_commit_delta(
         moved: identity.moved,
         authored_ids: vec![],
         affected_ids: identity.affected_ids,
-        code_delta,
         touched_files,
         affected_files: identity.affected_files,
         created,
@@ -904,16 +900,19 @@ pub(crate) fn run_staged(
     };
 
     // 3 + 4 + 5. Identity reconcile → code-layer produce → identity persist.
-    let (identity, code_delta) = if staged.reconcile {
+    let identity = if staged.reconcile {
         let mut identity = run_identity_reconciliation(head, staged.scope.as_ref(), next_rev);
 
         // ── Scoped in-commit code-layer producer (§6.1/6.2/6.3) ──
-        // Re-derive the dirty scope over the prior layer, update head.code_layer,
-        // and emit the minimal incremental code_delta. Runs inside the lock,
-        // before the deferred publish; rolled back via the captured Baseline.
+        // Re-derive the dirty scope over the prior layer and update
+        // head.code_layer — this is what maintains `reverse_deps` and feeds
+        // `affected_ids`. Its structural `code_delta` is no longer emitted in the
+        // commit delta (Project 31, #2): graph consumers build on demand from
+        // `full_code_delta()`, so the producer's diff is dropped here. Runs inside
+        // the lock, before the deferred publish; rolled back via the Baseline.
         let prev = std::mem::take(&mut head.code_layer);
         let state = head.read_clone();
-        let (next, code_delta) = produce_layer(&state, &prev, &staged, next_rev);
+        let (next, _code_delta) = produce_layer(&state, &prev, &staged, next_rev);
 
         // affected_ids = transitive, container-granular closure of changed ∪
         // deleted over the freshly-maintained reverse_deps, seeding deletions
@@ -954,9 +953,9 @@ pub(crate) fn run_staged(
         // Identity persistence: a staged, fallible, PROPAGATED step.
         check_fault(armed, "identity_persist")?;
         persist_identity(head)?;
-        (identity, Some(code_delta))
+        identity
     } else {
-        (IdentityDelta::default(), None)
+        IdentityDelta::default()
     };
 
     // 6. Authored persistence (author only): stage → persist (publish at tail).
@@ -998,7 +997,6 @@ pub(crate) fn run_staged(
         staged.changed,
         staged.deleted,
         identity,
-        code_delta,
         staged.rescan,
         project_changed,
         custom_stdlib_changed,

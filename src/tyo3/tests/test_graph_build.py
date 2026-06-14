@@ -107,8 +107,9 @@ class TestGraphConstruction:
         body_change = "class User:\n\n    def save(self):\n        return 2\n"
 
         # Write before open so the file is ingested at open (Phase 1), then drive
-        # the live HEAD graph (a native projection) with edits — the native
-        # post-commit path rebuilds it in place from the code delta.
+        # the HEAD graph with edits — ``session.graph`` is built on demand at the
+        # current revision after each commit (Project 31 #1b), so it is re-read
+        # fresh after every edit.
         (tmp_path / "models.py").write_text(original)
         with TyO3Session(str(tmp_path)) as session:
             graph = session.graph
@@ -116,11 +117,13 @@ class TestGraphConstruction:
             initial_hash = save.content_hash
 
             session.edit("models.py", cosmetic)
+            graph = session.graph
             save_after_cosmetic = next(n for n in graph.symbols_of_kind(SymbolKind.METHOD) if n.name == "save")
             assert save_after_cosmetic.durable_id == save.durable_id
             assert save_after_cosmetic.content_hash == initial_hash
 
             session.edit("models.py", body_change)
+            graph = session.graph
             save_after_body = next(n for n in graph.symbols_of_kind(SymbolKind.METHOD) if n.name == "save")
             assert save_after_body.durable_id == save.durable_id
             assert save_after_body.content_hash is not None
