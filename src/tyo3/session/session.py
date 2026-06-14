@@ -9,6 +9,7 @@ from ``read_ops`` and hands back the read views from ``views``.
 from __future__ import annotations
 
 import json
+import logging
 import warnings
 from pathlib import Path as StdPath
 from typing import Any
@@ -35,6 +36,8 @@ from tyo3.session._native import (
 )
 from tyo3.session.read_ops import _ReadOps
 from tyo3.session.views import LatestView, Snapshot, _OwnedView
+
+log = logging.getLogger("tyo3.session")
 
 
 class TyO3Session(_ReadOps):
@@ -298,7 +301,9 @@ class TyO3Session(_ReadOps):
                     # poll_changes funnels through the one _after_commit hook
                     # (applies the graph delta + publishes) on a real commit.
                 except Exception:
-                    pass
+                    # Graceful degradation: keep polling. Log at debug so a
+                    # persistently stuck watcher is recoverable, never spammy.
+                    log.debug("watcher poll_changes failed; will retry next tick", exc_info=True)
 
         self._watcher_thread = threading.Thread(target=_poll_loop, daemon=True, name="tyo3-watcher")
         self._watcher_thread.start()
@@ -322,7 +327,7 @@ class TyO3Session(_ReadOps):
         try:
             self.unwatch()
         except Exception:
-            pass
+            log.debug("unwatch during watcher stop failed", exc_info=True)
 
     # ── Subscription bus (Gate 8) ──────────────────────────────────
 
