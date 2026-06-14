@@ -270,15 +270,19 @@ build-release     # compile Rust extension (release)
 build-wheel       # build a distributable maturin wheel
 
 # Test
-test              # full test suite with coverage
-test-quick        # unit tests only (no Rust extension needed)
+tests             # full test suite
+test-fast         # fast dev loop (parallel, no coverage)
 test-rust         # Rust backend integration + snapshot tests
 test-property     # Hypothesis property-based tests
 test-perf         # performance benchmarks
 test-ci           # CI-style fail-fast run
 test-coverage     # full suite with HTML coverage report
+test-nvim         # tyo3.nvim Lua specs (hermetic stack)
+test-final        # final-acceptance suite
 
 # Utilities
+check-rust        # Rust type/borrow check
+clippy            # Rust lints
 check-so          # verify the native extension loads and works
 status            # show toolchain versions and available commands
 clean             # remove all build artifacts
