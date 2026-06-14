@@ -12,6 +12,38 @@ from tyo3.models.navigation import ReferenceRole
 from tyo3.models.symbols import SymbolKind
 
 
+def coerce_range(payload: Any) -> Range | None:
+    """Validate a pythonized range dict (or ``None``) into a ``Range``."""
+    if payload is None:
+        return None
+    if isinstance(payload, Range):
+        return payload
+    return Range.model_validate(payload)
+
+
+def symbol_node_from_dto(n: dict[str, Any]) -> SymbolNode:
+    """Build a ``SymbolNode`` from one ``CodeNodeDto`` dict.
+
+    The ``CodeNodeDto`` shape is what the native ``full_code_delta()`` emits in
+    its ``nodes_upserted`` list. Shared by the graph applier and by
+    ``CodeLayerView``, which reads node data straight off the delta without
+    building a ``CodeGraph`` (Project 31, #3).
+    """
+    return SymbolNode(
+        durable_id=n["durable_id"],
+        name=n["name"],
+        qualified_name=n["qualified_name"],
+        kind=SymbolKind(n["kind"]),
+        file=n["file"],
+        range=coerce_range(n["range"]),
+        selection_range=coerce_range(n.get("name_range")),
+        content_hash=n.get("content_hash"),
+        content_hashes=dict(n.get("content_hashes") or {}),
+        external=bool(n.get("external", False)),
+        package=n.get("package"),
+    )
+
+
 class _ApplierMixin:
     """Pure native-delta applier methods for :class:`CodeGraph`."""
 
@@ -47,27 +79,11 @@ class _ApplierMixin:
     @staticmethod
     def _coerce_range(payload: Any) -> Range | None:
         """Validate a pythonized range dict (or ``None``) into a ``Range``."""
-        if payload is None:
-            return None
-        if isinstance(payload, Range):
-            return payload
-        return Range.model_validate(payload)
+        return coerce_range(payload)
 
     def _node_from_code_delta(self, n: dict[str, Any]) -> SymbolNode:
         """Build a ``SymbolNode`` from one ``CodeNodeDto`` dict."""
-        return SymbolNode(
-            durable_id=n["durable_id"],
-            name=n["name"],
-            qualified_name=n["qualified_name"],
-            kind=SymbolKind(n["kind"]),
-            file=n["file"],
-            range=self._coerce_range(n["range"]),
-            selection_range=self._coerce_range(n.get("name_range")),
-            content_hash=n.get("content_hash"),
-            content_hashes=dict(n.get("content_hashes") or {}),
-            external=bool(n.get("external", False)),
-            package=n.get("package"),
-        )
+        return symbol_node_from_dto(n)
 
     def apply_code_delta(self, code_delta: Any) -> None:
         """Apply a native ``CodeDelta`` to this graph — a **pure** function of the
