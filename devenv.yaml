@@ -15,9 +15,16 @@ inputs:
     url: github:Bullish-Design/allium-env?ref=v0.3.5
     flake: false
 
+  # devman: the automation plane's repo interface (CONCEPT.md §3.2). A devenv
+  # import is a PATH inside an input, never a flake output attribute, and the
+  # file it resolves to must be named devenv.nix.
+  devman:
+    url: "git+https://github.com/Bullish-Design/devman?ref=main&rev=f20a9c11cd6b062aa6646e8b72b9767d7e90a522"
+
 imports:
   - allium-env
   - mypy-agent
+  - devman/modules
 
 # If you're using non-OSS software, you can set allowUnfree to true.
 # allowUnfree: true

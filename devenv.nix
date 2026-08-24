@@ -624,6 +624,30 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
 
   # ── Shell entry / test ───────────────────────────────────
 
+  # devman — the automation plane (CONCEPT.md §5). `base` alone: this repository
+  # ships no scheduled work and writes none of its own files.
+  devman = {
+    enable = true;
+    project = "tyo3";
+    groups = [ "base" ];
+  };
+
+  # https://devenv.sh/tasks/
+  #
+  # The two task names the `base` group calls (groups/base/README.md). devenv
+  # owns each implementation; Dagu owns the composition (§6). `base:test`
+  # mirrors `enterTest`'s own gate (maturin develop + the lean pytest run).
+  # Dev deps are a uv `[dependency-groups]`, not an extra, so the flag is
+  # `--group dev`. maturin and pytest are devenv packages here, so the task
+  # runner's PATH has them.
+  tasks = {
+    "tyo3:lint".exec = "uv run --group dev ruff check src";
+    "tyo3:test".exec = "export VIRTUAL_ENV=\"$DEVENV_ROOT/.devenv/state/venv\"; maturin develop 2>&1 && PYTHONPATH=src uv run --group dev pytest --strict-markers -q --tb=short -m \"not benchmark\" src/tyo3/tests/ -x";
+
+    "base:check".after = [ "tyo3:lint" ];
+    "base:test".after = [ "tyo3:test" ];
+  };
+
   enterShell = ''
     hello
     status
