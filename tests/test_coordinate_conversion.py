@@ -15,7 +15,6 @@ Run with: PYTHONPATH=src pytest src/tyo3/tests/test_coordinate_conversion.py -v
 from __future__ import annotations
 
 from collections.abc import Generator
-from pathlib import Path as StdPath
 
 import pytest
 
@@ -29,12 +28,12 @@ except ImportError:
 
 from pydantic import ValidationError
 
+from tests.conftest import FIXTURES_DIR
 from tyo3.exceptions import PathResolutionError, PositionError
 from tyo3.models.analysis import Position
 
 # ── Path helpers ──────────────────────────────────────────────────────────
 
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 
 def fixture_path(name: str) -> str:

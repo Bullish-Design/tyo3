@@ -26,8 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from tyo3 import TyO3Session
-from tyo3.tests.parity_oracle import (
+from tests.parity_oracle import (
     ParityOracleNotReady,
     assert_graphs_equal,
     assert_parity,
@@ -38,6 +37,7 @@ from tyo3.tests.parity_oracle import (
     legacy_graph,
     node_payloads,
 )
+from tyo3 import TyO3Session
 
 
 def _write(root: Path, files: dict[str, str]) -> None:

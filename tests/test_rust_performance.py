@@ -17,9 +17,10 @@ Run with: PYTHONPATH=src pytest src/tyo3/tests/test_rust_performance.py -v --ben
 from __future__ import annotations
 
 import time
-from pathlib import Path as StdPath
 
 import pytest
+
+from tests.conftest import FIXTURES_DIR
 
 # Check if native extension is available
 try:
@@ -31,7 +32,6 @@ except ImportError:
 
 # ── Path helpers ──────────────────────────────────────────────────────────
 
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 
 def fixture_path(name: str) -> str:

@@ -51,7 +51,7 @@ review_on_change = true
 
 [generators.upper_gen]
 type = "python"
-callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+callable = "tests.test_gate7_read_surface:uppercase_generator"
 
 [stores.kv_upper]
 backend = "fs"
@@ -128,7 +128,7 @@ review_on_change = true
 
 [generators.upper_gen]
 type = "python"
-callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+callable = "tests.test_gate7_read_surface:uppercase_generator"
 
 [stores.kv_upper]
 backend = "fs"
@@ -214,7 +214,7 @@ entity_kinds = ["function"]
 
 [generators.upper_gen]
 type = "python"
-callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+callable = "tests.test_gate7_read_surface:uppercase_generator"
 
 [stores.kv_upper]
 backend = "fs"
@@ -300,7 +300,7 @@ review_on_change = true
 
 [generators.upper_gen]
 type = "python"
-callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+callable = "tests.test_gate7_read_surface:uppercase_generator"
 
 [stores.kv_upper]
 backend = "fs"
@@ -464,7 +464,7 @@ entity_kinds = ["function"]
 
 [generators.upper_gen]
 type = "python"
-callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+callable = "tests.test_gate7_read_surface:uppercase_generator"
 
 [stores.kv_upper]
 backend = "fs"
@@ -582,7 +582,7 @@ review_on_change = true
 
 [generators.upper_gen]
 type = "python"
-callable = "tyo3.tests.test_gate7_read_surface:uppercase_generator"
+callable = "tests.test_gate7_read_surface:uppercase_generator"
 
 [stores.kv_upper]
 backend = "fs"

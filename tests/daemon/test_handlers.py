@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.daemon.conftest import needs_native
 from tyo3.daemon.protocol import INVALID_PARAMS, METHOD_NOT_FOUND, ProtocolError
-from tyo3.daemon.tests.conftest import needs_native
 
 pytestmark = needs_native
 

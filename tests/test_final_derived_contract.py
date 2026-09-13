@@ -58,7 +58,7 @@ entity_kinds = ["function"]
 
 [generators.{generator}]
 type = "python"
-callable = "tyo3.tests.test_final_derived_contract:{callable_name}"
+callable = "tests.test_final_derived_contract:{callable_name}"
 
 [stores.kv_upper]
 backend = "fs"
@@ -222,7 +222,7 @@ entity_kinds = ["function"]
 
 [generators.counting_gen]
 type = "python"
-callable = "tyo3.tests.test_final_derived_contract:counting_generator"
+callable = "tests.test_final_derived_contract:counting_generator"
 
 [stores.kv_upper]
 backend = "fs"

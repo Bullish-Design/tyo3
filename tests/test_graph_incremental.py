@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from pathlib import Path as StdPath
 
+from tests.graph_helpers import edges_of_kind
 from tyo3 import TyO3Session
 from tyo3.graph import CodeGraph, EdgeKind
-from tyo3.tests.graph_helpers import edges_of_kind
 
 # ── Parity helpers ──────────────────────────────────────────────────────
 

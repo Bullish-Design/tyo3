@@ -1,6 +1,6 @@
 """A deliberately slow ``_llm`` callable for the non-serialization test.
 
-Wired via ``TYO3_LLM=callable`` + ``TYO3_LLM_CALLABLE=tyo3.daemon.tests._slow_llm:slow_explain``
+Wired via ``TYO3_LLM=callable`` + ``TYO3_LLM_CALLABLE=tests.daemon._slow_llm:slow_explain``
 in a daemon subprocess. It sleeps for ``TYO3_TEST_LLM_SLEEP`` seconds (default 2)
 so a concurrent fast request (``ping``) can be observed returning *before* the
 slow ``explain`` completes — proving the dispatch pool isn't serializing the

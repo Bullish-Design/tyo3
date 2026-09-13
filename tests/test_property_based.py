@@ -28,11 +28,11 @@ try:
 except ImportError:
     _HAS_NATIVE = False
 
+from tests.conftest import FIXTURES_DIR
 from tyo3.exceptions import PathResolutionError, PositionError, ProjectClosedError
 
 # ── Path helpers ──────────────────────────────────────────────────────────
 
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 ALL_FIXTURES = [
     "simple_package",
@@ -56,7 +56,7 @@ def fixture_path(name: str) -> str:
 
 
 def get_project(fixture_name: str) -> TyO3Session:
-    from tyo3.tests.conftest import shared_project
+    from tests.conftest import shared_project
 
     return shared_project(fixture_name)
 

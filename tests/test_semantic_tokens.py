@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path as StdPath
-
 import pytest
+
+from tests.conftest import FIXTURES_DIR
 
 try:
     from tyo3 import _HAS_NATIVE
 except ImportError:
     _HAS_NATIVE = False
 
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 
 def fixture_path(name: str) -> str:
@@ -24,7 +23,7 @@ needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension
 
 
 def get_project(fixture_name: str):
-    from tyo3.tests.conftest import shared_project
+    from tests.conftest import shared_project
 
     return shared_project(fixture_name)
 

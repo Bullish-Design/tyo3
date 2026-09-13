@@ -54,7 +54,7 @@ entity_kinds = ["function"]
 
 [generators.upper_gen]
 type = "python"
-callable = "tyo3.tests.test_gate5_derived:uppercase_generator"
+callable = "tests.test_gate5_derived:uppercase_generator"
 
 [stores.kv_upper]
 backend = "fs"
@@ -364,7 +364,7 @@ def test_python_generator_deterministic():
     """A python generator returns deterministic bytes for a batch."""
     from tyo3.derive.generators import GenInput, make_generator
 
-    cfg = _make_python_cfg("tyo3.tests.test_gate5_derived:echo_generator")
+    cfg = _make_python_cfg("tests.test_gate5_derived:echo_generator")
     gen = make_generator(cfg, name="test")
 
     inputs = [
@@ -383,7 +383,7 @@ def test_python_generator_batching():
     """Inputs are split into batches per batch_size."""
     from tyo3.derive.generators import GenInput, make_generator
 
-    cfg = _make_python_cfg("tyo3.tests.test_gate5_derived:echo_generator", batch_size=3)
+    cfg = _make_python_cfg("tests.test_gate5_derived:echo_generator", batch_size=3)
     gen = make_generator(cfg, name="test")
 
     inputs = [GenInput(durable_id=str(i), source=f"item{i}") for i in range(7)]
@@ -397,7 +397,7 @@ def test_python_generator_failure():
     from tyo3.derive.generators import GenInput, make_generator
     from tyo3.exceptions import GeneratorFailed
 
-    cfg = _make_python_cfg("tyo3.tests.test_gate5_derived:failing_generator")
+    cfg = _make_python_cfg("tests.test_gate5_derived:failing_generator")
     gen = make_generator(cfg, name="test")
 
     with pytest.raises(GeneratorFailed) as exc_info:
@@ -567,7 +567,7 @@ serving = "block"
 
 [generators.echo_gen]
 type = "python"
-callable = "tyo3.tests.test_gate5_derived:echo_generator"
+callable = "tests.test_gate5_derived:echo_generator"
 
 [stores.kv]
 backend = "fs"
@@ -609,7 +609,7 @@ serving = "block"
 
 [generators.echo_gen]
 type = "python"
-callable = "tyo3.tests.test_gate5_derived:echo_generator"
+callable = "tests.test_gate5_derived:echo_generator"
 
 [stores.kv]
 backend = "fs"
@@ -725,7 +725,7 @@ serving = "block"
 
 [generators.echo_gen]
 type = "python"
-callable = "tyo3.tests.test_gate5_derived:echo_generator"
+callable = "tests.test_gate5_derived:echo_generator"
 
 [stores.kv]
 backend = "fs"
@@ -832,7 +832,7 @@ serving = "block"
 
 [generators.echo_gen]
 type = "python"
-callable = "tyo3.tests.test_gate5_derived:echo_generator"
+callable = "tests.test_gate5_derived:echo_generator"
 
 [stores.kv]
 backend = "fs"

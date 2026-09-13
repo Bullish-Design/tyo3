@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from tests.conftest import get_graph, needs_native
 from tyo3.graph import CodeGraph, EdgeData, EdgeKind, SymbolNode
 from tyo3.graph.models import ReferenceRole
 from tyo3.models.analysis import Range
 from tyo3.models.symbols import SymbolKind
-from tyo3.tests.conftest import get_graph, needs_native
 
 
 @needs_native

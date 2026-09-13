@@ -5,7 +5,8 @@
 Owns one :class:`~tyo3.TyO3Session` for ``--root`` and serves it over a
 unix-domain socket (default: ``$XDG_RUNTIME_DIR/tyo3/<hash(root)>.sock``).
 Logs to **stderr** so a supervisor (overseer.nvim) can surface them. The socket
-is removed on exit; ``SIGINT`` / ``SIGTERM`` trigger a clean shutdown. With
+is removed on exit; ``SIGINT`` / ``SIGTERM`` trigger a clean shutdown. Exactly
+one daemon may own a root; a second one exits 3 with a clear message. With
 ``--autostop`` the daemon exits when the last client disconnects; otherwise it
 stays resident.
 """
@@ -19,6 +20,7 @@ import sys
 from pathlib import Path
 
 from tyo3.daemon.server import DaemonServer, default_socket_path
+from tyo3.exceptions import DaemonAlreadyRunning
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -73,6 +75,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         server.serve_forever()
+    except DaemonAlreadyRunning as e:
+        # Expected when an editor races two spawns at cold start. Report it in
+        # one line and exit 3 — the spawner should connect to the live daemon
+        # instead of treating this as a crash.
+        print(f"tyo3-daemon: {e}", file=sys.stderr)
+        return 3
     except KeyboardInterrupt:
         server.shutdown()
     except Exception as e:  # noqa: BLE001 — top-level: report and exit non-zero

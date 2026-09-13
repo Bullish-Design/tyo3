@@ -10,11 +10,9 @@ from __future__ import annotations
 import shutil
 from pathlib import Path as StdPath
 
+from tests.conftest import FIXTURES_DIR, get_graph, needs_native
 from tyo3.graph import CodeGraph
 from tyo3.session import TyO3Session
-from tyo3.tests.conftest import get_graph, needs_native
-
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 
 @needs_native

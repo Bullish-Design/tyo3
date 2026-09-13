@@ -13,6 +13,7 @@ on the wire.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import logging
 import os
@@ -36,6 +37,7 @@ from tyo3.daemon.protocol import (
 )
 from tyo3.daemon.session_actor import SessionActor
 from tyo3.daemon.tracking import AffectedTracker
+from tyo3.exceptions import DaemonAlreadyRunning
 
 if TYPE_CHECKING:
     from tyo3.bus.delta import Delta
@@ -128,6 +130,8 @@ class DaemonServer:
         self._handlers = Handlers(self._actor, tracker=self._tracker)
         self._pump = BusPump(self._actor, self.broadcast, self.broadcast_delta, tracker=self._tracker)
 
+        self._lock_path = self._socket_path.with_suffix(".lock")
+        self._lock_fd: int | None = None
         self._server_sock: socket.socket | None = None
         self._clients: set[_Client] = set()
         self._clients_lock = threading.Lock()
@@ -201,21 +205,86 @@ class DaemonServer:
     def serve_forever(self) -> None:
         """Open the session, bind the socket, and accept clients until shutdown.
 
-        Blocks the calling thread on the accept loop. Raises if the session
-        cannot be opened (surfaced from the actor).
+        Blocks the calling thread on the accept loop. Raises
+        :class:`~tyo3.exceptions.DaemonAlreadyRunning` if another daemon owns
+        this root, or propagates a session-open failure from the actor.
         """
-        log.info("opening session at %s", self._root)
-        self._actor.start()  # opens + sync_all; raises on failure
-        self._pump.start()
-        self._bind()
+        # Claim the root before the actor opens the session: opening is what
+        # writes the ``.tyo3/`` sidecar, so the lock has to precede it.
+        self._acquire_lock()
+        try:
+            log.info("opening session at %s", self._root)
+            self._actor.start()  # opens + sync_all; raises on failure
+            self._pump.start()
+            self._bind()
+        except BaseException:
+            self._release_lock()
+            raise
         log.info("listening on %s", self._socket_path)
         try:
             self._accept_loop()
         finally:
             self.shutdown()
 
+    def _acquire_lock(self) -> None:
+        """Take the per-root exclusive lock, or refuse to start.
+
+        Exactly one daemon may own a root: each holds a writable session over
+        the same ``.tyo3/`` sidecar, so two of them would interleave writes to
+        one identity registry.
+
+        ``flock`` is the right primitive because the kernel releases the lock
+        when the holder exits — by ``shutdown()``, by ``SIGKILL``, or by a
+        crash. That makes a stale lock impossible, so no pid-liveness probe and
+        no crash-recovery path are needed. The pid is written for diagnostics
+        only; it is never used to decide ownership.
+        """
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as e:
+            holder = self._read_lock_pid(fd)
+            os.close(fd)
+            owner = f" (pid {holder})" if holder else ""
+            raise DaemonAlreadyRunning(
+                f"another tyo3-daemon{owner} already serves {self._root}; "
+                f"lock held at {self._lock_path}",
+                pid=holder,
+            ) from e
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode())
+        self._lock_fd = fd
+
+    @staticmethod
+    def _read_lock_pid(fd: int) -> int | None:
+        """Best-effort read of the lock holder's pid, for the error message."""
+        try:
+            raw = os.pread(fd, 32, 0).decode().strip()
+            return int(raw) if raw else None
+        except (OSError, ValueError):
+            return None
+
+    def _release_lock(self) -> None:
+        """Drop the lock. The file itself stays: unlinking it would race a
+        daemon that already opened it and is blocked on ``flock``."""
+        fd = self._lock_fd
+        self._lock_fd = None
+        if fd is None:
+            return
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
     def _bind(self) -> None:
-        # A stale socket from a previous crashed daemon blocks bind — remove it.
+        # We hold the exclusive lock, so no live daemon owns this path and any
+        # socket file still here is a leftover from one that died. Removing it
+        # is safe now, and only now.
         try:
             if self._socket_path.exists():
                 self._socket_path.unlink()
@@ -364,12 +433,14 @@ class DaemonServer:
             self._actor.stop()
         except Exception:
             log.exception("error stopping session actor")
-        # Remove the socket file.
+        # Remove the socket file, then drop the lock — in that order, so the
+        # next daemon never observes our socket after the root is claimable.
         try:
             if self._socket_path.exists():
                 self._socket_path.unlink()
         except OSError:
             pass
+        self._release_lock()
         log.info("daemon stopped")
 
 

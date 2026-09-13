@@ -24,7 +24,7 @@ needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension
 
 # ── Shared caches (session-scoped, shared across all test modules) ─────
 
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
+FIXTURES_DIR = StdPath(__file__).parent.parent / "fixtures"
 
 
 def _fixture_path(name: str) -> str:

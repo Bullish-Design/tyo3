@@ -6,15 +6,13 @@ import re
 from pathlib import Path as StdPath
 from unittest.mock import MagicMock
 
+from tests.conftest import FIXTURES_DIR, get_graph, get_session, needs_native
 from tyo3 import TyO3Session
 from tyo3.graph import (
     CodeGraph,
     GraphBuildReport,
 )
 from tyo3.models.symbols import SymbolKind
-from tyo3.tests.conftest import get_graph, get_session, needs_native
-
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 
 def fixture_path(name: str) -> str:

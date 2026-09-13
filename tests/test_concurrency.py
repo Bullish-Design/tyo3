@@ -22,6 +22,8 @@ from pathlib import Path as StdPath
 
 import pytest
 
+from tests.conftest import FIXTURES_DIR
+
 # ── Native extension detection ──────────────────────────────────────────
 
 try:
@@ -34,7 +36,6 @@ except ImportError:
 
 needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
 
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 
 def _fixture_path(name: str) -> str:

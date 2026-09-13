@@ -25,7 +25,7 @@ from typing import Any
 import pytest
 
 import tyo3
-from tyo3.daemon.tests.conftest import needs_native
+from tests.daemon.conftest import needs_native
 
 pytestmark = needs_native
 
@@ -295,7 +295,7 @@ def test_slow_request_does_not_serialize_the_connection(shop_project: Path, tmp_
         socket_path,
         env_extra={
             "TYO3_LLM": "callable",
-            "TYO3_LLM_CALLABLE": "tyo3.daemon.tests._slow_llm:slow_explain",
+            "TYO3_LLM_CALLABLE": "tests.daemon._slow_llm:slow_explain",
             "TYO3_TEST_LLM_SLEEP": str(sleep_s),
         },
     )

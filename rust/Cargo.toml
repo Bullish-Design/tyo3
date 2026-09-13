@@ -55,10 +55,23 @@ tempfile = "3"      # real temp directories for OsSystem-backed tests
 # code never re-parses (it reuses the ty db's already-parsed module).
 ruff_python_parser = { git = "https://github.com/astral-sh/ruff", rev = "3cb09eba689ebb49e799131092121928cc789c18" }
 
+# Thin LTO with 16 codegen units, measured against fat LTO / 1 codegen unit on
+# an interleaved A/B (9 runs each, same machine, same project): `edit()` 630ms
+# thin vs 639ms fat — indistinguishable — while an incremental rebuild drops
+# from 238s to 88s. Fat LTO costs 2.7x the build time here and buys no runtime,
+# so it does not belong in the loop a developer runs on every Rust edit.
 [profile.release]
+lto = "thin"
+codegen-units = 16
+opt-level = 3
+
+# The published wheel. Build time is irrelevant for a release, so take fat LTO
+# on the chance it helps a workload the local benchmark does not cover.
+#   maturin build --profile dist
+[profile.dist]
+inherits = "release"
 lto = true
 codegen-units = 1
-opt-level = 3
 
 # Optimize all *dependencies* even in dev/debug builds (`maturin develop`).
 # The ty type-checker, salsa, and ruff do heavy semantic analysis over the

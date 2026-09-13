@@ -11,7 +11,6 @@ Run with: PYTHONPATH=src pytest src/tyo3/tests/test_rust_snapshots.py -v
 from __future__ import annotations
 
 from collections.abc import Generator
-from pathlib import Path as StdPath
 
 import pytest
 
@@ -23,11 +22,11 @@ try:
 except ImportError:
     _HAS_NATIVE = False
 
+from tests.conftest import FIXTURES_DIR
 from tyo3.models.symbols import Symbol
 
 # ── Path helpers ──────────────────────────────────────────────────────────
 
-FIXTURES_DIR = StdPath(__file__).parent.parent.parent.parent / "fixtures"
 
 
 def fixture_path(name: str) -> str:

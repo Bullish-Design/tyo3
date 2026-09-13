@@ -29,9 +29,9 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from tests.parity_oracle import assert_graphs_equal
 from tyo3.bus.interest import Interest
 from tyo3.graph.projection import CodeGraph
-from tyo3.tests.parity_oracle import assert_graphs_equal
 
 from .conftest import needs_native
 
@@ -175,11 +175,11 @@ entity_kinds = ["function"]
 
 [generators.loc_gen]
 type = "python"
-callable = "tyo3.tests.test_final_acceptance:local_generator"
+callable = "tests.test_final_acceptance:local_generator"
 
 [generators.sem_gen]
 type = "python"
-callable = "tyo3.tests.test_final_acceptance:semantic_generator"
+callable = "tests.test_final_acceptance:semantic_generator"
 
 [stores.kv_loc]
 backend = "fs"

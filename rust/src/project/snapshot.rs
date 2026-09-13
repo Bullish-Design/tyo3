@@ -471,6 +471,62 @@ impl PySnapshot {
         }
     }
 
+    // ── Identity ────────────────────────────────────────────
+
+    // Identity reads answer against this snapshot's **pinned** registry, so
+    // `locate`/`needs_review`/`orphaned` time-travel with the rest of the
+    // snapshot rather than reporting the live head. They share their
+    // implementation with `PyTyProject` (see `identity_ops`) so a snapshot
+    // taken at HEAD and the head itself always agree.
+
+    /// Resolve the DurableId of the entity at `(path, line, col)` at this
+    /// snapshot's pinned revision.
+    fn id_for(&self, py: Python<'_>, path: &str, line: u32, col: u32) -> PyResult<Option<String>> {
+        let state = clone_locked_state(&self.inner, "id_for")?;
+        let path = path.to_owned();
+        py.detach(move || super::identity_ops::id_for(&state, &path, line, col))
+    }
+
+    /// The `file::qualified_path` bound to `durable_id` at this revision.
+    fn locate(&self, durable_id: &str) -> PyResult<Option<String>> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock poisoned: {e}")))?;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Snapshot is closed"))?;
+        Ok(super::identity_ops::locate(state.registry.as_ref(), durable_id))
+    }
+
+    /// DurableIds flagged `needs_review` at this revision.
+    fn needs_review(&self) -> PyResult<Vec<String>> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock poisoned: {e}")))?;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Snapshot is closed"))?;
+        Ok(super::identity_ops::needs_review(
+            &self.config,
+            state.authored.as_ref(),
+            state.registry.as_ref(),
+        ))
+    }
+
+    /// DurableIds flagged `Orphaned` at this revision.
+    fn orphaned(&self) -> PyResult<Vec<String>> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock poisoned: {e}")))?;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Snapshot is closed"))?;
+        Ok(super::identity_ops::orphaned(state.registry.as_ref()))
+    }
+
     // ── Authored reads ──────────────────────────────────────
 
     /// Resolve an authored value for `(layer, durable_id)` at this snapshot's
