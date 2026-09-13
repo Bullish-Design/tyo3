@@ -256,6 +256,7 @@ pub(crate) fn config_error_to_pyerr(err: config::ConfigError) -> PyErr {
 mod analysis;
 mod commit;
 mod head_view;
+mod identity_ops;
 mod methods;
 mod open;
 mod snapshot;

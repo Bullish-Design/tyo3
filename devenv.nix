@@ -151,6 +151,12 @@ in
 
   # ── Environment variables for Cargo ─────────────────────────
   env.CARGO_NET_GIT_FETCH_WITH_CLI = "true";  # Use system git for crate fetching
+  # sccache caches rustc invocations by content, so a change that only alters
+  # *flags* — switching profile, or moving between `cargo build` and `maturin`
+  # (which adds pyo3/extension-module) — replays the ty/ruff/salsa tree from
+  # cache instead of recompiling it. It does not speed up edits to tyo3's own
+  # crate; cargo's incremental cache already covers those.
+  env.RUSTC_WRAPPER = "sccache";
   env.RUST_BACKTRACE = "1";                    # Debug Rust panics
 
   # ── Build scripts ────────────────────────────────────────────
@@ -197,7 +203,7 @@ in
     # Tee the run so we can print a friendly pass/fail banner afterward, and
     # preserve pytest's own exit code (PIPESTATUS[0]) for CI.
     _out="$(mktemp)"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS -ra ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing "$@" 2>&1 | tee "$_out"
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS -ra ${pytestDefaultMarkerArgs} tests/ --cov=tyo3 --cov-report=term-missing "$@" 2>&1 | tee "$_out"
     _pytest_rc=''${PIPESTATUS[0]}
     echo ""
     if [ "$_rust_rc" -eq 0 ] && [ "$_pytest_rc" -eq 0 ]; then
@@ -225,9 +231,9 @@ in
   #   devenv shell -- test-fast --all               # all tests (explicit)
   #   devenv shell -- test-fast test_project.py     # only that file (bare
   #                                                 #   names are resolved
-  #                                                 #   under src/tyo3/tests/)
+  #                                                 #   under tests/)
   #   devenv shell -- test-fast test_project.py::test_open  # a single node id
-  #   devenv shell -- test-fast src/tyo3/tests/foo.py -k bar  # path + flags
+  #   devenv shell -- test-fast tests/foo.py -k bar  # path + flags
   # Any arg that looks like a test selector (a path, a *.py file, or a ::node
   # id) narrows the run to just those targets; everything else (flags, -k
   # exprs) passes through to pytest. With no selector, the full suite runs.
@@ -242,12 +248,12 @@ in
         --all)          _force_all=1 ;;
         -*)             _passthru+=("$_arg") ;;          # flag — pass through
         */*)            _targets+=("$_arg") ;;           # explicit path — verbatim
-        *.py|*.py::*|*::*) _targets+=("src/tyo3/tests/$_arg") ;;  # bare file/node id
+        *.py|*.py::*|*::*) _targets+=("tests/$_arg") ;;  # bare file/node id
         *)              _passthru+=("$_arg") ;;          # e.g. value of -k
       esac
     done
     if [ "$_force_all" -eq 1 ] || [ ''${#_targets[@]} -eq 0 ]; then
-      _targets=(src/tyo3/tests/)
+      _targets=(tests/)
       _xdist=(-n 4 --dist loadscope)                    # full suite — parallel
       echo "═══ Running all tests (no coverage, parallel) ═══"
     else
@@ -263,28 +269,28 @@ in
     ${detailPrelude}
     echo "═══ Running Rust backend tests ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/test_rust_integration.py src/tyo3/tests/test_rust_snapshots.py src/tyo3/tests/test_coordinate_conversion.py "$@" 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} tests/test_rust_integration.py tests/test_rust_snapshots.py tests/test_coordinate_conversion.py "$@" 2>&1
   '';
 
   scripts.test-property.exec = ''
     ${detailPrelude}
     echo "═══ Running property-based tests (Hypothesis) ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/test_property_based.py "$@" 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} tests/test_property_based.py "$@" 2>&1
   '';
 
   scripts.test-perf.exec = ''
     ${detailPrelude}
     echo "═══ Running performance benchmarks ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/test_rust_performance.py "$@" 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} tests/test_rust_performance.py "$@" 2>&1
   '';
 
   scripts.test-coverage.exec = ''
     ${detailPrelude}
     echo "═══ Running all tests with coverage report ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ --cov=tyo3 --cov-report=term-missing --cov-report=html -n auto "$@" 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} tests/ --cov=tyo3 --cov-report=term-missing --cov-report=html -n auto "$@" 2>&1
     echo "═══ HTML coverage report: $DEVENV_ROOT/htmlcov/index.html ═══"
   '';
 
@@ -292,7 +298,7 @@ in
     ${detailPrelude}
     echo "═══ Running CI-style test suite ═══"
     cd "$DEVENV_ROOT"
-    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} src/tyo3/tests/ -x --cov=tyo3 --cov-report=term-missing "$@" 2>&1
+    PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS ${pytestDefaultMarkerArgs} tests/ -x --cov=tyo3 --cov-report=term-missing "$@" 2>&1
     _ci_rc=$?
     [ "$_ci_rc" -eq 0 ] || exit "$_ci_rc"
     echo ""
@@ -379,15 +385,15 @@ in
     cd "$DEVENV_ROOT"
     PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS -ra --no-cov \
       -p no:cacheprovider \
-      src/tyo3/tests/test_final_content_spine.py \
-      src/tyo3/tests/test_final_no_read_side_writes.py \
-      src/tyo3/tests/test_final_commit_delta_contract.py \
-      src/tyo3/tests/test_final_transaction_rollback.py \
-      src/tyo3/tests/test_final_bus_contract.py \
-      src/tyo3/tests/test_final_derived_contract.py \
-      src/tyo3/tests/test_final_hash_ast.py \
-      src/tyo3/tests/test_final_parity_oracle.py \
-      src/tyo3/tests/test_final_acceptance.py \
+      tests/test_final_content_spine.py \
+      tests/test_final_no_read_side_writes.py \
+      tests/test_final_commit_delta_contract.py \
+      tests/test_final_transaction_rollback.py \
+      tests/test_final_bus_contract.py \
+      tests/test_final_derived_contract.py \
+      tests/test_final_hash_ast.py \
+      tests/test_final_parity_oracle.py \
+      tests/test_final_acceptance.py \
       "$@" 2>&1
   '';
 
@@ -397,7 +403,7 @@ in
     cd "$DEVENV_ROOT"
     PYTHONPATH=src python -m pytest $PYTEST_LOG_ARGS -ra --no-cov \
       -p no:cacheprovider \
-      src/tyo3/tests/test_final_parity_oracle.py \
+      tests/test_final_parity_oracle.py \
       "$@" 2>&1
   '';
 
@@ -429,7 +435,7 @@ in
     echo "═══ Rebuild complete ═══"
   '';
 
-  # Pass-through pytest: `devenv shell -- pytest src/tyo3/tests/test_concurrency.py -v`
+  # Pass-through pytest: `devenv shell -- pytest tests/test_concurrency.py -v`
   # Lean by default; add `--detail` for the verbose debug flags.
   scripts.pytest.exec = ''
     ${detailPrelude}
@@ -642,7 +648,7 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
   # runner's PATH has them.
   tasks = {
     "tyo3:lint".exec = "uv run --group dev ruff check src";
-    "tyo3:test".exec = "export VIRTUAL_ENV=\"$DEVENV_ROOT/.devenv/state/venv\"; maturin develop 2>&1 && PYTHONPATH=src uv run --group dev pytest --strict-markers -q --tb=short -m \"not benchmark\" src/tyo3/tests/ -x";
+    "tyo3:test".exec = "export VIRTUAL_ENV=\"$DEVENV_ROOT/.devenv/state/venv\"; maturin develop 2>&1 && PYTHONPATH=src uv run --group dev pytest --strict-markers -q --tb=short -m \"not benchmark\" tests/ -x";
 
     "base:check".after = [ "tyo3:lint" ];
     "base:test".after = [ "tyo3:test" ];
@@ -657,6 +663,6 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
     echo "Running CI-style tests..."
     cd "$DEVENV_ROOT"
     maturin develop 2>&1
-    PYTHONPATH=src python -m pytest ${pytestLeanArgs} ${pytestDefaultMarkerArgs} src/tyo3/tests/ -x 2>&1
+    PYTHONPATH=src python -m pytest ${pytestLeanArgs} ${pytestDefaultMarkerArgs} tests/ -x 2>&1
   '';
 }

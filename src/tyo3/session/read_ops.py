@@ -456,53 +456,64 @@ class _ReadOps:
 
         return [NameOccurrence.model_validate(o) for o in native_result]
 
-    # ── Identity (Gate 2) ────────────────────────────────────────────
-    # Available on TyO3Session; Snapshot may not support these if the
-    # native snapshot handle doesn't expose identity methods.
+    # ── Identity ─────────────────────────────────────────────────────
+    # Identity resolves against whatever revision this handle reads: HEAD for a
+    # session, the pinned revision for a snapshot. Every handle answers, and
+    # every handle reports failure the same way — a typed exception, never a
+    # silent ``None``. (Before, this surface swallowed all errors so that
+    # snapshots, whose native handle had no identity methods at all, appeared
+    # to work while always answering ``None``.)
 
-    def id_for(self, path: str, line: int, col: int):
-        """Resolve the DurableId of the entity at (path, line, col).
+    def id_for(self, path: str | StdPath, line: int, col: int) -> str | None:
+        """Resolve the DurableId of the entity at *(line, col)*.
 
-        Returns None if no entity was found or not supported.
+        Returns ``None`` when no entity encloses the position, or when the
+        entity has no registered id.
         """
         self._check_open()
         try:
-            return self._native().id_for(path, line, col)
-        except Exception:
-            return None
+            return self._native().id_for(str(path), line, col)
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except _NativePathError as e:
+            raise PathResolutionError(str(e)) from e
+        except _NativePositionError as e:
+            raise PositionError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in id_for(): {e}") from e
 
-    def locate(self, durable_id: str):
-        """Locate the current file::qualified_path for a DurableId.
+    def locate(self, durable_id: str) -> str | None:
+        """Return the ``file::qualified_path`` bound to *durable_id*.
 
-        Returns None if the id is not in the registry or not supported.
+        Returns ``None`` when the id is not in this revision's registry.
         """
         self._check_open()
         try:
             return self._native().locate(durable_id)
-        except Exception:
-            return None
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in locate(): {e}") from e
 
     def needs_review(self) -> list[str]:
-        """List durable ids currently flagged as NeedsReview.
-
-        Returns empty list if the native handle doesn't support it.
-        """
+        """List durable ids currently flagged as NeedsReview."""
         self._check_open()
         try:
             return self._native().needs_review()
-        except Exception:
-            return []
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in needs_review(): {e}") from e
 
     def orphaned(self) -> list[str]:
-        """List durable ids currently flagged as Orphaned.
-
-        Returns empty list if the native handle doesn't support it.
-        """
+        """List durable ids currently flagged as Orphaned."""
         self._check_open()
         try:
             return self._native().orphaned()
-        except Exception:
-            return []
+        except _NativeClosedError as e:
+            raise ProjectClosedError(str(e)) from e
+        except Exception as e:
+            raise InternalTyError(f"Unexpected error in orphaned(): {e}") from e
 
     # ── Hover ────────────────────────────────────────────────────────
 

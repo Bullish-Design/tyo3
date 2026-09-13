@@ -673,96 +673,31 @@ impl PyTyProject {
 
     /// Resolve the DurableId of the entity at `(path, line, col)`.
     ///
-    /// Finds the enclosing symbol at the position, builds its qualified_path,
-    /// and looks up the DurableId in the identity registry. Returns None if
-    /// no entity was found at the position or no identity is registered.
+    /// Head-pinned view of `identity_ops::id_for`; `TySnapshot::id_for` answers
+    /// the same question against its pinned revision.
     fn id_for(&self, path: &str, line: u32, col: u32) -> PyResult<Option<String>> {
         let guard = lock_state(&self.inner, "id_for")?;
         let head = guard.as_ref().unwrap();
-
-        let state = TyProjectState {
-            db: head.db.clone(),
-            root: head.root.clone(),
-            registry: Some(head.registry.clone()),
-            hash_policy: head.hash_policy,
-            hash_policies: head.hash_policies.clone(),
-            default_hash_profile: head.default_hash_profile.clone(),
-            authored: None,
-        };
-
-        // Resolve the file.
-        let file = crate::files::resolve_file(
-            &state.db,
-            state.root.as_std_path(),
-            path,
-        ).map_err(|e| PathResolutionError::new_err(e.to_string()))?;
-
-        let file_path = file.path(&state.db).as_str().to_string();
-
-        // Get document symbols.
-        let flat_symbols = ty_ide::document_symbols(&state.db, file);
-        let hierarchical = flat_symbols.to_hierarchical();
-
-        let src = ruff_db::source::source_text(&state.db, file);
-        let source_str = src.as_str();
-        let line_index = ruff_source_file::LineIndex::from_source_text(source_str);
-
-        // Convert position to offset.
-        let offset = crate::coordinates::position_to_offset_with_index(
-            source_str, &line_index, line, col,
-        ).map_err(|e| PositionError::new_err(e.to_string()))?;
-
-        // Find all symbols that contain this offset, pick the innermost.
-        let mut best: Option<(String, u32)> = None; // (qualified_path, range_size)
-
-        // Walk all symbols via iter() and figure out containment + nesting.
-        for (id, info) in hierarchical.iter() {
-            if info.full_range.contains(offset) {
-                // Build qualified_path by walking up the hierarchy.
-                let qp = build_qualified_path(&hierarchical, id, &file_path);
-                let size = info.full_range.len().to_u32();
-                match &best {
-                    None => best = Some((qp, size)),
-                    Some((_, prev_size)) if size < *prev_size => {
-                        best = Some((qp, size));
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // Look up in the registry.
-        match best {
-            Some((qp, _)) => Ok(head.registry.by_path(&qp).map(|id| id.0.clone())),
-            None => Ok(None),
-        }
+        let state = head.read_clone();
+        super::identity_ops::id_for(&state, path, line, col)
     }
 
     /// Locate the current file+qualified_path for a DurableId.
-    ///
-    /// Returns None if the id is not in the registry (e.g. retired, or
-    /// from another session).
     fn locate(&self, durable_id: &str) -> PyResult<Option<String>> {
         let guard = lock_state(&self.inner, "locate")?;
         let head = guard.as_ref().unwrap();
-        let id = DurableId(durable_id.to_string());
-        Ok(head.registry.get(&id).map(|a| a.qualified_path.clone()))
+        Ok(super::identity_ops::locate(Some(&head.registry), durable_id))
     }
 
     /// List DurableIds whose body now differs from the hash captured when their
     /// note was authored — the durable, level-triggered `needs_review` set.
-    ///
-    /// This is NOT the transient registry `NeedsReview` status (an edge signal
-    /// that auto-clears on the next reconcile); it survives saves, same-file
-    /// edits, and restart, and unflags on revert. See
-    /// `commit::needs_review_ids`.
     fn needs_review(&self) -> PyResult<Vec<String>> {
         let guard = lock_state(&self.inner, "needs_review")?;
         let head = guard.as_ref().unwrap();
-        Ok(crate::project::commit::needs_review_ids(
+        Ok(super::identity_ops::needs_review(
             &head.config,
-            &head.authored,
-            &head.registry,
+            Some(&head.authored),
+            Some(&head.registry),
         ))
     }
 
@@ -770,10 +705,7 @@ impl PyTyProject {
     fn orphaned(&self) -> PyResult<Vec<String>> {
         let guard = lock_state(&self.inner, "orphaned")?;
         let head = guard.as_ref().unwrap();
-        Ok(head.registry.iter()
-            .filter(|a| a.status == crate::identity::IdentityStatus::Orphaned)
-            .map(|a| a.id.0.clone())
-            .collect())
+        Ok(super::identity_ops::orphaned(Some(&head.registry)))
     }
 }
 

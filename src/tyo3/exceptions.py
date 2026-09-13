@@ -104,6 +104,18 @@ class InternalTyError(TyO3Error):
     """Raised when the underlying ty/Ruff engine encounters an unexpected error."""
 
 
+class DaemonAlreadyRunning(TyO3Error):
+    """Raised when another live daemon already owns this project root.
+
+    Exactly one daemon may serve a root, because each one owns a writable
+    session over the same ``.tyo3/`` sidecar. The holder's pid is in ``pid``
+    when it could be read from the lock file."""
+
+    def __init__(self, message: str, *, pid: int | None = None) -> None:
+        super().__init__(message)
+        self.pid = pid
+
+
 class SchemaValidationError(TyO3Error):
     """Raised when an authored value fails its layer's declared schema (AB5).
 
@@ -128,5 +140,6 @@ __all__ = [
     "ReconcileAmbiguous",
     "AnalysisError",
     "InternalTyError",
+    "DaemonAlreadyRunning",
     "SchemaValidationError",
 ]

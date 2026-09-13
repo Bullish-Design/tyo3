@@ -334,6 +334,43 @@ impl PyHeadView {
         }
     }
 
+    // ── Identity ─────────────────────────────────────────────────
+
+    // The floating view answers identity against the live head, so all three
+    // handles (`TyProject`, `TySnapshot`, `TyHeadView`) implement the same
+    // surface over the same `identity_ops` logic. Only `id_for` analyses the
+    // source, so only it needs the cancel-retry path; the rest are plain
+    // registry lookups under a brief lock.
+
+    fn id_for(&self, py: Python<'_>, path: &str, line: u32, col: u32) -> PyResult<Option<String>> {
+        let path = path.to_owned();
+        read_head_with_retry(py, &self.inner, "id_for", move |s| {
+            super::identity_ops::id_for(s, &path, line, col)
+        })?
+    }
+
+    fn locate(&self, durable_id: &str) -> PyResult<Option<String>> {
+        let guard = lock_state(&self.inner, "locate")?;
+        let head = guard.as_ref().unwrap();
+        Ok(super::identity_ops::locate(Some(&head.registry), durable_id))
+    }
+
+    fn needs_review(&self) -> PyResult<Vec<String>> {
+        let guard = lock_state(&self.inner, "needs_review")?;
+        let head = guard.as_ref().unwrap();
+        Ok(super::identity_ops::needs_review(
+            &head.config,
+            Some(&head.authored),
+            Some(&head.registry),
+        ))
+    }
+
+    fn orphaned(&self) -> PyResult<Vec<String>> {
+        let guard = lock_state(&self.inner, "orphaned")?;
+        let head = guard.as_ref().unwrap();
+        Ok(super::identity_ops::orphaned(Some(&head.registry)))
+    }
+
     // ── Hover ────────────────────────────────────────────────────
 
     fn hover<'py>(

@@ -1,0 +1,132 @@
+"""Tests for file_occurrences API (Phase 5 — Batch Occurrence API)."""
+
+from __future__ import annotations
+
+import pytest
+
+from tests.conftest import FIXTURES_DIR
+from tyo3.graph.models import ReferenceRole
+
+try:
+    from tyo3 import _HAS_NATIVE
+except ImportError:
+    _HAS_NATIVE = False
+
+
+
+def fixture_path(name: str) -> str:
+    return str((FIXTURES_DIR / name).resolve())
+
+
+needs_native = pytest.mark.skipif(not _HAS_NATIVE, reason="Rust native extension not built")
+
+# ── Shared caches (session-scoped, via conftest) ──────────────────────────
+
+
+def get_project(fixture_name: str):
+    from tests.conftest import shared_project
+
+    return shared_project(fixture_name)
+
+
+def _get_graph(fixture_name: str):
+    from tests.conftest import shared_graph
+
+    return shared_graph(fixture_name)
+
+
+@needs_native
+class TestFileOccurrences:
+    def test_returns_list(self) -> None:
+        rp = get_project("simple_package")
+        files = rp.files()
+        assert len(files) > 0
+        occs = rp.file_occurrences(str(files[0]))
+        assert isinstance(occs, list)
+
+    def test_occurrences_have_range_and_role(self) -> None:
+        rp = get_project("graph_test")
+        files = rp.files()
+        occs = rp.file_occurrences(str(files[0]))
+        assert len(occs) > 0, "Expected at least one occurrence"
+        for occ in occs:
+            assert occ.range is not None
+            assert occ.role in ReferenceRole
+
+    def test_some_occurrences_resolve(self) -> None:
+        """Some occurrences should have resolved targets."""
+        rp = get_project("graph_test")
+        files = [str(f) for f in rp.files()]
+        models_file = [f for f in files if "models.py" in f]
+        assert len(models_file) == 1
+
+        occs = rp.file_occurrences(models_file[0])
+        resolved = [o for o in occs if o.target_file is not None]
+        # At minimum, the `Base` reference in `User(Base)` should resolve
+        # back to models.py itself (or stdlib/builtins.pyi for `object`)
+        assert len(resolved) > 0, (
+            f"Expected at least one resolved occurrence, got {len(resolved)} from {len(occs)} total"
+        )
+
+    def test_import_role_detected(self) -> None:
+        """Import statements should get the Import role."""
+        rp = get_project("graph_test")
+        files = [str(f) for f in rp.files()]
+        app_file = [f for f in files if "app.py" in f]
+        assert len(app_file) == 1
+
+        occs = rp.file_occurrences(app_file[0])
+        imports = [o for o in occs if o.role == ReferenceRole.IMPORT]
+        # app.py has `from models import MAX_USERS, User`
+        assert len(imports) >= 1, f"Expected Import role occurrences, got roles: {[o.role for o in occs]}"
+
+    def test_definition_role_detected(self) -> None:
+        """Definition sites should get the Definition role."""
+        rp = get_project("graph_test")
+        files = [str(f) for f in rp.files()]
+        models_file = [f for f in files if "models.py" in f]
+        assert len(models_file) == 1
+
+        occs = rp.file_occurrences(models_file[0])
+        definitions = [o for o in occs if o.role == ReferenceRole.DEFINITION]
+        # models.py defines Base, User, __init__, save, MAX_USERS
+        assert len(definitions) >= 3, (
+            f"Expected Definition role occurrences, got {len(definitions)}: "
+            f"{[(o.target_name, o.role) for o in definitions]}"
+        )
+
+    def test_bad_path_raises(self) -> None:
+        from tyo3.exceptions import PathResolutionError
+
+        rp = get_project("simple_package")
+        with pytest.raises(PathResolutionError):
+            rp.file_occurrences("nonexistent.py")
+
+    def test_after_close_raises(self) -> None:
+        from tyo3 import TyO3Session
+        from tyo3.exceptions import ProjectClosedError
+
+        # Needs own instance since it closes the project
+        rp = TyO3Session(fixture_path("simple_package"))
+        rp.close()
+        with pytest.raises(ProjectClosedError):
+            rp.file_occurrences("anything.py")
+
+    def test_session_method(self) -> None:
+        from tyo3.session import TyO3Session
+
+        with TyO3Session(fixture_path("graph_test")) as session:
+            files = session.files()
+            assert len(files) > 0
+            occs = session.file_occurrences(str(files[0]))
+            assert isinstance(occs, list)
+            assert len(occs) > 0
+
+    def test_graph_construction_uses_occurrences(self) -> None:
+        """Verify that CodeGraph.build() completes successfully using the
+        batch occurrence API (Phase 5 path)."""
+        graph = _get_graph("graph_test")
+        assert graph.node_count > 0
+        assert graph.edge_count >= 0
+        # Should have at least some edges from the occurrence API
+        assert graph.edge_count > 0, "Expected at least some reference edges from file_occurrences"

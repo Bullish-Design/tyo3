@@ -24,6 +24,9 @@ requires = ["maturin>=1.7"]
 build-backend = "maturin"
 
 [tool.maturin]
+# Tests live in the top-level tests/ dir, outside the package, so nothing
+# test-shaped reaches the wheel. This guard keeps it that way.
+exclude = ["tyo3/tests/**", "tyo3/*/tests/**"]
 features = ["pyo3/extension-module"]
 module-name = "tyo3._native_impl"
 manifest-path = "rust/Cargo.toml"
@@ -33,7 +36,7 @@ python-source = "src"
 
 [tool.pytest.ini_options]
 addopts = "-q --cov=tyo3 --cov-report=term-missing --strict-markers -m 'not benchmark'"
-testpaths = ["src/tyo3/tests"]
+testpaths = ["tests"]
 markers = [
     "benchmark: opt-in performance and CodeGraph benchmarks (not run in default suite)",
     "watcher: real file-system watcher test (timing-dependent, may fail on watcher-hostile CI)",
