@@ -1,4 +1,4 @@
-"""Phase 8: Watcher as a change source — deterministic tests (no real FS timing)."""
+"""Phase 8: Watcher as a change source — deterministic and real-FS tests."""
 
 from __future__ import annotations
 
@@ -66,6 +66,38 @@ def test_created_event(tmp_path):
         assert any(p.endswith("new.py") for p in sync.created)
 
 
+def test_injected_cross_file_move_preserves_id_and_reports_structured_move(tmp_path):
+    body = "def helper():\n    return 1\n"
+    (tmp_path / "a.py").write_text(body)
+    (tmp_path / "b.py").write_text("")  # indexed destination placeholder
+
+    with TyO3Session(str(tmp_path)) as s:
+        s.sync_all()
+        helper_id = s.id_for("a.py", 1, 5)
+        assert helper_id is not None
+        before = s.head
+
+        (tmp_path / "a.py").unlink()
+        (tmp_path / "b.py").write_text(body)
+        s._inject_changes([("deleted", "a.py"), ("created", "b.py")])
+        delta = s.poll_changes()
+
+        assert delta is not None
+        assert delta.revision == before + 1
+        assert len(delta.moved) == 1
+        moved = delta.moved[0]
+        assert moved.id == helper_id
+        assert moved.old_qualified_path.endswith("a.py::helper")
+        assert moved.new_qualified_path.endswith("b.py::helper")
+        assert moved.old_file.endswith("a.py")
+        assert moved.new_file.endswith("b.py")
+        assert helper_id not in delta.created_ids
+        assert helper_id not in delta.deleted_ids
+        assert any(path.endswith("a.py") for path in delta.deleted)
+        assert any(path.endswith("b.py") for path in delta.created)
+        assert s.locate(helper_id).endswith("b.py::helper")
+
+
 def test_rescan_short_circuit(tmp_path):
     (tmp_path / "a.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as s:
@@ -101,5 +133,34 @@ def test_real_watcher_observes_disk_change(tmp_path):
             result = _poll_until_change(s)
             assert result is not None, "watcher did not observe the disk change within the timeout"
             assert any(p.endswith("a.py") for p in result.changed) or result.rescan
+        finally:
+            s.unwatch()
+
+
+@pytest.mark.watcher
+def test_real_watcher_preserves_cross_file_move(tmp_path):
+    body = "def helper():\n    return 1\n"
+    (tmp_path / "a.py").write_text(body)
+    (tmp_path / "b.py").write_text("")
+    with TyO3Session(str(tmp_path)) as s:
+        s.sync_all()
+        helper_id = s.id_for("a.py", 1, 5)
+        assert helper_id is not None
+        before = s.head
+        s.watch()
+        try:
+            time.sleep(0.2)  # let the watcher register paths
+            (tmp_path / "a.py").rename(tmp_path / "b.py")
+            result = _poll_until_change(s)
+            assert result is not None, "watcher did not observe the move within the timeout"
+            assert result.revision == before + 1
+            assert len(result.moved) == 1
+            moved = result.moved[0]
+            assert moved.id == helper_id
+            assert moved.old_qualified_path.endswith("a.py::helper")
+            assert moved.new_qualified_path.endswith("b.py::helper")
+            assert helper_id not in result.created_ids
+            assert helper_id not in result.deleted_ids
+            assert s.locate(helper_id).endswith("b.py::helper")
         finally:
             s.unwatch()

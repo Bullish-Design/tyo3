@@ -15,11 +15,10 @@
 | 1 | FsStore garbage collection | bounded gap | ✅ **done** |
 | 2 | Symbol/entity walk context-struct | cleanup | **planned** → `.scratch/projects/18-symbol-entity-walk-refactor/OVERVIEW.md` |
 | 3 | Optional store backends (qdrant, sqlite-vec) | feature | **open** (this doc §3) |
-| 4 | Watcher-driven cross-file move detection | bounded gap | **open** (this doc §4) |
+| 4 | Watcher-driven cross-file move detection | bounded gap | ✅ **done** (verified on current `main`) |
 | 5 | Stale "deferred to Phase N" doc comments | cleanup | ✅ **done** (commit `7f8d30b`, released in 0.2.0) |
 
-Suggested order if picking up: **#4** (needs a focused reconcile investigation)
-→ **#3** (real feature, only when a backend is actually wanted).
+Suggested next item: **#3** (real feature, only when a backend is actually wanted).
 
 ---
 
@@ -143,7 +142,7 @@ lancedb already covers the vector-store path end to end.
 
 ---
 
-## 4. Watcher-driven cross-file move detection
+## 4. Watcher-driven cross-file move detection ✅ done
 
 ### What it is
 Moving an entity to a new file with an unchanged body should preserve its
@@ -153,46 +152,45 @@ not a delete + a create. Two paths reach reconciliation:
   reconciler sees the delete + create in one scope and applies the §5.5 rule-2
   hash-match (same content hash, different path ⇒ `Moved`).
 - **Watcher path** (`poll_changes` ingesting disk events: a delete of `a.py` + a
-  create of `b.py` with identical content) — **gap**: the scoped reconcile
-  processes both changes but reports delete + create rather than the single
-  hash-matched move.
+  create of `b.py` with identical content) — **verified working**: the scoped
+  reconcile processes both changes together and reports the single hash-matched
+  move.
 
 ### Current status
-Documented, non-strict xfail at
-`src/tyo3/graph/tests/test_incremental_parity.py:347`
-(`test_moved_entity_preserves_id_and_updates_location`). It is **outside** the
-gated `testpaths` (`src/tyo3/tests`), so it neither blocks the suite nor
-XPASS-fails. Phase 5 already fixed the *other* half (the watcher no longer drops
-the delete+create batch — see `test_watch`); what remains is move *detection*
-over that batch.
+The gap is already resolved on the current `main` checkout; no implementation
+change was needed. The old reference to
+`src/tyo3/graph/tests/test_incremental_parity.py` is stale: that file is not in
+this checkout, and the durable regression now lives in the gated top-level
+`tests/test_watch.py` suite.
 
-### Where the fix lives (needs a focused investigation)
-Identity-layer move detection (`reconcile` / `reconcile_scoped` in
-`rust/src/identity.rs`, §5.5 rule 2). The likely divergence: the commit path
-reconciles the deleted and created entities together so the hash-match across
-them fires; the watcher's scoped reconcile either scopes per-file or doesn't
-cross-reference a just-deleted entity's content hash against a just-created one in
-the same poll batch. The fix is to make the watcher-batch reconcile consider
-hash-matched moves across the whole batch, exactly as the commit funnel does —
-ideally by routing both through the same reconcile entry so there is one move-
-detection rule, not two.
+The deterministic injection test and a real-watcher rename test both verify one
+revision, one structured move, preserved `DurableId`, empty `created_ids` /
+`deleted_ids`, and `locate()` at the destination. The path-shaped `created` /
+`deleted` metadata continues to list the filesystem paths by design.
+
+### Why it works
+The existing shared identity/commit path already provides the needed behavior.
+`poll_changes()` drains the complete watcher batch into `Mutation::Poll`,
+`build_poll_plan()` creates one scope containing both file paths,
+`extract_entities_for()` extracts the destination entity, and
+`reconcile_scoped()` retains the deleted anchor in `by_hash` until Pass B can
+match the unchanged body. Both commit and watcher changes therefore use the
+same hash-based move rule in `rust/src/identity.rs`.
 
 ### Files
-- `rust/src/identity.rs` (`reconcile_scoped` / the move-detection rule),
-  `rust/src/project/*` (the `poll_changes` → reconcile wiring vs the commit →
-  reconcile wiring).
-- Flip the xfail to a real assertion once it passes; consider promoting it into
-  the gated `testpaths`.
+- `tests/test_watch.py` (deterministic and real-watcher regression coverage).
+- `rust/src/identity.rs` and `rust/src/project/commit.rs` were inspected and
+  left unchanged; the shared reconciliation funnel is already correct.
 
 ### Acceptance
-- The xfail test passes as a normal test: a watcher-delivered cross-file move
-  preserves the id and reports one `moved` entry; `locate(id)` returns the new
-  path. Commit-path move behaviour unchanged.
+- Verified: a watcher-delivered cross-file move preserves the id and reports one
+  `moved` entry; `locate(id)` returns the new path. Commit-path move behavior is
+  unchanged.
 
-### Risk
-Low blast radius but identity-sensitive: a too-eager hash-match could mis-bind two
-genuinely-distinct same-hash entities. The existing `needs_review` ambiguity
-handling (§5.5) is the guard; make sure a watcher-batch move respects it.
+### Risk addressed
+The existing `needs_review` ambiguity handling (§5.5), one-to-one consumed sets,
+and deterministic ordering remain in force; the watcher uses the same
+hash-based move rule as the commit path.
 
 ---
 
