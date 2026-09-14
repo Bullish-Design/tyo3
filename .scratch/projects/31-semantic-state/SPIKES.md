@@ -1,4 +1,4 @@
-# Project 31 spikes
+# Project 31 spikes (historical pre-implementation record)
 
 Run on 2026-09-14 from trunk `1d75f602f220a74f342db38d53ec5bd1af93354d` in
 lane `31-spikes`. Baseline before the spikes: `check-rust` exit 0, clippy exit

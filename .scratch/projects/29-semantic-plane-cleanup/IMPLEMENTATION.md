@@ -1,7 +1,9 @@
-# IMPLEMENTATION — Semantic-plane cleanup (project 29)
+# IMPLEMENTATION — Semantic-plane cleanup (project 29, historical guide)
 
-Three steps. Land each one independently and green before starting the next.
-Read [DESIGN.md](DESIGN.md) first for the evidence behind each change.
+The three steps are complete. This file is retained as the execution record;
+it is not a current work order. Read [README.md](README.md) for current status
+and [Project 31](../31-semantic-state/README.md) for the later semantic-state
+decision.
 
 ## Ground rules
 
@@ -33,9 +35,10 @@ Record the count; it must not drop.
 
 # Step 1 — Explicit entity populations
 
-> **STATUS: the Python half is DONE** (landed 2026-09-13, uncommitted in the
-> working tree). §1.3 (Rust) is the only part left. §1.4–1.6 are already
-> applied — read them as a record of what was done, not as work to do. Re-run
+> Historical starting state: the Python half was **DONE** (landed 2026-09-13,
+> initially uncommitted in the working tree). §1.3 (Rust) was the only part
+> left at that point. §1.4–1.6 were already applied — read them as a record of
+> what was done, not as work to do. Re-run
 > §1.2 to confirm you are looking at the fixed state: `code.ids()` must return
 > the ULID only.
 >
@@ -457,7 +460,7 @@ Python commit-path test pass; the full suite is green.
 
 ---
 
-# After this project
+# After this project (historical roadmap)
 
 In order:
 
@@ -465,8 +468,9 @@ In order:
   The one change in this area with real performance impact: every traced derived
   production on a fresh snapshot currently pays a full project rebuild. Size the
   memory cost per pinned snapshot first.
-- **Project 31 — `SemanticState`.** DESIGN §5. The v2 document's Phase 1,
-  corrected: HEAD owns `{ identities, code }`; the read clone owns identities
-  plus a lazily produced layer. Do it after 30, which may reshape the boundary.
+- **Project 31 — semantic-state investigation.** The proposed `SemanticState`
+  type was investigated and rejected. See
+  `../31-semantic-state/README.md`; do not use the old “lazily produced layer”
+  wording as a description of current behavior.
 - **Jujutsu context via `pyjutsu`.** DESIGN §6. Independent of all the above;
   can start any time.

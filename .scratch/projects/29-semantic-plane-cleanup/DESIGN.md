@@ -1,7 +1,12 @@
-# DESIGN — Semantic-plane cleanup (project 29)
+# DESIGN — Semantic-plane cleanup (project 29, historical report)
 
 Verified against `main` at commit `e447986` on 2026-09-13. Every claim below
 carries a `file:line` anchor or a reproduction.
+
+This report is a historical record of the project-29 decision. Project 30 and
+Project 31 subsequently landed; where the deferred-work sections below refer
+to a future `SemanticState`, that proposal is superseded by
+[Project 31's settled decision](../31-semantic-state/README.md).
 
 ---
 
@@ -265,18 +270,19 @@ boundary. Sized as its own project **30**, after this one.
 
 ---
 
-## 5. Deferred: `SemanticState` (project 31)
+## 5. Historical proposal: `SemanticState` (project 31; superseded)
 
-The document's Phase 1, corrected. Not `SemanticState { registry, code }` on both
-sides, but an explicit split:
+At the time of this report, the document's Phase 1 was deferred as a proposed
+explicit split — not `SemanticState { registry, code }` on both sides:
 
 - **HEAD** owns `semantic: SemanticState { identities, code }` — both live, both
   owned, one publication boundary.
 - **Read clone / snapshot** owns identities plus a *lazily produced* layer.
 
-That is what happens today; the value is naming it so the asymmetry is deliberate
-rather than accidental. Do it **after** project 30, because caching the layer on
-snapshots may reshape the boundary and there is no point naming it twice.
+This was a roadmap proposal, not a current-state description. Project 31 later
+found that the registry and layer cannot honestly be one revision-shaped value,
+and introduced no `SemanticState` type. The current behavior is recorded in
+`../31-semantic-state/README.md` and its investigation §14.5.
 
 ---
 

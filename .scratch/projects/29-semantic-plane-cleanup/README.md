@@ -1,5 +1,9 @@
 # Project 29 — Semantic-plane cleanup
 
+**Status: complete.** This project and its three implementation steps are
+landed. The current follow-on decisions are recorded in [Project 31's
+overview](../31-semantic-state/README.md).
+
 Three behaviour-preserving cleanups to the native semantic plane
 (`IdentityRegistry` + `CodeLayer`), plus one verified bug fix. Groundwork for
 the later Jujutsu-context and semantic-persistence work.
@@ -19,40 +23,38 @@ different persistence, and deliberately different semantics (last-known facts vs
 current-revision facts). Merging them deletes the distinction reconciliation
 depends on.
 
-What *is* wrong in this area is smaller, more concrete, and partly a live bug.
-See [DESIGN.md](DESIGN.md) §2.
+What was wrong in this area was smaller and more concrete: one entity-population
+classification bug and two native invariants that needed to be made explicit.
+All three were addressed. See [DESIGN.md](DESIGN.md) §2 for the historical
+evidence.
 
-## Scope — three steps, in order
+## Completed scope
 
-- **Step 1 — Explicit entity populations.** The code layer holds three distinct
-  id populations (real entities, synthetic `<module>` nodes, external stubs)
-  distinguished today by ad-hoc string-shape guesses. The guess is **wrong for
-  external stubs**, and `session.code.ids()` leaks them as entities. Fix at the
-  source: emit an explicit discriminator from Rust; make Python read it.
-  *Rust + Python. Contains the one real bug fix in this project.*
-  **Python half landed 2026-09-13** (the bug fix + 12 tests, suite at 828). The
-  Rust half — naming the sentinels, the `Population` enum — is outstanding.
+- **Step 1 — Explicit entity populations.** The code layer's three distinct id
+  populations (real entities, synthetic `<module>` nodes, external stubs) were
+  classified by ad-hoc string-shape guesses. The external-stub guess was wrong,
+  and `session.code.ids()` leaked stubs as entities. The source now emits an
+  explicit `Population` discriminator and Python reads it, with regression
+  coverage for the leak.
 
-- **Step 2 — De-`Option` the identity registry.** `TyProjectState.registry` is
-  `Option<IdentityRegistry>`, but every production path passes `Some`. Costs 25
-  unwrap sites across six files. Make it a plain, default-empty
-  `IdentityRegistry`. *Rust only. Mechanical.*
+- **Step 2 — De-`Option` the identity registry.** `TyProjectState.registry` was
+  an unnecessary `Option<IdentityRegistry>` with 25 unwrap sites across six
+  files. It is now a plain, default-empty `IdentityRegistry`.
 
 - **Step 3 — `reverse_deps` derivability invariant.** The scoped in-commit
-  producer maintains `reverse_deps` edge-by-edge and never rebuilds it. Nothing
-  checks it still equals what the canonical edge set implies. If it drifts,
-  `affected_ids` under-fires and derived artifacts go **silently stale** — the
-  worst failure class in this system. Add the derivation, a debug assertion, and
-  a randomized-edit test. *Rust + test. Closes a silent-corruption risk.*
+  producer maintains `reverse_deps` edge-by-edge, and the canonical derivation,
+  debug assertions, and randomized-edit coverage now guard against silently
+  stale derived artifacts.
 
 ## Explicitly not in scope
 
 - Merging `Anchor` and `NodeData` into one record (DESIGN §3 — investigated and
   rejected, with evidence).
-- A `SemanticState` struct (DESIGN §5 — deferred to project 31, after 30 tells
-  us what the boundary should be).
-- Caching the produced `CodeLayer` on snapshots (DESIGN §4 — the one change here
-  with real performance impact; sized as its own project 30).
+- A `SemanticState` struct (DESIGN §5 — investigated and rejected by project
+  31; see its [settled decision](../31-semantic-state/README.md)).
+- Caching the produced `CodeLayer` on snapshots (DESIGN §4 — completed by
+  project 30; the remaining time-travel retention question is recorded by
+  project 31).
 - Jujutsu integration (DESIGN §6 — decided: use `pyjutsu`, Python-side, optional
   extra; own project).
 
@@ -65,13 +67,12 @@ See [DESIGN.md](DESIGN.md) §2.
   order; each step lands independently and green.
 - [KICKOFF.md](KICKOFF.md) — a self-contained prompt to start a clean session.
 
-## Status
+## Historical status
 
 - 2026-09-13 — Written.
-- 2026-09-13 — **Step 1, Python half landed.** `is_entity_node` added, all
-  callers moved, `tests/test_entity_populations.py` added. Suite 828 green,
-  parity-oracle green. Uncommitted in the working tree: `gitman` was not on
-  PATH. Remaining: Step 1 Rust half, Step 2, Step 3.
+- 2026-09-14 — All three steps landed and the working-tree loss risk was
+  resolved through the gitman workflow. Use current source and the linked
+  Project 31 overview for present behavior.
 
 ## Related
 

@@ -1,4 +1,8 @@
-# KICKOFF — Snapshot code-layer cache (project 30)
+# KICKOFF — Snapshot code-layer cache (project 30, historical)
+
+> Project 30 is complete. This is the original execution brief, retained for
+> provenance rather than current work. See [README.md](README.md) and Project
+> 31's [current overview](../31-semantic-state/README.md).
 
 You are working in **TyO3**: a Python semantic engine built on Astral `ty` +
 Salsa, with a Rust/PyO3 core (durable code identity, a native code layer,
@@ -16,12 +20,13 @@ IMPLEMENTATION.md wins.
 
 ## The defect, in one paragraph
 
-Every commit produces a **complete** code layer — `produce_code_delta_scoped`
+At the pre-implementation revision described by this historical brief, every
+commit produced a **complete** code layer — `produce_code_delta_scoped`
 documents its output as "byte-identical to a full `Builder::build` over the same
 final content" (`rust/src/code_layer.rs:525`) — and stores it at
-`rust/src/project/commit.rs:948`. Every snapshot then **throws it away** and
-rebuilds from an empty prev (`rust/src/project/snapshot.rs:58`), because
-`TyProjectState` (`rust/src/project.rs:81`) carries no code layer.
+`rust/src/project/commit.rs:948`. Before this project, every snapshot then
+**threw it away** and rebuilt from an empty prev (`rust/src/project/snapshot.rs:58`),
+because `TyProjectState` (`rust/src/project.rs:81`) carried no code layer.
 `_RecordingContext.__init__` calls `snapshot.graph()` unconditionally
 (`src/tyo3/session/views.py:47`), so **every traced derived production on a
 fresh snapshot pays a full project rebuild before the producer runs** — even one
@@ -89,13 +94,12 @@ devenv shell -- tests             # cargo test + full Python suite
 devenv shell -- parity-oracle     # MUST stay green
 ```
 
-## After this project
+## After this project (historical roadmap)
 
-**Project 31 — the corrected `SemanticState`.** See
-`.scratch/projects/29-semantic-plane-cleanup/DESIGN.md` §5. Re-read it before
-starting: after this project the read clone carries identities *and* a layer,
-which is most of what that boundary was going to name. This project may have
-already answered the question, or moved where the line belongs.
+**Project 31 — the semantic-state investigation.** The old roadmap expected a
+corrected `SemanticState`, but Project 31 investigated and rejected that type.
+See `../31-semantic-state/README.md`; do not treat 29's §5 as a current API
+description.
 
 **Jujutsu revision context.** Decided in 29's DESIGN §6: use `../pyjutsu`
 (in-process `jj-lib` binding, reads publish no operation), not `../gitman`

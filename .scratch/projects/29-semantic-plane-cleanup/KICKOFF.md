@@ -1,4 +1,9 @@
-# KICKOFF — Semantic-plane cleanup (project 29)
+# KICKOFF — Semantic-plane cleanup (project 29, historical)
+
+> Project 29 is complete. This file is retained as the original execution
+> brief and is not a current work order. See [README.md](README.md) for status
+> and [Project 31](../31-semantic-state/README.md) for the later semantic-state
+> decision.
 
 You are working in **TyO3**: a Python semantic engine built on Astral `ty` +
 Salsa, with a Rust/PyO3 core (durable code identity, a native code layer, layered
@@ -31,7 +36,8 @@ evidence. Do not re-litigate it; do not implement the merge.
 
 ### Step 1 — Explicit entity populations (**Python half already landed**)
 
-> The bug fix itself is **done** and sits uncommitted in the working tree:
+> Historical starting state: the Python half of the bug fix was **done** and
+> initially sat uncommitted in the working tree:
 > `is_entity_node` added, every caller moved, `tests/test_entity_populations.py`
 > added. Suite **828 passed**, parity-oracle green. **Only the Rust half is
 > left** — IMPLEMENTATION §1.3: name the `<module>` / `<external>` sentinels into
@@ -117,9 +123,9 @@ devenv shell -- parity-oracle     # the tiered structural/cosmetic oracle
   derived production on a fresh snapshot currently pays a full project rebuild
   (`rust/src/project/snapshot.rs:58`, `src/tyo3/session/views.py:44`). Real
   performance win; own project.
-- **Project 31** — a corrected `SemanticState`: HEAD owns
-  `{ identities, code }`, the read clone owns identities plus a lazily produced
-  layer. After 30.
+- **Project 31** — investigated the proposed corrected `SemanticState` and
+  rejected the new type. See `../31-semantic-state/README.md`; its current
+  eager-open and carried-layer behavior is authoritative.
 - **Jujutsu context** — decided: use `../pyjutsu` (in-process `jj-lib` binding),
   not `../gitman` (a workflow writer, wrong layer). Python-side adapter at
   `src/tyo3/integrations/jujutsu.py`, optional extra `tyo3[jj]`. DESIGN §6.

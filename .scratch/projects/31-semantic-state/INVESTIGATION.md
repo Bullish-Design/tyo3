@@ -1,21 +1,23 @@
 # INVESTIGATION — `SemanticState` (project 31)
 
-Traced against the working tree at trunk `aa87019` (post-project-30) on
-2026-09-14. Every load-bearing claim carries a `file:line` anchor or a
-reproduction command. Where the project-29 and project-30 documents disagree
-with the source, the source wins.
+The original investigation was traced against trunk `aa87019` (post-project-30)
+on 2026-09-14. The implementation and the eager-open follow-up are now landed
+on trunk `9118bb9f`. Every load-bearing claim carries a `file:line` anchor or a
+reproduction command. Where project-29 and project-30 documents disagree with
+the source, the source wins.
 
-The implementation has since landed in three independently pushed lanes. The
+The implementation landed in three independently pushed lanes, followed by the
+long-lived-session eager-open optimization in `31-eager-open-layer`. The
 pre-implementation duplication and line references below are retained where
 they explain the evidence; current post-implementation locations and
-measurements are recorded in §14.4 and the outcome in §17.
+measurements are recorded in §14.4–§14.5 and the outcome in §17.
 
 ---
 
 ## 1. Executive summary
 
-**Decision: document only. Do not add a `SemanticState` type. Close the
-architectural question.**
+**Decision: do not add a `SemanticState` type. The approved cleanup and the
+long-lived-session eager-open follow-up are complete.**
 
 Project 29 §5 deferred a corrected `SemanticState { identities, code }` on HEAD.
 Project 30 then moved the boundary. The current shape is:
@@ -70,11 +72,12 @@ new abstraction:
   at `project.rs:220-221`, with the deliberate `is_head` guard remaining at
   `methods.rs:613`.
 
-One real gap is recorded but deliberately **not** fixed here: a session that
-never commits never builds a head layer (`open.rs:168`, `commit.rs:849-851`), so
-every `full_code_delta` on a read-only session still pays the full rebuild —
-measured 4.40 s, repeatedly (§6.3). Fixing it needs a write on a read path,
-which architectural constraint 13 forbids. It is sized as a follow-up in §15.
+The original investigation recorded one real gap: a session that never commits
+never built a head layer, so every `full_code_delta` on a read-only session paid
+the full rebuild. That gap is resolved by the eager-open follow-up (§14.5): the
+full build is now paid during `open()` and repeated head reads use the carried
+layer. Time-travel snapshots remain the deliberate fallback because the head
+layer is valid only for the head revision.
 
 ---
 
@@ -84,11 +87,11 @@ which architectural constraint 13 forbids. It is sized as a follow-up in §15.
 |---|---|---|---|---|---|---|---|---|
 | `IdentityRegistry` (`identity.rs:78`) | `HeadState.registry` (`project.rs:120`) | whole session; survives `reload()` (`methods.rs:137`) | **last-known** facts *across* revisions; anchors carry `first_seen_rev` / `last_seen_rev` (`identity.rs:56-57`) | **Yes** — sidecar `identity.db`, every commit (`commit.rs:551-567`) | **Deep clone** into every read clone (`project.rs:168`, `:185`) and every snapshot (`methods.rs:602`, `:633`) | **Authoritative** | No — always a value; `Option` removed by project 29 Step 2 | With the layer, under the head lock; see §4.2 |
 | `Anchor` (`identity.rs:51`) | inside `IdentityRegistry.by_id` | outlives its entity — `retire` keeps it in `by_id` (`identity.rs:187-211`) | last-known; `status: Active\|NeedsReview\|Orphaned` (`identity.rs:65-70`) | Yes, with the registry (serde, `identity.rs:314`) | with the registry | Authoritative | `get()` → `None` for an unknown id | n/a |
-| `CodeLayer` (`code_layer.rs:211`) | `HeadState.code_layer: Arc<…>` (`project.rs:141`) | replaced wholesale each reconciling commit (`commit.rs:949`); reset to empty by `reload()` (`methods.rs:141` → `open.rs:168`) | **current** facts for exactly **one** revision; complete, not a patch (`code_layer.rs:525-527`) | **Never** — no sidecar write exists | **`Arc`-shared**, never mutated after publication (no `Arc::make_mut` / `get_mut` anywhere in `rust/src`) | Authoritative for its revision; **derived** from db + registry | Empty until the first reconciling commit (`open.rs:168`) | see §4.2 |
+| `CodeLayer` (`code_layer.rs:211`) | `HeadState.code_layer: Arc<…>` (`project.rs:141`) | initialized empty by `build_head_with_config` (`open.rs:168`), materialized at `open()` for non-empty projects, then replaced wholesale each reconciling commit (`commit.rs:949`); reset by `reload()` (`methods.rs:141` → `open.rs:168`) | **current** facts for exactly **one** revision; complete, not a patch (`code_layer.rs:525-527`) | **Never** — no sidecar write exists | **`Arc`-shared**, never mutated after publication (no `Arc::make_mut` / `get_mut` anywhere in `rust/src`) | Authoritative for its revision; **derived** from db + registry | Empty for genuinely empty projects and before materialization (`open.rs:168`) | see §4.2 |
 | `NodeData` (`code_layer.rs:153`) | inside `CodeLayer.nodes` | with the layer | current revision only | No | with the layer | Derived | `nodes.get()` → `None` | n/a |
 | `ProjectDatabase` | `HeadState.db` (live) and `TyProjectState.db` (frozen) | head: session; frozen: snapshot | head floats; frozen pinned by `Generation` + `Revision` (`open.rs:188-243`) | No (salsa memo cache) | **Cloned** per read (`project.rs:245-251`); snapshots get an **independent** `Zalsa` (`open.rs:178-179`) | Authoritative substrate | No | n/a |
 | `HeadState` (`project.rs:110`) | `PyTyProject.inner: Arc<Mutex<Option<…>>>` | session; `None` after `close()` | always the newest published revision | partially (registry + authored via sidecar) | never cloned — `store`/`system` must not escape (`project.rs:106-109`) | Authoritative | `None` after `close()` | it **is** the publication boundary |
-| `TyProjectState` (`project.rs:81`) | a read clone, or `PySnapshot.inner` | one call (read clone) or one snapshot | pinned for a snapshot; floating for a head read clone | No | cheap clone: `Arc` bump for the layer, deep clone for the registry + db | Derived view | its `code_layer` may be `None` (4 legitimate producers, §4.3) | consumes a published pair |
+| `TyProjectState` (`project.rs:81`) | a read clone, or `PySnapshot.inner` | one call (read clone) or one snapshot | pinned for a snapshot; floating for a head read clone | No | cheap clone: `Arc` bump for the layer, deep clone for the registry + db | Derived view | its `code_layer` may be `None` for empty heads, pre-reconcile extraction, frozen/time-travel snapshots, and tests (§4.3) | consumes a published pair |
 | `Snapshot` / `PySnapshot` (`snapshot.rs:16`) | Python `Snapshot` wrapper | until `close()` | immutable, pinned at `revision`; `is_head` distinguishes head from time travel (`snapshot.rs:26`) | No | shares the revision's `Arc<CodeLayer>` with HEAD and sibling snapshots | Derived | — | — |
 | `CodeGraph` (`graph/projection.py`) | Python `Snapshot._graph` (`views.py:295`) or `TyO3Session._head_graph` (`session.py:244`) | memoized per snapshot; dropped on every commit (`session.py:625-635`) | pinned via `_pin_at(revision)` (`views.py:295`) | No | rebuilt, never shared | **Pure projection** of one complete `full_code_delta()` (`applier.py:88-105`) | absent until first access | n/a — built on demand |
 
@@ -189,16 +192,16 @@ constraint, and it is the single most important fact for §7.
 
 ### 4.3 When is `code_layer == None`?
 
-All six `TyProjectState` construction sites, exhaustively
-(`grep -n 'code_layer' rust/src/project.rs rust/src/project/*.rs`):
+All `TyProjectState` construction sites, exhaustively
+(`rg -n 'code_layer' rust/src/project.rs rust/src/project/`):
 
 | Site | Value | Why |
 |---|---|---|
 | `project.rs:173` `TyProjectState::read_clone` | propagates whatever it holds | a read clone of a read clone |
-| `project.rs:204` `HeadState::read_clone` | `head.servable_code_layer()` | pre-first-commit head has an empty layer; the helper treats it as a miss |
-| `project.rs:914` MVCC stress test | `None` | test scaffolding |
+| `project.rs:204` `HeadState::read_clone` | `head.servable_code_layer()` | non-empty heads carry the layer materialized at open; empty heads retain the empty-layer miss |
+| `project.rs` test constructors | `None` | test scaffolding |
 | `commit.rs:364` pre-reconcile extraction state | `None` | this state exists only to run `extract_entities`; a layer is meaningless for it |
-| `open.rs:243` `build_frozen` | `None` | the frozen state is constructed before the caller decides what to attach |
+| `open.rs` `build_frozen` | `None` | the frozen state is constructed before the caller decides what to attach |
 | `methods.rs:613` `snapshot()` | `head.servable_code_layer()` only when `is_head` | a **time-travel** snapshot must not be served the head's layer |
 
 So the `Option` is **not** vestigial — unlike the `Option<IdentityRegistry>`
@@ -217,7 +220,7 @@ rejected here** — see Design C.
 
 ---
 
-## 5. The precise problem project 31 was supposed to solve
+## 5. The precise problem project 31 was supposed to solve (historical)
 
 From `.scratch/projects/29-semantic-plane-cleanup/DESIGN.md:268-279`:
 
@@ -225,8 +228,8 @@ From `.scratch/projects/29-semantic-plane-cleanup/DESIGN.md:268-279`:
 >   owned, one publication boundary.
 > - **Read clone / snapshot** owns identities plus a *lazily produced* layer.
 >
-> That is what happens today; the value is naming it so the asymmetry is
-> deliberate rather than accidental.
+> This was the pre-project-31 description; it is retained here as the historical
+> problem statement. The current behavior is recorded in §1 and §14.5.
 
 Decomposed, project 31 was to deliver three things:
 
@@ -241,7 +244,7 @@ documentation goal, and it must be judged against what project 30 shipped.
 
 ---
 
-## 6. Did project 30 already solve it?
+## 6. Did project 30 already solve it? (historical pre-follow-up assessment)
 
 ### 6.1 P1 — the HEAD publication boundary: **solved, and a type cannot improve it**
 
@@ -296,7 +299,7 @@ That comment was corrected in Step 0 to include time travel and the other
 legitimate `None` producers. The fallback remains a stateless recompute, not a
 lazy cache.
 
-### 6.3 The performance claim, reproduced
+### 6.3 The pre-follow-up performance claim, reproduced
 
 Reproduction (debug build, repository root, 167 files / 3,397 nodes / 36,285
 edges), script preserved at `.scratch/projects/31-semantic-state/probe_timing.py`:
@@ -322,22 +325,26 @@ Three facts fall out:
 3. **Time travel deliberately pays the fallback** (4.110 s), exactly as
    `methods.rs:607-610` documents.
 
-### 6.4 The gap project 30 left
+### 6.4 The gap project 30 left (resolved by §14.5)
 
-A session that never commits never produces a head layer: `build_head_with_config`
-starts it empty (`open.rs:168`), `open()` reconciles identity but does **not**
-produce a layer (`methods.rs:80-91`; no `code_layer` assignment exists there), and the deliberate reason is recorded at
-`commit.rs:849-851` ("the head layer is built lazily, never at open, to keep
-`open()` off the producer's cost path"). The measurement above shows the
-consequence: a read-only session pays **4.40 s on every `full_code_delta` call,
-forever**. `poll_changes` with no events returns `Ok(None)` without committing
-(`commit.rs:1016-1018`), so a watch-only daemon session never escapes it either.
+Before the eager-open follow-up, a session that never committed never produced
+a head layer: `build_head_with_config` started it empty (`open.rs:168`), and
+`open()` reconciled identity but did **not** produce a layer. The deliberate
+reason was recorded at `commit.rs:849-851` ("the head layer is built lazily,
+never at open, to keep `open()` off the producer's cost path"). The measurement
+above showed the consequence: a read-only session paid **4.40 s on every
+`full_code_delta` call, forever**. `poll_changes` with no events returned
+`Ok(None)` without committing (`commit.rs:1016-1018`), so a watch-only daemon
+session never escaped it either.
 
-This is out of scope for project 31: closing it requires either moving the cost
-onto `open()` (explicitly rejected) or memoising on a read path, which
-architectural constraint 13 forbids. Sized as a follow-up in §15.
+This paragraph is historical. The eager-open follow-up now resolves the gap by
+materializing the layer after reconciliation (§14.5). Time-travel remains on
+the fallback by design. The original three-lane implementation left this gap
+out of scope; the follow-up moves the cost onto `open()`, which is
+initialization rather than a read-side write, so architectural constraint 13
+remains satisfied.
 
-### 6.5 Verdict
+### 6.5 Verdict before the eager-open follow-up
 
 | Goal | Status after project 30 | Needs a new type? |
 |---|---|---|
@@ -427,7 +434,7 @@ real regression risk, not a style preference.
 
 ---
 
-## 9. Recommended architecture — Design A
+## 9. Recommended architecture — Design A (implemented)
 
 **Keep `IdentityRegistry` and `Arc<CodeLayer>` as distinct fields. Add no new
 state type. Remove the two duplications, and correct the comments.**
@@ -543,7 +550,7 @@ fail:
 
 ---
 
-## 11. Exact proposed type and field definitions
+## 11. Exact proposed type and field definitions (none)
 
 **None.** No new struct, enum or trait is proposed. The full proposed diff is two
 extracted functions and four comment blocks (§9.2), in
@@ -577,7 +584,7 @@ impl HeadState {
 
 ---
 
-## 12. Migration plan — independently testable steps
+## 12. Original migration plan — independently testable steps (complete)
 
 Spelled out in full in [IMPLEMENTATION.md](IMPLEMENTATION.md); summarised here.
 Do **not** start before this report is reviewed. One `gitman` lane per step;

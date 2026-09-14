@@ -1,81 +1,71 @@
-# Project 31 — `SemanticState`, investigated
+# Project 31 — semantic-state cleanup
 
-**Outcome: no new type. Document only.**
+**Status: complete.** Landed on `main` and pushed on 2026-09-14. The final
+implementation is the `31-eager-open-layer` follow-up, currently at trunk
+`9118bb9f`.
 
-Project 29 §5 deferred a `SemanticState { identities, code }` on HEAD until
-after project 30, "because caching the layer on snapshots may reshape the
-boundary". It did. This project traced the post-30 code and concluded that the
-boundary project 31 was going to name is already correct, already enforced, and
-cannot be improved by a wrapper type.
+## Outcome
 
-Read [INVESTIGATION.md](INVESTIGATION.md) for the evidence. The three findings
-that decide it:
+Project 31 does not introduce a `SemanticState` type. The evidence showed that
+the identity registry and code layer have different lifetimes, different key
+sets, and a required production order; wrapping them would claim an invariant
+the commit window does not provide. The approved cleanup landed: comments were
+corrected, the duplicated full-delta path was extracted, the duplicated layer
+hit rule was extracted, and non-empty projects now materialize the initial code
+layer during `open()` for long-lived read performance.
 
-1. **The pair cannot be published as one value.** The code layer is produced
-   *from* the already-reconciled registry (`commit.rs:905` → `:915-916` →
-   `analysis.rs:123` → `convert/symbols.rs:99-102`). A `SemanticState` on HEAD
-   would still be mutated field-by-field.
-2. **A wrapper would turn a benign inconsistency into a false claim.** Inside the
-   commit, the read clone at `commit.rs:915` carries an R−1 layer beside an R
-   registry (`project.rs:193`). Nobody reads it; two named fields say nothing,
-   one struct named `SemanticState` would say something untrue.
-3. **Memory forbids any owned duplicate.** Measured: 2.05 MiB per snapshot at the
-   same revision (layer `Arc`-shared, no commits — a clean figure) versus
-   13.42 MiB per distinct revision (an upper bound; that branch also commits
-   eight times — see INVESTIGATION §14.2). Against project 30's isolated
-   12.83 MiB/layer, an owned layer per snapshot costs roughly 6× more.
+## Current behavior
 
-## What is recommended instead
+- `HeadState` owns a deep-cloned `IdentityRegistry` and an `Arc<CodeLayer>`.
+- The initial non-empty `CodeLayer` is produced after open-time identity
+  reconciliation; an empty project keeps the empty-layer miss behavior.
+- Repeated head and same-revision snapshot graph reads use the carried layer.
+- Time-travel snapshots intentionally rebuild because the head layer is valid
+  for the head revision only.
+- `TyProjectState.code_layer` remains `Option<Arc<CodeLayer>>`; no wire shape,
+  Python projection, GIL boundary, or rollback contract changed.
 
-Design A — three small lanes, no new types (INVESTIGATION §9, §12):
+At repository scale, the eager-open tradeoff is approximately 4.69 s paid once
+at startup instead of approximately 4.4 s on every first/read-only full-delta
+call. Repeated reads are approximately 0.17–0.19 s. The isolated layer-memory
+reference remains approximately 12.83 MiB; see the memory confound note before
+using RSS figures.
 
-- **Step 0** — comment corrections. `project.rs:94-98` omits the time-travel
-  `None` producer, and project 29's "lazily produced layer" is no longer true:
-  the layer is eagerly carried and the fallback memoises nothing.
-- **Step 1** — extract `full_code_delta_for`. `snapshot.rs:61-76` and
-  `methods.rs:675-690` are verbatim twins, and the `methods.rs` copy is the
-  parity oracle's input.
-- **Step 2** — extract `HeadState::servable_code_layer`. The "an empty layer is a
-  cache miss" rule is stated twice (`project.rs:193`, `methods.rs:611-615`).
+## What is next
 
-## Reproducing the measurements
+The remaining performance candidate is bounded per-revision code-layer
+retention for time travel. It should only become a project if real Neovim or
+daemon usage shows that time-travel snapshots are frequent enough to justify
+the memory cost and an eviction policy.
 
-```sh
-devenv shell -- bash -c 'cd "$DEVENV_ROOT" && PYTHONPATH=src python \
-  .scratch/projects/31-semantic-state/probe_timing.py .'
-devenv shell -- bash -c 'cd "$DEVENV_ROOT" && PYTHONPATH=src python \
-  .scratch/projects/31-semantic-state/probe_memory.py'
-devenv shell -- bash -c 'cd "$DEVENV_ROOT" && PYTHONPATH=src python \
-  .scratch/projects/31-semantic-state/probe_read_clone.py . repo-root'
-```
+`apply_code_delta` remains a measured graph cost, but re-incrementalising the
+wholesale Python projection is an explicit architectural constraint and is not
+queued here.
 
-Verified baseline at trunk `aa87019`: **171 Rust tests, 833 Python tests,
-8 parity-oracle tests**, `check-rust` and `clippy -D warnings` clean.
+The next investigation is the agent-facing control plane:
+[Project 32 kickoff](../32-agent-control-plane/KICKOFF.md). It is a clean,
+investigation-first brief for understanding the Python, daemon, bus, native,
+and Neovim surfaces before proposing more API or lifecycle work.
 
-## Files
+## Read this project
 
-- [INVESTIGATION.md](INVESTIGATION.md) — the full report: ownership table,
-  data-flow diagram, verified invariants, design comparison, rejected designs
-  with reasons, test obligations, measurements, risks.
-- [IMPLEMENTATION.md](IMPLEMENTATION.md) — the Design A follow-up, step by step.
-  Not started.
-- [KICKOFF.md](KICKOFF.md) — self-contained prompt to start a clean session.
-- `probe_timing.py` / `probe_memory.py` / `probe_read_clone.py` — the three
-  reproducible measurements. Read §14.2's confound note before quoting
-  `probe_memory.py`'s per-revision figure.
+- [INVESTIGATION.md](INVESTIGATION.md) — evidence, invariants, rejected designs,
+  implementation outcome, and measurements.
+- [IMPLEMENTATION.md](IMPLEMENTATION.md) — the historical step-by-step guide,
+  now annotated with its completed status and the eager-open follow-up.
+- [SPIKES.md](SPIKES.md) — the pre-implementation spike results.
+- `probe_timing.py`, `probe_memory.py`, and `probe_read_clone.py` — repeatable
+  probes; read the memory confound note in INVESTIGATION §14.2 first.
+- [Project 32 KICKOFF](../32-agent-control-plane/KICKOFF.md) — the next clean
+  investigation brief for agents working on TyO3’s control plane.
 
-## Status
+## Historical context
 
-- 2026-09-14 — Investigated. Decision: **document only**. Design A's three steps
-  are specified but **not started**.
+Project 29 §5 proposed a `SemanticState` after project 30. Project 30 instead
+established the carried `Arc<CodeLayer>` boundary. Project 31 verified that the
+boundary is already correct and deliberately kept the fields separate.
 
-## Related
-
-- `.scratch/projects/29-semantic-plane-cleanup/` — DESIGN §5 proposed this
-  project. **That section is superseded**; see INVESTIGATION §6.2.
-- `.scratch/projects/30-snapshot-layer-cache/` — the carried `Arc<CodeLayer>`.
-  Its DESIGN §4.1 memory figures are independently reproduced here (§14.2).
-- **Naming collision:** `Project 31, #1b/#2/#3` in eleven places across
-  `src/tyo3` and `rust/src` refers to the *v2 concept document's* project 31
-  (retiring the per-commit structural delta), not this one. Do not renumber
-  those citations.
+References in source comments such as `Project 31, #1b/#2/#3` belong to the
+separate v2 concept-document numbering for retiring the per-commit structural
+delta. They are not references to this scratch project and must not be
+renumbered.

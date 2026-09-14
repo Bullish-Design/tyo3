@@ -34,7 +34,7 @@ d1, _ = t(snap0._inner.full_code_delta)
 print(f"pre-commit  snapshot full_code_delta: {d1:.3f}s")
 snap0.close()
 
-# 3. commit one no-op-ish edit so the head layer is produced
+# 3. commit one no-op-ish edit so the already-maintained head layer advances
 files = [str(f) for f in s.files() if str(f).endswith(".py")]
 target = files[0]
 txt = open(target).read() if target.startswith("/") else None

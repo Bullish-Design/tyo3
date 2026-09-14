@@ -2,6 +2,14 @@
 
 Measured on `main` at `314371c8` (post-project-29) on 2026-09-13/14.
 
+Project 30 is complete. Sections 1–4 preserve the pre-implementation analysis;
+§1.4 records the landed result. The Project 31 references in the original
+roadmap are historical and are superseded by
+[Project 31's settled decision](../31-semantic-state/README.md).
+References such as `Project 31, #1/#2` retain the separate v2
+concept-document numbering; they are not references to this scratch project's
+directory.
+
 ---
 
 ## 1. The measurements

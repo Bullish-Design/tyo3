@@ -1,99 +1,75 @@
-# KICKOFF — Semantic-state cleanup (project 31)
+# Project 31 — closeout and current handoff
 
-You are working in **TyO3**: a Python semantic engine built on Astral `ty` +
-Salsa, with a Rust/PyO3 core (durable code identity, a native code layer,
-layered annotations, a delta bus, a daemon, and a Neovim plugin).
+Project 31 is complete. This file is retained as the entrypoint for agents
+auditing the decision or its implementation; it is no longer an implementation
+prompt.
 
-**Read these first, in order:**
+## Read first
 
-- `.scratch/projects/31-semantic-state/INVESTIGATION.md` — why there is **no**
-  `SemanticState` type, with the evidence. Read §4 (invariants), §6 (what
-  project 30 already solved) and §8 (rejected designs) before touching code.
-- `.scratch/projects/31-semantic-state/IMPLEMENTATION.md` — the step-by-step
-  guide. Follow it in order.
+1. [README.md](README.md) — current status, behavior, and next work.
+2. [INVESTIGATION.md](INVESTIGATION.md) — evidence and the settled decision.
+3. [IMPLEMENTATION.md](IMPLEMENTATION.md) — historical execution guide and
+   verification record.
+4. [SPIKES.md](SPIKES.md) — pre-implementation premise, graph, empty-project,
+   helper-location, and timing-noise checks.
 
-This file is the actionable summary. Where it and IMPLEMENTATION.md differ,
-IMPLEMENTATION.md wins.
+Use current source as authoritative when any historical line anchor differs.
 
-## The decision, in one paragraph
+## Settled decision
 
-Project 29 §5 deferred a `SemanticState { identities, code }` until after
-project 30. Project 30 moved the boundary: HEAD now owns an `IdentityRegistry`
-plus an `Arc<CodeLayer>` (`rust/src/project.rs:120`, `:141`), the read state
-carries identities plus an optional carried layer (`:84`, `:99`), and head
-snapshots serve the committed layer through `CodeLayer::diff_from`. The
-investigation concluded that **no wrapper type is justified** and that the
-remaining work is comments plus two deduplications. Do not reopen the type
-question without new evidence — §8 rejects Designs B, C and D individually.
+There is no `SemanticState` type. The registry and code layer are not one
+revision-shaped value:
 
-## Why no type (the three findings you must not re-litigate)
+- `IdentityRegistry` is a persisted, deep-cloned, last-known identity record
+  that survives reload and retains orphaned anchors.
+- `CodeLayer` is an unpersisted, `Arc`-shared, current-revision semantic layer
+  derived from the reconciled registry. It includes synthetic module nodes and
+  external stubs.
+- During reconciliation the registry must advance before the next layer can be
+  produced. A wrapper would not make that sequence atomic and would misstate the
+  intermediate state.
+- An owned duplicate would violate the measured memory constraint.
 
-1. **The pair cannot be published as one value.** The layer is produced *from*
-   the already-reconciled registry: `commit.rs:905` mutates `head.registry`,
-   then `:915-916` runs the producer, which reads `state.registry` via
-   `analysis.rs:123` → `convert/symbols.rs:99-102`. A `SemanticState` would
-   still be assigned field-by-field.
-2. **A wrapper would state something false.** At `commit.rs:915` the read clone
-   carries an R−1 layer beside an R registry (`project.rs:193`). Nothing reads
-   it. Two named fields say nothing; one struct would claim they describe one
-   revision.
-3. **Memory forbids an owned duplicate.** Same-revision snapshots cost 2.05 MiB
-   each because the `Arc` is shared; project 30 measured an isolated layer at
-   12.83 MiB.
+Do not reopen this design question without new evidence that directly overturns
+one of those findings.
 
-## The plan — three lanes, in order
+## Landed implementation
 
-1. **Step 0** — comment corrections only. `project.rs:94-98` omits the
-   time-travel `None` producer and calls the fallback lazy when it memoises
-   nothing. Zero behaviour risk; land it first.
-2. **Step 1** — extract `full_code_delta_for`. `snapshot.rs:61-76` and
-   `methods.rs:675-690` are identical **character for character**, and only the
-   `methods.rs` copy is covered by the parity oracle. **Run `parity-oracle`
-   before anything else** — `methods.rs` is its input.
-3. **Step 2** — extract `HeadState::servable_code_layer`. Keep the `is_head`
-   guard at the snapshot site; it is deliberate.
-4. **Step 3** — re-measure with the three committed probes; record in
-   INVESTIGATION §14.
+- The duplicated full-code-delta body is one `full_code_delta_for` helper in
+  `rust/src/project.rs`; both head and snapshot callers retain their existing
+  `py.detach` boundaries.
+- The empty-layer miss rule is one `HeadState::servable_code_layer` helper.
+  The snapshot site retains its explicit `is_head` guard.
+- Non-empty projects materialize the initial code layer during `open()`, after
+  identity reconciliation. This is the long-lived-session optimization: the
+  full build is paid once at startup, and repeated reads use the carried layer.
+- Empty projects still use the empty-layer fallback. Time-travel snapshots
+  still rebuild because the head layer is not valid for an older revision.
+- `TyProjectState.code_layer` remains `Option<Arc<CodeLayer>>`,
+  `HeadState.code_layer` remains `Arc<CodeLayer>`, and the wire, GIL, Python
+  projection, and rollback contracts are unchanged.
 
-## Working rules
+## Verification
 
-- **No new struct, enum or trait.** If a step grows one, stop and re-read
-  INVESTIGATION §8.
-- **`devenv shell -- parity-oracle` must stay green.** Every step is a pure
-  refactor or a comment; any parity movement is a bug.
-- Baseline: **171 Rust tests, 833 Python tests, 8 parity-oracle tests**, clippy
-  clean at trunk `aa87019`. Record before you start; counts must not drop.
-- Version control goes through **gitman**. One lane per step:
-  `gitman start 31-step0-docs` → work → `gitman save -m ...` → `gitman land` →
-  `gitman push`. Never raw `jj`/`git`.
-- **Commit your notes.** Project 29's docs were lost once because they sat
-  uncommitted in an orphaned change.
+The landed implementation was verified with:
 
-## Commands
+- 174 Rust tests passed.
+- 836 Python tests passed, with 4 deselected.
+- parity oracle: 8/8 passed.
+- `check-rust`, clippy, and native rebuild passed.
+- repository-scale repeated full-delta reads: approximately 0.17–0.19 s.
+- repository-scale `open()`: approximately 4.69 s.
 
-```sh
-devenv shell -- check-rust        # fast type-check, ~1s — the Rust edit loop
-devenv shell -- clippy            # -D warnings, matches the CI gate
-devenv shell -- build             # maturin develop (~17s)
-devenv shell -- parity-oracle     # MUST stay green
-devenv shell -- tests             # cargo test + full Python suite
-```
+See INVESTIGATION §14.5 for the measurement table and memory caveat.
 
-Note: this shell requires a secrets reason. Prefix with
-`SECRETSPEC_REASON="<why>"` or export it once.
+## Next investigation
 
-## Start here
+Do not start another semantic-state refactor. The next planned investigation is
+the agent-facing control plane in
+`.scratch/projects/32-agent-control-plane/KICKOFF.md`. It should map the
+current Python, daemon, delta-bus, native, and Neovim surfaces before proposing
+new agent APIs, lifecycle rules, or recovery semantics.
 
-1. `devenv shell -- tests` — confirm 171 Rust + 833 Python, all green.
-2. Read INVESTIGATION.md §4, §6, §8, then IMPLEMENTATION.md.
-3. Reproduce INVESTIGATION §6.3 with
-   `PYTHONPATH=src python .scratch/projects/31-semantic-state/probe_timing.py .`
-   so you have your own baseline.
-4. `gitman start 31-step0-docs` and do the comment corrections.
-
-## After this project
-
-Two sized-but-unscheduled follow-ups (INVESTIGATION §15.2). The larger one —
-read-only sessions never benefit from project 30, measured at 4.40 s per
-`full_code_delta` call, unbounded — is **blocked on a decision about
-architectural constraint 13**, not on engineering. Raise it before starting.
+The only remaining Project 31 performance candidate is bounded code-layer
+retention for time-travel snapshots. Investigate real usage first; it costs
+approximately 12.83 MiB per retained layer and needs an eviction policy.

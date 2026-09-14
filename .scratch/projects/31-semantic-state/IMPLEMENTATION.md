@@ -1,8 +1,10 @@
-# IMPLEMENTATION — Semantic-state cleanup (project 31)
+# IMPLEMENTATION — Semantic-state cleanup (project 31, historical guide)
 
 Read [INVESTIGATION.md](INVESTIGATION.md) first. It concludes **no new type**;
-this file is the Design A follow-up it recommends (§9). Three steps, each
-landing independently and green.
+this file is the completed Design A execution guide it recommended (§9). The
+three original steps, plus the later eager-open follow-up, have already landed.
+This is retained for provenance and should not be treated as a new work order;
+use [README.md](README.md) for the current status and next work.
 
 ## Ground rules
 

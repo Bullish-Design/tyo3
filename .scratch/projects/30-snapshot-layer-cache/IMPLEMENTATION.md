@@ -1,7 +1,9 @@
-# IMPLEMENTATION — Snapshot code-layer cache (project 30)
+# IMPLEMENTATION — Snapshot code-layer cache (project 30, historical guide)
 
-Read [DESIGN.md](DESIGN.md) first. Design A (carry an `Arc<CodeLayer>` on the
-read clone) is the chosen approach; §3.2 records why B was rejected.
+Project 30 is complete. Read [README.md](README.md) for current status. This
+file retains the historical implementation sequence: Design A (carry an
+`Arc<CodeLayer>` on the read clone) was the chosen approach; §3.2 records why B
+was rejected.
 
 ## Commands
 
@@ -150,10 +152,8 @@ from Step 0 recorded alongside it.
 
 ---
 
-## After this project
+## After this project (historical roadmap)
 
-**Project 31 — the corrected `SemanticState`.** See
-`.scratch/projects/29-semantic-plane-cleanup/DESIGN.md` §5. After this project,
-the read clone carries identities *and* a layer, which is most of what that
-boundary was going to name. Re-read §5 before starting: this project may have
-already answered the question, or moved where the line belongs.
+**Project 31 — the semantic-state investigation.** The old roadmap expected a
+corrected `SemanticState`, but Project 31 investigated and rejected that type.
+See `../31-semantic-state/README.md` for the current decision and behavior.
