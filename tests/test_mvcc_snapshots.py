@@ -28,6 +28,11 @@ def _num_diags(check_result) -> int:
     return len(check_result.diagnostics)
 
 
+def _node_by_name(graph, name: str):
+    raw = graph.graph
+    return next(raw[index] for index in raw.node_indices() if raw[index].name == name)
+
+
 @needs_native
 def test_edit_while_snapshot_open_does_not_block(tmp_path: StdPath) -> None:
     """Phase 4 removes Phase 3's constraint: an OPEN snapshot no longer blocks
@@ -76,6 +81,23 @@ def test_time_travel_snapshot(tmp_path: StdPath) -> None:
         with s.snapshot(at=r0) as old:
             # reads the project as of r0 (disk "x = 1"), not the edited buffer
             assert old.revision == r0
+
+
+@needs_native
+def test_time_travel_graph_uses_frozen_revision(tmp_path: StdPath) -> None:
+    """A time-travel graph must not serve the current head's code layer."""
+    (tmp_path / "a.py").write_text("def value():\n    return 1\n")
+    with TyO3Session(str(tmp_path)) as s:
+        s.sync_all()  # Prime durable identities so entity nodes are emitted.
+        r0 = s.head
+        s.edit("a.py", "def value():\n    return 2\n")
+
+        with s.snapshot(at=r0) as old:
+            old_node = _node_by_name(old.graph(), "value")
+        with s.snapshot() as current:
+            current_node = _node_by_name(current.graph(), "value")
+
+        assert old_node.content_hash != current_node.content_hash
 
 
 @needs_native

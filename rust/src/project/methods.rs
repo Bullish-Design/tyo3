@@ -610,11 +610,7 @@ impl PyTyProject {
         // fallback until layers are retained per revision. Project 30 measured
         // a retained repository-scale layer at 12.83 MiB; retaining one per
         // revision therefore needs an explicit bound (Project 30 DESIGN §4.1).
-        let code_layer = if is_head && !head.code_layer.is_empty() {
-            Some(Arc::clone(&head.code_layer))
-        } else {
-            None
-        };
+        let code_layer = if is_head { head.servable_code_layer() } else { None };
         let (generation, rev) = match at {
             None => (head.store.capture(), head.store.revision()),
             Some(r) => {

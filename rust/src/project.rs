@@ -201,8 +201,24 @@ impl ReadCloneSource for HeadState {
             // The head starts with an empty layer and builds its first real
             // layer on the first commit. Treat that empty value as a cache miss
             // so pre-commit reads retain the rebuild fallback.
-            code_layer: (!self.code_layer.is_empty()).then(|| Arc::clone(&self.code_layer)),
+            code_layer: self.servable_code_layer(),
         }
+    }
+}
+
+impl HeadState {
+    /// The head's code layer when it is real, `None` while it is still the
+    /// empty placeholder installed by `build_head_with_config` (`open.rs:168`).
+    ///
+    /// The head layer is built at the first reconciling commit, never at open
+    /// (`commit.rs:849-851`). Treating the empty placeholder as a miss keeps
+    /// pre-commit reads on the rebuild fallback, which yields the same (empty)
+    /// delta — so this can only cost speed, never correctness.
+    ///
+    /// Callers that pin a non-head revision must not use this: the head layer
+    /// is valid only for the head revision (`methods.rs:607-615`).
+    pub(crate) fn servable_code_layer(&self) -> Option<Arc<crate::code_layer::CodeLayer>> {
+        (!self.code_layer.is_empty()).then(|| Arc::clone(&self.code_layer))
     }
 }
 
@@ -314,6 +330,52 @@ pub(crate) use commit::*;
 pub(crate) use head_view::*;
 pub(crate) use open::*;
 pub(crate) use snapshot::*;
+
+#[cfg(test)]
+mod semantic_state_tests {
+    use super::*;
+
+    fn empty_head() -> (tempfile::TempDir, HeadState) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
+        let head = build_head(root, ContentStore::new(), IdentityRegistry::default());
+        (dir, head)
+    }
+
+    #[test]
+    fn fresh_head_has_no_servable_code_layer() {
+        let (_dir, head) = empty_head();
+        assert!(head.servable_code_layer().is_none());
+    }
+
+    #[test]
+    fn servable_code_layer_shares_nonempty_head_layer() {
+        let (_dir, mut head) = empty_head();
+        let mut layer = crate::code_layer::CodeLayer::new();
+        layer.upsert_node(
+            "entity".into(),
+            crate::code_layer::NodeData {
+                name: "entity".into(),
+                qualified_name: "entity".into(),
+                kind: "function".into(),
+                file: "a.py".into(),
+                range: dto::RangeDto {
+                    start: dto::PositionDto { line: 1, column: 1 },
+                    end: dto::PositionDto { line: 1, column: 7 },
+                },
+                name_range: None,
+                content_hash: None,
+                content_hashes: Default::default(),
+                external: false,
+                package: None,
+            },
+        );
+        head.code_layer = Arc::new(layer);
+
+        let servable = head.servable_code_layer().expect("non-empty layer is servable");
+        assert!(Arc::ptr_eq(&servable, &head.code_layer));
+    }
+}
 
 #[cfg(test)]
 mod phase2_tests {
