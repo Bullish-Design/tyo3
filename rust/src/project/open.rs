@@ -240,5 +240,6 @@ pub(crate) fn build_frozen(
         hash_policies,
         default_hash_profile,
         authored: None,
+        code_layer: None,
     }
 }

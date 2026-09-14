@@ -91,6 +91,12 @@ pub(crate) struct TyProjectState {
     /// Authored record store captured at snapshot time alongside the
     /// registry so authored reads are revision-consistent.
     pub(crate) authored: Option<AuthoredStore>,
+    /// The committed code layer for this state's revision, when one exists.
+    ///
+    /// `None` is used by read clones taken before any commit has produced a
+    /// layer, and by analysis/test constructors. Consumers fall back to a full
+    /// rebuild when it is absent.
+    pub(crate) code_layer: Option<Arc<crate::code_layer::CodeLayer>>,
 }
 
 /// The live, mutable HEAD of a session. Owns the database plus the content
@@ -164,6 +170,7 @@ impl ReadCloneSource for TyProjectState {
             hash_policies: self.hash_policies.clone(),
             default_hash_profile: self.default_hash_profile.clone(),
             authored: None,
+            code_layer: self.code_layer.clone(),
         }
     }
 }
@@ -180,6 +187,7 @@ impl ReadCloneSource for HeadState {
             hash_policies: self.hash_policies.clone(),
             default_hash_profile: self.default_hash_profile.clone(),
             authored: None,
+            code_layer: Some(Arc::clone(&self.code_layer)),
         }
     }
 }
@@ -900,6 +908,7 @@ mod phase5_concurrency_tests {
                     hash_policies: std::collections::HashMap::new(),
                     default_hash_profile: "structure".to_string(),
                     authored: None,
+                    code_layer: None,
                 };
             let barrier = Arc::clone(&barrier);
             let tx = tx.clone();

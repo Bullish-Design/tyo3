@@ -361,6 +361,7 @@ pub(crate) fn run_identity_reconciliation(
         hash_policies: head.hash_policies.clone(),
         default_hash_profile: head.default_hash_profile.clone(),
         authored: None,
+        code_layer: None,
     };
     let entities = match scope {
         Some(scope) => extract_entities_for(&state, scope),

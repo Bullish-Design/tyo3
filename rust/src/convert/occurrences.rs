@@ -283,6 +283,7 @@ mod tests {
                 hash_policies: std::collections::HashMap::new(),
                 default_hash_profile: "structure".to_string(),
                 authored: None,
+                code_layer: None,
             },
         )
     }

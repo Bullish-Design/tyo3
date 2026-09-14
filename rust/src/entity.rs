@@ -307,7 +307,7 @@ mod tests {
         let metadata = ProjectMetadata::new(Name::new("test"), root.clone());
         let db = ProjectDatabase::use_defaults(metadata, system);
 
-        (dir, TyProjectState { db, root, registry: crate::identity::IdentityRegistry::default(), hash_policy: HashPolicy::default(), hash_policies: std::collections::HashMap::new(), default_hash_profile: "structure".to_string(), authored: None })
+        (dir, TyProjectState { db, root, registry: crate::identity::IdentityRegistry::default(), hash_policy: HashPolicy::default(), hash_policies: std::collections::HashMap::new(), default_hash_profile: "structure".to_string(), authored: None, code_layer: None })
     }
 
     #[test]
