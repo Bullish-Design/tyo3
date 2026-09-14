@@ -155,6 +155,38 @@ of `String` overhead), an `EdgeKind` discriminant, and three `Option`s
 
 If the real figure lands far above the estimate, revisit Design B.
 
+### 4.1 Step 0 measurement (2026-09-14)
+
+A temporary Rust test used a counting allocator and cloned each retained
+component independently, so builder scratch and Salsa allocations were not
+mistaken for layer memory. The current checkout's repository-root session is
+the closest match to the documented 3,258-node / 32,849-edge scale; it now
+contains 174 source paths, 3,406 nodes, and 36,328 edges. The measured live
+allocations were:
+
+| component | bytes | MiB |
+|---|---:|---:|
+| nodes | 1,617,346 | 1.54 |
+| edges | 10,247,032 | 9.77 |
+| reverse_deps | 1,427,865 | 1.36 |
+| file_to_nodes | 166,460 | 0.16 |
+| `CodeLayer` inline map fields | 96 | — |
+| **retained layer total** | **13,458,799** | **12.83** |
+
+The same probe measured the existing pinned `build_frozen` state (including
+its independent `ProjectDatabase`) at 1,079,359 bytes / 1.03 MiB. A package-
+only root (`src/tyo3`) measured 75 source paths, 1,781 nodes, 16,052 edges,
+and 5,877,757 bytes / 5.61 MiB for the layer. The process RSS delta during
+the full build was much larger (about 197 MiB at repository scale) because it
+also retained analysis/Salsa working data; it is not the per-layer figure.
+
+The measured repository-scale layer is about 2.1× the arithmetic estimate,
+but Design A remains the only candidate that fixes both snapshot producer
+paths. We therefore retain the existing snapshot lifecycle as the bound: no
+new live-snapshot cap is introduced by this project. The larger measured
+share is recorded as an explicit follow-up risk for any future snapshot
+retention policy.
+
 ---
 
 ## 5. What this does not address
