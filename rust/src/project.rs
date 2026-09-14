@@ -187,7 +187,10 @@ impl ReadCloneSource for HeadState {
             hash_policies: self.hash_policies.clone(),
             default_hash_profile: self.default_hash_profile.clone(),
             authored: None,
-            code_layer: Some(Arc::clone(&self.code_layer)),
+            // The head starts with an empty layer and lazily builds its first
+            // real layer on the first commit. Treat that empty value as a
+            // cache miss so pre-commit reads retain the rebuild fallback.
+            code_layer: (!self.code_layer.is_empty()).then(|| Arc::clone(&self.code_layer)),
         }
     }
 }

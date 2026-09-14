@@ -604,6 +604,15 @@ impl PyTyProject {
         let config = head.config.clone();
         let hash_policies = head.hash_policies.clone();
         let default_hash_profile = head.default_hash_profile.clone();
+        // The current head layer is valid for a head snapshot only. A
+        // time-travel snapshot may target an older revision, for which the
+        // head's current layer is not valid; leave that case on the rebuild
+        // fallback until layers are retained per revision.
+        let code_layer = if is_head && !head.code_layer.is_empty() {
+            Some(Arc::clone(&head.code_layer))
+        } else {
+            None
+        };
         let (generation, rev) = match at {
             None => (head.store.capture(), head.store.revision()),
             Some(r) => {
@@ -623,6 +632,7 @@ impl PyTyProject {
         let mut state = build_frozen(root, generation, rev, hash_policies, default_hash_profile);
         state.registry = registry;
         state.authored = authored;
+        state.code_layer = code_layer;
         Ok(PySnapshot {
             inner: Mutex::new(Some(state)),
             revision: rev.0,
@@ -664,9 +674,19 @@ impl PyTyProject {
         };
         let empty = crate::code_layer::CodeLayer::new();
         let delta = py.detach(move || {
-            let (_next, delta) =
-                crate::code_layer::produce_code_delta(&state, &empty, revision, true, None);
-            delta
+            match state.code_layer.as_deref() {
+                Some(layer) => layer.diff_from(&empty, revision, true),
+                None => {
+                    let (_next, delta) = crate::code_layer::produce_code_delta(
+                        &state,
+                        &empty,
+                        revision,
+                        true,
+                        None,
+                    );
+                    delta
+                }
+            }
         });
         pythonize(py, &delta).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
