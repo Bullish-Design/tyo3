@@ -45,11 +45,13 @@ Three findings decide the question.
    describe one revision, which at that point they do not.
 
 3. **The measured memory profile forbids any owned duplicate.** Measured on this
-   checkout (§14): eight snapshots at the **same** revision cost **2.05 MiB
-   each**, because the `Arc<CodeLayer>` is shared. Eight snapshots at **eight
-   distinct** revisions cost **13.42 MiB each**. `Arc` sharing is therefore worth
-   ~11.4 MiB per extra same-revision snapshot. Any design that gives a snapshot
-   its own owned layer multiplies pinned-snapshot memory by ~6.5×.
+   checkout (§14.2): eight snapshots at the **same** revision cost **2.05 MiB
+   each**, because the `Arc<CodeLayer>` is shared — a clean figure, no commits
+   involved. Eight snapshots at **eight distinct** revisions cost **13.42 MiB
+   each**, an upper bound (that branch also runs eight commits; see the confound
+   note in §14.2). Against project 30's isolated 12.83 MiB/layer, a design that
+   gives each snapshot its own owned layer costs roughly **6× more per pinned
+   snapshot**.
 
 Project 30 did solve the substantive problem: the carried layer cuts
 `full_code_delta` from **4.40 s to 0.17 s** at head and **4.15 s to 0.15 s** on a
@@ -566,6 +568,7 @@ impl HeadState {
 
 ## 12. Migration plan — independently testable steps
 
+Spelled out in full in [IMPLEMENTATION.md](IMPLEMENTATION.md); summarised here.
 Do **not** start before this report is reviewed. One `gitman` lane per step;
 verify before every `save`.
 
@@ -576,7 +579,7 @@ verify before every `save`.
 |---|---|---|---|
 | **0** | `31-step0-docs` | Comment corrections only (`project.rs:94-98`, `:118-120`, `:136-141`; `commit.rs:915`; `methods.rs:611-615`). No code. | `check-rust` + `clippy` + `tests` unchanged at 171/833. Zero behaviour risk. |
 | **1** | `31-step1-dedupe-serve` | Extract `full_code_delta_for`; call from `snapshot.rs:58` and `methods.rs:669`. `py.detach` stays at both call sites. | **`parity-oracle` first** (`methods.rs` is its input), then `tests`. Add one Python test asserting `session.snapshot().graph()` and `session.graph` agree node-for-node and edge-for-edge at the same revision — the invariant the duplication threatened. |
-| **2** | `31-step2-dedupe-hit-rule` | Add `HeadState::servable_code_layer`; use at `project.rs:193` and inside `methods.rs:611-615`, keeping the explicit `is_head &&` guard at the snapshot site. | Add a Rust test: a head with an empty layer yields `None`; after one commit yields `Some`; `Arc::ptr_eq` holds between the head layer and a head snapshot's carried layer, and does **not** hold for a time-travel snapshot. |
+| **2** | `31-step2-dedupe-hit-rule` | Add `HeadState::servable_code_layer`; use at `project.rs:193` and inside `methods.rs:611-615`, keeping the explicit `is_head &&` guard at the snapshot site. | Rust: a freshly built head yields `None`; with a non-empty layer assigned it yields `Some` and `Arc::ptr_eq` holds. Python: a time-travel snapshot's graph shows the **old** content while a head snapshot shows the new — the behavioural half of the `is_head` guard. |
 | **3** | `31-step3-measure` | No code. Re-run §6.3 and §14 probes; append results to this file. | Numbers within noise of §6.3 / §14. |
 
 Land each step green before starting the next. Steps 1 and 2 are independently
@@ -605,13 +608,19 @@ New obligations introduced by the migration plan:
 1. **Head/snapshot graph agreement** (Step 1, Python). Same revision ⇒ identical
    node set, identical `(source, target, kind)` edge relation set. Directly
    guards the duplication being removed.
-2. **Carried-layer sharing and isolation** (Step 2, Rust). `Arc::ptr_eq`
-   head ↔ head-snapshot; **not** equal for a time-travel snapshot; `None` before
-   the first commit.
-3. **Time-travel correctness under the fallback** (Python, optional but cheap).
-   Edit a file, snapshot at `head - 1`, assert its graph reflects the **old**
-   content — proving the fallback rebuilds against the frozen db, not the head
-   layer.
+2. **Carried-layer sharing** (Step 2, Rust). `servable_code_layer` is `None` for
+   a freshly built head and `Some` with `Arc::ptr_eq` once a real layer is
+   present. Keep it to the pure predicate: `commit()` is driven only from
+   `#[pymethods]` (`methods.rs:209`, `:252`, `:287`) and no Rust test drives the
+   funnel today, so an end-to-end Rust commit harness is **not** worth building
+   for this. The end-to-end half is obligation 3.
+3. **Time-travel correctness under the fallback** (Step 2, Python — required, not
+   optional). Edit a file, snapshot at `head - 1`, assert its graph reflects the
+   **old** content while a head snapshot reflects the new. This proves the
+   fallback rebuilds against the frozen db rather than serving the head layer,
+   and is the only deterministic way to test the `is_head` guard (a timing test
+   would be flaky). Fits `tests/test_mvcc_snapshots.py`, which already
+   time-travels at `:71-76`.
 
 No test may assert on `CodeNodeDto` field names beyond what
 `tests/parity_oracle.py:76` already pins.
@@ -647,18 +656,41 @@ after closing them          : 348.5 MiB   (allocator retains; RSS does not shrin
 8 snapshots @ 8 revisions   : 455.9 MiB   (+107.4 MiB, 13.42 MiB/revision)
 ```
 
-Interpretation:
+**Read the confound before the numbers.** The two branches are not a clean
+controlled pair:
 
-- **`Arc` sharing is worth ~11.4 MiB per extra same-revision snapshot.** Eight
-  snapshots at one revision retain one layer; eight at eight revisions retain
-  eight.
-- **13.42 MiB/revision** independently reproduces project 30's Step 0 figure
-  (12.83 MiB layer + 1.03 MiB pinned frozen state = 13.86 MiB) from a completely
-  different measurement technique (RSS vs counting allocator). Treat 12.83 MiB as
-  the standing per-revision layer cost.
+- Branch A (same revision) performs **no commits**. Its 2.05 MiB/snapshot is a
+  clean marginal cost: one frozen `ProjectDatabase` + one registry clone, with
+  the layer `Arc`-shared.
+- Branch B (distinct revisions) performs **eight commits** to create eight
+  revisions. Each commit additionally grows the HEAD salsa store and transiently
+  deep-clones the entire layer — `Builder::seeded` starts from
+  `layer: prev.clone()` (`code_layer.rs:598`). So 13.42 MiB/revision is an
+  **upper bound** on the retained-layer cost, not an isolated measurement of it.
+
+There is no way to remove that confound from a Python-level probe: distinct
+retained layers require distinct commits, and a time-travel snapshot retains no
+layer at all (`methods.rs:607-615`). An isolated figure needs the counting
+allocator that project 30 Step 0 used.
+
+Interpretation, stated to that precision:
+
+- **`Arc` sharing is worth up to ~11.4 MiB per extra same-revision snapshot.**
+  Both branches retain eight snapshots; only revision-distinctness differs, so
+  the gap is dominated by layer retention — but part of it is commit overhead.
+- **13.42 MiB/revision is an upper bound.** It is *consistent with* project 30's
+  counting-allocator figure (12.83 MiB layer + 1.03 MiB pinned frozen state =
+  13.86 MiB), but it does not independently reproduce it: the two measure
+  different quantities. **Project 30's 12.83 MiB remains the authoritative
+  per-revision layer cost**; this probe corroborates its order of magnitude and
+  nothing finer.
 - **Any design adding a second owned layer per snapshot costs ~12.8 MiB each** —
-  a ~6.5× increase over the measured 2.05 MiB/snapshot. The old arithmetic
-  estimate of ~6 MB per revision is superseded and must not be used.
+  roughly 6× the clean 2.05 MiB/snapshot marginal cost. That conclusion rests on
+  project 30's isolated figure, not on this probe's upper bound. The old
+  arithmetic estimate of ~6 MB per revision is superseded and must not be used.
+- **Side finding: every scoped commit transiently doubles layer memory**
+  (`code_layer.rs:598`). Not a defect — the clone is the incremental producer's
+  working copy — but it belongs in any future retention-policy discussion.
 
 ### 14.3 Measured time
 

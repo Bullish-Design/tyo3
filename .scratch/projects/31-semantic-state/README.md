@@ -20,8 +20,10 @@ that decide it:
    registry (`project.rs:193`). Nobody reads it; two named fields say nothing,
    one struct named `SemanticState` would say something untrue.
 3. **Memory forbids any owned duplicate.** Measured: 2.05 MiB per snapshot at the
-   same revision (layer `Arc`-shared) versus 13.42 MiB per distinct revision.
-   `Arc` sharing is worth ~11.4 MiB per extra same-revision snapshot.
+   same revision (layer `Arc`-shared, no commits — a clean figure) versus
+   13.42 MiB per distinct revision (an upper bound; that branch also commits
+   eight times — see INVESTIGATION §14.2). Against project 30's isolated
+   12.83 MiB/layer, an owned layer per snapshot costs roughly 6× more.
 
 ## What is recommended instead
 
@@ -54,9 +56,13 @@ Verified baseline at trunk `aa87019`: **171 Rust tests, 833 Python tests,
 
 - [INVESTIGATION.md](INVESTIGATION.md) — the full report: ownership table,
   data-flow diagram, verified invariants, design comparison, rejected designs
-  with reasons, migration plan, test obligations, measurements, risks.
+  with reasons, test obligations, measurements, risks.
+- [IMPLEMENTATION.md](IMPLEMENTATION.md) — the Design A follow-up, step by step.
+  Not started.
+- [KICKOFF.md](KICKOFF.md) — self-contained prompt to start a clean session.
 - `probe_timing.py` / `probe_memory.py` / `probe_read_clone.py` — the three
-  reproducible measurements.
+  reproducible measurements. Read §14.2's confound note before quoting
+  `probe_memory.py`'s per-revision figure.
 
 ## Status
 
