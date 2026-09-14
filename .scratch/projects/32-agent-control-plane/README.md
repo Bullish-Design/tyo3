@@ -1,23 +1,25 @@
-# Project 32 — agent-facing control plane
+# Project 32 — agent-only MVP
 
-**Status: kickoff prepared; investigation not started.**
+**Status: MVP scope locked; implementation not started.**
 
-This project will investigate the surfaces TyO3 exposes to coding agents: the
-Python session API, daemon, delta bus, native core, and Neovim integration. Its
-goal is to describe the current control plane precisely before proposing any
-new agent API, lifecycle rule, recovery behavior, or orchestration boundary.
+The broad investigation is complete and has been deliberately narrowed. TyO3
+already has the native semantic engine, Python session, daemon, atomic
+multi-file overlay edits, diagnostics, durable IDs, and useful semantic query
+handlers needed for an effective headless agent loop. The MVP is a thin agent
+client over the existing daemon plus three small contract improvements:
+capabilities in `ping`/`open`, revision-bearing MVP reads, and
+`expected_revision` on mutation. It does not add a new control-plane state
+object, snapshot service, event log, MCP server, or filesystem writer.
 
-Start with [KICKOFF.md](KICKOFF.md). It is an investigation-first brief for a
-clean session and requires evidence from current source, tests, and focused
-probes. The investigation must keep external agent-facing control distinct
-from TyO3's internal coordination control plane.
+Read [INVESTIGATION.md](INVESTIGATION.md) for the evidence, exact boundary,
+wire sketch, implementation tasks, and acceptance tests. Read
+[KICKOFF.md](KICKOFF.md) for a self-contained handoff to the implementation
+project.
 
-Project 31 is complete and is not being reopened: it deliberately introduced
-no `SemanticState` type. Its current behavior and the remaining conditional
-time-travel performance candidate are recorded in
-[Project 31's overview](../31-semantic-state/README.md).
+The previous broad control-plane investigation is preserved in the preceding
+published history point. This rewrite records the selected MVP rather than
+discarding that evidence.
 
-Expected deliverables are a source-anchored investigation, a compact map of
-agent-relevant capabilities and failure modes, and at most three evidence-led
-follow-up projects. No implementation belongs in this project until a later
-project is explicitly approved.
+**Next decision:** start a separate implementation project for the headless
+agent client and the three protocol hardenings. This project remains
+documentation-only.

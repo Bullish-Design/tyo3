@@ -1,312 +1,220 @@
-# Project 32 — Agent-facing control plane: investigation
+# Project 32 — headless agent MVP kickoff
 
-You are starting a clean investigation session in TyO3:
-`/home/andrew/Documents/Projects/tyo3`.
+This is the implementation handoff for the narrowed Project 32 decision. The
+goal is to make TyO3 useful to an external coding agent without Neovim. Keep
+the implementation deliberately small: build a thin Python client over the
+existing daemon, add a compact capability manifest, add revision metadata to
+the core read responses, and reject stale mutations with an
+`expected_revision` check.
 
-TyO3 is a Python semantic engine built on Astral `ty` + Salsa, with a Rust/PyO3
-core, durable code identity, a native code graph layer, layered annotations,
-a delta bus, a daemon, and a Neovim plugin.
+Do not turn this into a general control-plane redesign. The broad
+investigation and its evidence are preserved in the prior published history;
+the current [README](README.md) and [INVESTIGATION](INVESTIGATION.md) define the
+selected MVP.
 
-This is an investigation and architecture report first. Do not implement a
-new control plane during this session. Do not redesign Project 31’s semantic
-state decision. Establish evidence, identify the real control-plane boundary,
-and produce a decision-ready recommendation. Any implementation should be a
-separate, explicitly approved project after this report.
+## Objective
 
-## Primary question
+Enable this headless loop:
 
-What should the agent-facing control plane of TyO3 be?
+```text
+agent connects to TyO3
+  → learns root, session, revision, and available operations
+  → asks for context/symbols/navigation/diagnostics
+  → edits files with its normal filesystem tools or intentionally stages overlay text
+  → synchronizes or reindexes TyO3
+  → checks diagnostics and diff
+  → retries only after re-reading when a revision is stale
+```
 
-Here “agent-facing” means an external coding agent, LLM-driven tool, or
-automation process that wants to understand and act on a live TyO3 project. Do
-not assume that the current daemon API, Python session API, delta bus, or
-Neovim integration is already the correct control plane. Determine what exists,
-what is actually usable, where the boundaries are, and what is missing.
+“Agent-only” means no Neovim dependency. It does not mean TyO3 becomes the
+filesystem writer. `sync_buffers` is an in-memory semantic overlay operation;
+the agent owns durable working-tree edits in this MVP.
 
-The investigation must cover both:
+## Required reading
 
-1. The control plane TyO3 exposes to an external agent.
-2. The control plane TyO3 itself needs internally to coordinate sessions,
-   snapshots, edits, semantic reads, annotations, subscriptions, and recovery.
+Read these in order before changing code:
 
-Keep those two meanings distinct throughout the report.
+1. `AGENTS.md` if present, then `README.md`, `CONTRIBUTING.md`, and `pyproject.toml`.
+2. [Project 31 overview](../31-semantic-state/README.md) and
+   [Project 31 investigation](../31-semantic-state/INVESTIGATION.md).
+3. Current daemon protocol, actor, server, and handlers:
+   `src/tyo3/daemon/protocol.py`, `session_actor.py`, `server.py`, `handlers.py`.
+4. Current Python session/read APIs:
+   `src/tyo3/session/session.py`, `read_ops.py`, and `views.py`.
+5. Native project methods/commit path:
+   `rust/src/project.rs`, `rust/src/project/methods.rs`, and
+   `rust/src/project/commit.rs`.
+6. Existing daemon tests:
+   `tests/daemon/test_protocol.py`, `test_handlers.py`, and
+   `test_end_to_end.py`.
 
-## Read first, in order
+Current source is authoritative if documentation disagrees.
 
-1. Root repository guidance and overview:
-   - `AGENTS.md`
-   - `README.md`
-   - `pyproject.toml`
-   - relevant root-level architecture/development documentation
-2. Project history and decisions:
-   - `.scratch/projects/29-semantic-plane-cleanup/`
-   - `.scratch/projects/30-snapshot-layer-cache/`
-   - `.scratch/projects/31-semantic-state/README.md`
-   - `.scratch/projects/31-semantic-state/INVESTIGATION.md`
-   - `.scratch/projects/31-semantic-state/IMPLEMENTATION.md`
-3. Python-facing surfaces:
-   - `src/tyo3/session/`
-   - `src/tyo3/daemon/`
-   - `src/tyo3/graph/`
-   - `src/tyo3/layers/`
-   - `src/tyo3/models/`
-   - `src/tyo3/bus/`
-4. Native/Rust-facing surfaces:
-   - `rust/src/project.rs`
-   - `rust/src/project/`
-   - `rust/src/code_layer.rs`
-   - `rust/src/dto/`
-   - `rust/src/content.rs`
-   - `rust/src/identity.rs`
-   - relevant bus, snapshot, authored, and overlay modules
-5. Editor integration:
-   - `editors/tyo3.nvim/`
-   - its protocol/client/session code
-   - demo and integration documentation where it describes actual behavior
+## Existing capabilities to reuse
 
-Use current source as authoritative when documents disagree. Label historical
-claims as historical. Project 29’s “lazily produced layer” wording is
-superseded. Project 31’s conclusion is still settled: there is no
-`SemanticState` type.
+The implementation should reuse these existing routes rather than introduce a
+second semantic API:
 
-## Operating rules
+| MVP need | Existing route |
+|---|---|
+| Open/status | `ping`, `open` |
+| Context | `context_pack`, `entity_at` |
+| Symbol search | `symbols` |
+| Navigation | `definition`, `references`, `hover`, `type_hierarchy`, `call_hierarchy` |
+| Diagnostics | `check`, `diagnostics_at` |
+| Semantic overlay update | `sync_buffer`, `sync_buffers` |
+| Authored annotation | `author`, `authored` |
+| Verification | `diff`, `ping` revision |
 
-- Run repository commands inside `devenv shell`.
-- Every `devenv shell` command needs `SECRETSPEC_REASON="..."`.
-- Filter ambient `mypi`, `MYPI`, and `⚠️` noise when capturing evidence.
-- Route all version-control actions through `gitman`; never use raw `git` or `jj`.
-- Before any save, inspect the complete worktree scope with `gitman status`.
-- Do not touch the unrelated open lanes.
-- Do not modify Rust/Python behavior during the investigation unless a tiny,
-  isolated probe is necessary and it is kept under the new scratch project.
-- Do not change public wire shapes, GIL-release boundaries, identity semantics,
-  snapshot isolation, rollback guarantees, or the Python projection as part of
-  this investigation.
-- Do not turn an architectural hypothesis into a stated invariant.
-- For every important claim, record `file:line` evidence, a reproducible
-  command, or label it explicitly as an inference or unknown.
-- Never quote a memory figure without reading the confound note in
-  `31-semantic-state/INVESTIGATION.md §14.2`.
+The native and Python layers already provide durable IDs, snapshots, atomic
+multi-file commits, rollback, and graph projections. Do not duplicate those
+concepts in the client.
 
-## Establish the baseline
+## In-scope implementation
 
-Before drawing conclusions:
+### 1. Headless Python client
 
-1. Inspect repository/lane status with `gitman status`.
-2. Confirm the current trunk revision.
-3. Run the smallest relevant health gates:
-   - `devenv shell -- check-rust`
-   - `devenv shell -- clippy`
-   - `devenv shell -- parity-oracle`
-   - `devenv shell -- tests`
-4. Record actual counts and any ambient warnings separately from failures.
-5. If the baseline differs from the documented state, stop and characterize the
-   difference before relying on stale line references.
+Provide a small public client or CLI that external agents can use without
+importing private daemon/session classes. It should handle:
 
-## Trace the real control plane
+- daemon connect/start and socket lifecycle;
+- newline-delimited JSON-RPC framing and request correlation;
+- capability parsing;
+- high-level calls for context, search, navigation, checks, sync, author, and diff;
+- typed errors for stale revision, closed session, evicted revision, and engine failure;
+- status and post-mutation verification helpers.
 
-Build an evidence-backed end-to-end map for each path below.
+Keep the client synchronous and simple unless existing project conventions
+require otherwise. Do not add MCP in this project.
 
-### A. Agent/session lifecycle
+### 2. Capabilities manifest
 
-Trace:
+Add an additive `protocol_version` and compact `capabilities` object to
+`ping` or `open`. It should identify the core read/mutation operations and
+important bounds such as the symbol result cap. It does not need a generated
+schema registry.
 
-- project discovery and open
-- initial content ingestion
-- identity reconciliation
-- initial code-layer materialization
-- session ownership and close/reload
-- long-lived session behavior
-- daemon session creation, lookup, expiry, and shutdown
-- whether multiple clients/agents can share a session
-- what identifies a project, session, revision, snapshot, and actor
+The manifest must be tested against the actual advertised handler surface so
+it cannot silently drift.
 
-Identify which objects are authoritative, which are projections, and which
-operations are state-changing versus read-only.
+### 3. Revision-bearing reads
 
-### B. Agent read/query surface
+Add an observed `revision` field to the MVP responses for:
 
-Inventory the actual callable operations an agent can use:
+- `context_pack`;
+- `entity_at`;
+- `symbols`;
+- `definition`;
+- `references`;
+- `hover`;
+- `check`;
+- `diagnostics_at`.
 
-- files and project metadata
-- diagnostics and checks
-- symbols/entities
-- code graph nodes and edges
-- references, dependencies, hierarchy, occurrences, and paths
-- snapshots and time travel
-- identity/durable IDs
-- authored annotations and derived layers
-- status/revision/change information
+Preserve existing payload fields. The field means the native/session revision
+observed for that result; it does not promise that separate calls share one
+revision.
 
-For each operation, record:
+### 4. Stale mutation guard
 
-- Python API, daemon/API endpoint, or Neovim route
-- input and output shape
-- revision semantics
-- blocking/async behavior
-- GIL/thread behavior where relevant
-- error behavior
-- whether the result is deterministic and revision-pinned
-- whether the operation is suitable for an autonomous agent
+Accept optional `expected_revision` on `sync_buffers` and `author`.
 
-### C. Agent write/action surface
+The comparison must occur inside one `SessionActor` work item immediately
+before the native/session mutation. If the current revision differs:
 
-Trace:
+- return a typed stale-revision error;
+- include the current revision;
+- publish no new revision or commit delta;
+- do not partially apply the request.
 
-- edit and virtual-edit operations
-- sync/watch paths
-- commit boundaries and failure/rollback behavior
-- code deltas and bus publication
-- authored annotation writes
-- review/accept/reject or equivalent workflows
-- actions available through the daemon and Neovim
-- whether an agent can request a dry run, preview, explainability data, or
-  confirmation before mutation
+On success, return the existing commit delta with additive `base_revision` and
+`committed_revision` fields if needed. Preserve native publish-last and rollback
+behavior.
 
-Separate semantic edits from filesystem edits and from annotation writes.
-Record what an agent can mutate accidentally and what guardrails exist.
+### 5. Working-tree behavior
 
-### D. Eventing and subscriptions
+Document and test both explicit modes:
 
-Trace the delta bus and all consumers:
+- working-tree mode: the agent edits files, then asks TyO3 to reindex/sync;
+- overlay mode: the agent sends `sync_buffers` for unsaved semantic text.
 
-- event types
-- revision ordering
-- filtering/interest mechanisms
-- backpressure and overflow policy
-- reconnect/resume behavior
-- whether events are replayable
-- snapshot/event consistency
-- daemon-to-client and native-to-Python boundaries
-- what a long-lived agent must do after missed or out-of-order events
+Do not add a daemon filesystem-write operation. Resolve whether existing
+`reindex` is sufficient or whether a narrow `sync_path` route is needed, but
+keep that choice minimal and explicit.
 
-Determine whether the event surface is a usable control-plane protocol or only
-an internal notification mechanism.
+## Deliberately out of scope
 
-### E. Concurrency, isolation, and recovery
+Do not implement:
 
-Investigate:
+- a `SemanticState` type or changes to Project 31 ownership;
+- server-side snapshot handles or a time-travel service;
+- event sequence numbers, replay, resume cursors, or durable subscriptions;
+- mutation idempotency storage or cancellation guarantees;
+- plan/apply workflows or broad explainability/provenance;
+- multi-agent leases, authentication, or authorization;
+- MCP or another external tool protocol;
+- daemon-owned filesystem writes;
+- broad graph/dependency API expansion;
+- changes to GIL-release, identity, snapshot isolation, rollback, or existing
+  Neovim behavior unless an additive compatibility fix is unavoidable.
 
-- concurrent reads and writes
-- held snapshots and writer behavior
-- daemon session concurrency
-- cancellation
-- stale clients
-- revision eviction
-- process restart and reopen
-- malformed input and partial failure
-- sidecar/identity persistence failures
-- whether an agent can recover from every documented failure without
-  reinitializing the whole project
+For the MVP, notifications are optional hints. The client must use `ping`,
+re-read, `check`, and `diff` for correctness after reconnect or a mutation.
 
-Pay particular attention to the distinction between:
+## Acceptance tests
 
-- live floating HEAD
-- revision-pinned snapshots
-- time-travel snapshots
-- Python projections/caches
-- native `Arc<CodeLayer>` ownership
-- persisted identity/authored data
-- bus/event state
+Add focused tests, preferably in the existing daemon test structure:
 
-## Assess the control-plane qualities
+1. A headless client starts/connects to a daemon without Neovim.
+2. `open`/`ping` returns protocol version, capabilities, root, session ID, and revision.
+3. Core read calls return their observed revision without losing existing fields.
+4. A multi-file `sync_buffers` request is one revision and returns a complete delta.
+5. A stale `expected_revision` is rejected with no revision/delta/event.
+6. Authored writes enforce the same stale check.
+7. `ping` and `diff` verify a successful mutation.
+8. Disconnect/reconnect followed by status and re-read converges without event replay.
+9. `sync_buffers` is proven not to write source files.
+10. Existing rollback, MVCC, bus, daemon, and Neovim tests remain green.
+11. A client timeout is treated as an unknown outcome, not cancellation.
+12. Capability metadata and advertised methods stay consistent.
 
-Evaluate the current and possible control plane against these qualities:
+The most important test is the stale-write race: advance the daemon revision
+between an agent read and its mutation, then assert the old mutation is
+rejected without a second commit.
 
-- discoverability: can a new agent learn the API from machine-readable metadata?
-- capability negotiation: can clients discover supported operations and versions?
-- explicitness: are revisions, sessions, actors, and mutations unambiguous?
-- determinism: can an agent reproduce and verify a result?
-- safety: are destructive or broad mutations guarded?
-- provenance: can the agent tell why a result or diagnostic exists?
-- composability: can read/query/action operations be composed without hidden
-  side effects?
-- observability: can an agent inspect health, lag, queue state, and revision?
-- resumability: can it reconnect without losing semantic state?
-- idempotence: can retries safely repeat operations?
-- boundedness: are work, memory, event queues, and retention bounded?
-- explainability: can the system expose affected files/symbols and reasons?
-- editor integration: do daemon, Python, and Neovim surfaces agree?
-- testability: can the protocol and invariants be tested without a live editor?
-- security/trust boundaries: what can an external agent read or mutate?
+## Verification and repository workflow
 
-Do not score these abstractly without evidence. For each weakness, show the
-concrete path and the user/agent consequence.
+Run repository commands inside `devenv shell`, and put a reason on every shell
+invocation:
 
-## Required outputs
+```text
+SECRETSPEC_REASON="Project 32 MVP check-rust" devenv shell -- check-rust
+SECRETSPEC_REASON="Project 32 MVP clippy" devenv shell -- clippy
+SECRETSPEC_REASON="Project 32 MVP parity oracle" devenv shell -- parity-oracle
+SECRETSPEC_REASON="Project 32 MVP tests" devenv shell -- tests
+```
 
-Create a new scratch project:
-`.scratch/projects/32-agent-control-plane/`
+Filter ambient `mypi`, `MYPI`, and `⚠️` setup noise from captured evidence; do
+not treat it as a project test result.
 
-Produce:
+Before every save, inspect the complete worktree with:
 
-1. `README.md`
-   - one-paragraph outcome
-   - scope and non-goals
-   - links to the report and any probes
-   - current status and next decision
-2. `INVESTIGATION.md`
-   - executive summary
-   - terminology and actors
-   - current architecture/data-flow diagram
-   - lifecycle/state-machine diagram
-   - operation inventory tables
-   - daemon/Python/Neovim/native surface mapping
-   - ownership and revision-consistency table
-   - event/delta/bus analysis
-   - concurrency/failure/recovery analysis
-   - evidence ledger with `file:line` anchors
-   - gaps and opportunities, prioritized by impact and cost
-   - alternatives considered
-   - explicit non-goals and rejected assumptions
-   - test/probe obligations
-   - risks and open questions
-   - recommendation with a clearly stated decision boundary
-3. `KICKOFF.md`
-   - a self-contained version of the final investigation instructions so the
-     work can be resumed by another agent
-4. Any probe scripts only if they add repeatable evidence. Keep them small,
-   documented, and do not commit generated output.
+```text
+SECRETSPEC_REASON="Project 32 MVP pre-save status" devenv shell -- gitman status
+```
 
-Distinguish every report statement as one of:
+Route all version-control actions through `gitman`; never invoke raw `git` or
+`jj`. Save and publish completed work promptly, and do not include unrelated
+lanes.
 
-- verified fact
-- measured result
-- inference
-- recommendation
-- unresolved question
+## Definition of done
 
-Use exact source anchors for verified facts. Do not claim “the control plane”
-is one object unless the evidence supports that conclusion.
+The MVP is done when an external agent can, without Neovim:
 
-## Decision discipline
+1. connect to a project and discover the supported operations;
+2. obtain useful semantic context and diagnostics with an observed revision;
+3. submit a guarded multi-file semantic update or authored write;
+4. receive an unambiguous success/stale result;
+5. verify the resulting revision and diff; and
+6. recover from a reconnect by reopening and re-reading.
 
-Do not implement merely because an API is awkward. First decide whether the
-problem is:
-
-- missing protocol surface,
-- inconsistent existing surfaces,
-- lifecycle/ownership ambiguity,
-- lack of machine-readable capability metadata,
-- event/recovery weakness,
-- semantic correctness issue,
-- performance/memory issue,
-- editor-only ergonomics,
-- or documentation/discoverability.
-
-Do not introduce a wrapper state type as a naming exercise. Preserve Project 31’s
-settled conclusion unless new evidence directly overturns one of its three
-findings; if that happens, stop and report the contradiction instead of
-redesigning unilaterally.
-
-At the end, recommend at most three next projects. For each, state:
-
-- exact user/agent problem
-- evidence
-- proposed boundary
-- expected benefit
-- costs and risks
-- why it should be done now or deferred
-- minimum acceptance tests
-
-The likely output is an investigation and a prioritized roadmap, not code.
+Anything beyond that belongs in a separately approved follow-up project.
