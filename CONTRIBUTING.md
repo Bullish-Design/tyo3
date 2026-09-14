@@ -9,7 +9,7 @@ shell with the exact Rust toolchain, Python 3.13, and all build dependencies.
 # Enter the development shell
 devenv shell
 
-# Build the Rust native extension (debug)
+# Build the Rust native extension (release — the default)
 devenv shell -- build
 
 # Run the full test suite
@@ -91,6 +91,14 @@ revisions. Bumping is a deliberate, tested operation:
   specific file first, shadowing your fresh build. Symptom: a green build but
   `AttributeError` for new methods/classes at runtime. Fix:
   `devenv shell -- clean && devenv shell -- build`.
+- **Build-profile gotcha:** Debug and release install to the *same* path,
+  `src/tyo3/_native_impl.abi3.so`, so whichever ran last wins and the profile
+  is invisible at runtime. `build` is release; only `build-debug` produces a
+  debug extension. A debug build leaves the local `tyo3` crate at
+  `opt-level = 0` and runs the commit path ~6x slower — it is fine for
+  correctness tests and **never** valid for a performance number. Symptom: a
+  benchmark that is inexplicably slow, or a targeted sync that somehow costs
+  more than a full project rescan. Fix: `devenv shell -- build`.
 
 ## Project structure
 

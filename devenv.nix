@@ -178,18 +178,38 @@ in
     echo "tyo3 dev shell — $GREET"
   '';
 
+  # DEFAULT = RELEASE.
+  #
+  # Debug and release install to the SAME path (src/tyo3/_native_impl.abi3.so),
+  # so whichever ran last wins and the profile is invisible at runtime. Cargo
+  # already optimises every *dependency* in the dev profile
+  # ([profile.dev.package."*"] opt-level = 3), but the local tyo3 crate stays at
+  # opt-level 0 — which runs the commit path ~6x slower and silently voids any
+  # measurement taken against it. Only `build-debug` produces one, and it says so.
   scripts.build.exec = ''
-    echo "═══ Building Rust extension (debug) ═══"
+    echo "═══ Building Rust extension (release) ═══"
     cd "$DEVENV_ROOT"
-    maturin develop 2>&1
-    echo "═══ Build complete ═══"
+    maturin develop --release 2>&1
+    echo "═══ Build complete (release) ═══"
   '';
 
+  # Retained so existing docs and muscle memory keep working — `build` is already
+  # release, so this is the same thing under the older name.
   scripts.build-release.exec = ''
     echo "═══ Building Rust extension (release) ═══"
     cd "$DEVENV_ROOT"
     maturin develop --release 2>&1
     echo "═══ Release build complete ═══"
+  '';
+
+  # The fast-iteration Rust loop, and nothing else. Leaves a DEBUG .so installed.
+  # Run `build` before you measure anything or quote a performance number.
+  scripts.build-debug.exec = ''
+    echo "═══ Building Rust extension (DEBUG — slow engine, do not measure) ═══"
+    cd "$DEVENV_ROOT"
+    maturin develop 2>&1
+    echo "⚠  DEBUG build installed — the engine is ~6x slower."
+    echo "⚠  Run 'build' before benchmarking or trusting a timing."
   '';
 
   scripts.build-wheel.exec = ''
@@ -334,8 +354,8 @@ in
     # The specs spawn the daemon (`python -m tyo3.daemon`), which imports the
     # native extension — make sure it's built.
     if ! ls src/tyo3/_native_impl*.so >/dev/null 2>&1; then
-      echo "── native extension missing; building (maturin develop) ──"
-      maturin develop 2>&1
+      echo "── native extension missing; building (release) ──"
+      maturin develop --release 2>&1
     fi
     export PYTHONPATH="$DEVENV_ROOT/src''${PYTHONPATH:+:$PYTHONPATH}"
     NVIM="${tyo3NvimBin}"
@@ -444,8 +464,8 @@ in
     echo "═══ Removing stale .so + rebuilding (avoids abi3/cpython shadowing) ═══"
     rm -f "$DEVENV_ROOT/src/tyo3/_native_impl"*.so
     cd "$DEVENV_ROOT"
-    maturin develop 2>&1
-    echo "═══ Rebuild complete ═══"
+    maturin develop --release 2>&1
+    echo "═══ Rebuild complete (release) ═══"
   '';
 
   # Pass-through pytest: `devenv shell -- pytest tests/test_concurrency.py -v`
@@ -625,8 +645,9 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
     fi
     echo ""
     echo "  Available commands:"
-    echo "    build              — build debug + copy .so"
-    echo "    build-release      — build release + copy .so"
+    echo "    build              — build RELEASE + copy .so  (the default)"
+    echo "    build-release      — same as build, older name"
+    echo "    build-debug        — build DEBUG + copy .so  (~6x slower engine)"
     echo "    build-wheel        — build maturin wheel"
     echo "    test               — full test suite"
 
@@ -653,7 +674,7 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
   # runner's PATH has them.
   tasks = {
     "tyo3:lint".exec = "uv run --group dev ruff check src";
-    "tyo3:test".exec = "export VIRTUAL_ENV=\"$DEVENV_ROOT/.devenv/state/venv\"; maturin develop 2>&1 && PYTHONPATH=src uv run --group dev pytest --strict-markers -q --tb=short -m \"not benchmark\" tests/ -x";
+    "tyo3:test".exec = "export VIRTUAL_ENV=\"$DEVENV_ROOT/.devenv/state/venv\"; maturin develop --release 2>&1 && PYTHONPATH=src uv run --group dev pytest --strict-markers -q --tb=short -m \"not benchmark\" tests/ -x";
 
     "base:check".after = [ "tyo3:lint" ];
     "base:test".after = [ "tyo3:test" ];
@@ -667,7 +688,7 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
   enterTest = ''
     echo "Running CI-style tests..."
     cd "$DEVENV_ROOT"
-    maturin develop 2>&1
+    maturin develop --release 2>&1
     PYTHONPATH=src python -m pytest ${pytestLeanArgs} ${pytestDefaultMarkerArgs} tests/ -x 2>&1
   '';
 }

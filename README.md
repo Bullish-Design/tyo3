@@ -44,7 +44,7 @@ git clone <repo-url> && cd tyo3
 # Enter the development shell (provisions everything automatically)
 devenv shell
 
-# Build the Rust extension in debug mode
+# Build the Rust extension (release — the default)
 build
 ```
 
@@ -265,8 +265,9 @@ GIL-free. Snapshots are terminal: they don't expose ``reload()`` or
 devenv shell      # enter the development environment
 
 # Build
-build             # compile Rust extension (debug)
-build-release     # compile Rust extension (release)
+build             # compile Rust extension (release — the default)
+build-release     # same as `build`, kept for older docs
+build-debug       # DEBUG build: fast rebuilds, ~6x slower engine
 build-wheel       # build a distributable maturin wheel
 
 # Test
