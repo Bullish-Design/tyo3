@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from tyo3.daemon.llm import _llm, llm_model
 from tyo3.daemon.protocol import INVALID_PARAMS, METHOD_NOT_FOUND, ProtocolError
-from tyo3.graph.identity import is_entity_durable_id
+from tyo3.graph.identity import is_entity_node
 from tyo3.graph.queries import DEPENDENCY_EDGE_KINDS
 
 if TYPE_CHECKING:
@@ -174,7 +174,7 @@ class Handlers:
                 g = snap.graph()
                 for idx in g._graph.node_indices():
                     node = g._graph[idx]
-                    if node.file != rel or node.external or not is_entity_durable_id(node.durable_id):
+                    if node.file != rel or not is_entity_node(node.durable_id, external=node.external):
                         continue
                     did = node.durable_id
                     item: dict[str, Any] = {
@@ -416,7 +416,7 @@ class Handlers:
         """Project-wide symbol list (the ``workspace/symbol`` surface).
 
         Walks the head graph for entity nodes (same filter as ``decorate``:
-        ``is_entity_durable_id``, not external, not a module), returning a flat
+        ``is_entity_node``: not external, not a module), returning a flat
         ``[{durable_id, name, qualified_name, kind, path, range}]``. Optional
         ``query`` is a case-insensitive substring filter on ``qualified_name``;
         the result is capped (a hot prefix shouldn't flood the picker). One
@@ -432,7 +432,7 @@ class Handlers:
                 g = snap.graph()
                 for idx in g._graph.node_indices():
                     node = g._graph[idx]
-                    if node.external or not is_entity_durable_id(node.durable_id):
+                    if not is_entity_node(node.durable_id, external=node.external):
                         continue
                     if needle is not None and needle not in node.qualified_name.lower():
                         continue
@@ -494,11 +494,9 @@ class Handlers:
                     if caller_id is None or caller_id == did:
                         continue
                     caller = _node_by_id(g, caller_id)
-                    if caller is None or caller.external or not is_entity_durable_id(caller_id):
+                    if caller is None or not is_entity_node(caller_id, external=caller.external):
                         continue
-                    entry = incoming.setdefault(
-                        caller_id, {"from": self._call_item(caller), "ranges": []}
-                    )
+                    entry = incoming.setdefault(caller_id, {"from": self._call_item(caller), "ranges": []})
                     entry["ranges"].append(_range_dict(r.range))
                 # Outgoing: this entity's direct dependency entities (its own
                 # calls/uses), each with the call-site ranges *in this entity's
@@ -511,7 +509,7 @@ class Handlers:
                 for tgt_idx, edata in g._edges_of_kind(did, set(DEPENDENCY_EDGE_KINDS)):
                     dep = g._graph[tgt_idx]
                     dep_id = dep.durable_id
-                    if dep.external or not is_entity_durable_id(dep_id):
+                    if not is_entity_node(dep_id, external=dep.external):
                         continue
                     entry = outgoing_by_id.setdefault(dep_id, {"to": self._call_item(dep), "ranges": []})
                     if edata.range is not None:
@@ -577,9 +575,7 @@ class Handlers:
                 return None
             changes: dict[str, list[dict[str, Any]]] = {}
             for e in edit.edits:
-                changes.setdefault(str(e.path), []).append(
-                    {"range": _range_dict(e.range), "new_text": edit.new_name}
-                )
+                changes.setdefault(str(e.path), []).append({"range": _range_dict(e.range), "new_text": edit.new_name})
             return {"new_name": edit.new_name, "changes": changes}
 
         return self._actor.submit(work)
@@ -682,9 +678,7 @@ class Handlers:
         rel = self._relpath(path) if isinstance(path, str) else None
 
         def work(s: TyO3Session) -> dict[str, Any]:
-            flagged = [(i, "needs_review") for i in s.needs_review()] + [
-                (i, "orphaned") for i in s.orphaned()
-            ]
+            flagged = [(i, "needs_review") for i in s.needs_review()] + [(i, "orphaned") for i in s.orphaned()]
             items: list[dict[str, Any]] = []
             with s.snapshot() as snap:
                 g = snap.graph()
@@ -846,9 +840,7 @@ class Handlers:
             raise ProtocolError("'mode' must be 'explain' or 'simplify'", code=INVALID_PARAMS)
         return mode
 
-    def _gather_context(
-        self, s: TyO3Session, rel: str, line: int, col: int, did: str, *, mode: str
-    ) -> dict[str, Any]:
+    def _gather_context(self, s: TyO3Session, rel: str, line: int, col: int, did: str, *, mode: str) -> dict[str, Any]:
         """The context pack for *did*: node card, source slice, references, prior
         authored layers, and (simplify only) the bodies of the direct callers.
 
@@ -958,9 +950,7 @@ class Handlers:
         so a registered layer opts into inline extmarks declaratively — no
         hardcoded ``intent``."""
         candidates = [
-            n
-            for n, c in s.effective_layers.items()
-            if c.origin == "authored" and s._display_for(n) == "inline-note"
+            n for n, c in s.effective_layers.items() if c.origin == "authored" and s._display_for(n) == "inline-note"
         ]
         if candidates:
             return "intent" if "intent" in candidates else sorted(candidates)[0]
@@ -971,9 +961,7 @@ class Handlers:
 
         Picks the first derived layer whose ``display`` is ``inline-summary``."""
         candidates = [
-            n
-            for n, c in s.effective_layers.items()
-            if c.origin == "derived" and s._display_for(n) == "inline-summary"
+            n for n, c in s.effective_layers.items() if c.origin == "derived" and s._display_for(n) == "inline-summary"
         ]
         if candidates:
             return "summary" if "summary" in candidates else sorted(candidates)[0]
@@ -1058,11 +1046,7 @@ def _build_explain_prompt(ctx: dict[str, Any], mode: str) -> str:
         lines += ["", "Bodies of direct callers / dependents:"]
         for rb in ctx["reference_bodies"]:
             lines += [f"# {rb['durable_id']}", rb["source"]]
-    task = (
-        "Explain this entity."
-        if mode == "explain"
-        else "Suggest a simplification of this entity."
-    )
+    task = "Explain this entity." if mode == "explain" else "Suggest a simplification of this entity."
     lines += ["", task]
     return "\n".join(lines)
 

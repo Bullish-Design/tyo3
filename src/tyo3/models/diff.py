@@ -139,7 +139,7 @@ class SnapshotDiff:
 
 def _compute_code_diff(after: Snapshot, before: Snapshot) -> CodeDiff:
     """Compute the detailed code diff from two pinned snapshots."""
-    from tyo3.graph.identity import is_entity_durable_id
+    from tyo3.graph.identity import is_entity_node
 
     after_graph = after.graph()
     before_graph = before.graph()
@@ -147,13 +147,13 @@ def _compute_code_diff(after: Snapshot, before: Snapshot) -> CodeDiff:
     after_nodes: dict[str, Any] = {}
     for idx in after_graph._graph.node_indices():
         node = after_graph._graph[idx]
-        if is_entity_durable_id(node.durable_id):
+        if is_entity_node(node.durable_id, external=node.external):
             after_nodes[node.durable_id] = node
 
     before_nodes: dict[str, Any] = {}
     for idx in before_graph._graph.node_indices():
         node = before_graph._graph[idx]
-        if is_entity_durable_id(node.durable_id):
+        if is_entity_node(node.durable_id, external=node.external):
             before_nodes[node.durable_id] = node
 
     after_ids = set(after_nodes.keys())
@@ -179,9 +179,13 @@ def _compute_code_diff(after: Snapshot, before: Snapshot) -> CodeDiff:
         for edge_idx in graph._graph.edge_indices():
             data = graph._graph.get_edge_data_by_index(edge_idx)
             src, tgt = graph._graph.get_edge_endpoints_by_index(edge_idx)
-            src_id = graph._graph[src].durable_id
-            tgt_id = graph._graph[tgt].durable_id
-            if not is_entity_durable_id(src_id) and not is_entity_durable_id(tgt_id):
+            src_node = graph._graph[src]
+            tgt_node = graph._graph[tgt]
+            src_id = src_node.durable_id
+            tgt_id = tgt_node.durable_id
+            if not is_entity_node(src_id, external=src_node.external) and not is_entity_node(
+                tgt_id, external=tgt_node.external
+            ):
                 continue
             key = (src_id, tgt_id, data.kind.value, (data.role.value if data.role else None))
             edges.add(key)

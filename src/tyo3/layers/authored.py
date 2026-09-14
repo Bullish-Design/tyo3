@@ -48,12 +48,12 @@ class AuthoredLayerView:
         # Fallback: scan entity ids from the pinned graph and check each.
         # This is less efficient but correct — it reads-at-R.
         graph = self._snapshot.graph()
-        from tyo3.graph.identity import is_entity_durable_id
+        from tyo3.graph.identity import is_entity_node
 
         ids = []
         for idx in graph._graph.node_indices():
             node = graph._graph[idx]
-            if not is_entity_durable_id(node.durable_id):
+            if not is_entity_node(node.durable_id, external=node.external):
                 continue
             # Absence is reported as ``status == "absent"``, not an exception; a
             # backend/format failure propagates (it is not silently skipped).

@@ -941,7 +941,7 @@ pub(crate) fn run_staged(
             .iter()
             .filter_map(|id| next.nodes.get(id))
             .map(|node| node.file.clone())
-            .filter(|file| file != "<external>")
+            .filter(|file| file != crate::code_layer::EXTERNAL_FILE)
             .collect();
         identity.affected_files = affected_files.into_iter().collect();
 
@@ -1041,4 +1041,3 @@ pub(crate) fn commit_dto_to_py<'py>(
     let dto = dto.ok_or_else(|| CommitFailed::new_err("commit produced no delta"))?;
     pythonize(py, &dto).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
-

@@ -28,10 +28,42 @@ use crate::project::{
 
 // ── Synthetic id helpers (must match `graph/identity.py` byte-for-byte) ──────
 
+/// The `file` value carried by every external stub node. Not a real path.
+pub const EXTERNAL_FILE: &str = "<external>";
+
+/// The `qualified_name` carried by every synthetic module node.
+pub const MODULE_QUALIFIED_NAME: &str = "<module>";
+
 /// Stable synthetic DurableId for a module node: `"<module>" + file`
 /// (mirrors `make_module_durable_id`, `graph/identity.py:58`).
 pub fn make_module_durable_id(file: &str) -> String {
-    format!("<module>{}", file)
+    format!("{}{}", MODULE_QUALIFIED_NAME, file)
+}
+
+/// Stable synthetic id for an off-project package's module stub.
+pub fn make_external_module_id(package: &str) -> String {
+    format!("{}::{}", package, MODULE_QUALIFIED_NAME)
+}
+
+/// Stable synthetic id for an off-project reference target.
+pub fn make_external_symbol_id(package_or_file: &str, name: &str) -> String {
+    format!("{}::{}", package_or_file, name)
+}
+
+/// The three populations a `CodeLayer` node can belong to.
+///
+/// NOTE: an external stub is **not** identifiable from its id alone — its id is
+/// an ordinary `"a::b"` string. `NodeData::external` is the only authority.
+/// This is the defect Step 1 fixes; do not reintroduce id-shape guessing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Population {
+    Entity,
+    Module,
+    External,
+}
+
+pub fn is_module_id(durable_id: &str) -> bool {
+    durable_id.starts_with(MODULE_QUALIFIED_NAME)
 }
 
 // ── EdgeKind (mirrors Python `EdgeKind` StrEnum values used by the graph) ────
@@ -135,6 +167,16 @@ pub struct NodeData {
 }
 
 impl NodeData {
+    pub fn population(&self, durable_id: &str) -> Population {
+        if self.external {
+            Population::External
+        } else if is_module_id(durable_id) {
+            Population::Module
+        } else {
+            Population::Entity
+        }
+    }
+
     fn to_dto(&self, durable_id: &str) -> CodeNodeDto {
         CodeNodeDto {
             durable_id: durable_id.to_string(),
@@ -543,9 +585,9 @@ impl<'a> Builder<'a> {
                 let Some(node) = b.layer.nodes.get(id).cloned() else {
                     continue;
                 };
-                if node.qualified_name == "<module>" {
+                if node.qualified_name == MODULE_QUALIFIED_NAME {
                     b.name_to_id
-                        .insert((file.clone(), "<module>".to_string()), id.clone());
+                        .insert((file.clone(), MODULE_QUALIFIED_NAME.to_string()), id.clone());
                 } else {
                     b.register_name(file, &node.name, id);
                     b.register_name(file, &node.qualified_name, id);
@@ -676,7 +718,7 @@ impl<'a> Builder<'a> {
         for edge in &self.layer.edges {
             if edge.kind == EdgeKind::Imports && seed_modules.contains(&edge.target) {
                 if let Some(src_node) = self.layer.nodes.get(&edge.source) {
-                    if !src_node.file.is_empty() && src_node.file != "<external>" {
+                    if !src_node.file.is_empty() && src_node.file != EXTERNAL_FILE {
                         dirty.insert(src_node.file.clone());
                     }
                 }
@@ -771,7 +813,9 @@ impl<'a> Builder<'a> {
             .layer
             .nodes
             .iter()
-            .filter(|(id, n)| n.external && !referenced.contains(id))
+            .filter(|(id, n)| {
+                n.population(id.as_str()) == Population::External && !referenced.contains(id)
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in doomed {
@@ -801,7 +845,7 @@ impl<'a> Builder<'a> {
                 module_id.clone(),
                 NodeData {
                     name: file_stem(file),
-                    qualified_name: "<module>".to_string(),
+                    qualified_name: MODULE_QUALIFIED_NAME.to_string(),
                     kind: "module".to_string(),
                     file: file.to_string(),
                     range: module_range(),
@@ -813,7 +857,7 @@ impl<'a> Builder<'a> {
                 },
             );
             self.name_to_id
-                .insert((file.to_string(), "<module>".to_string()), module_id.clone());
+                .insert((file.to_string(), MODULE_QUALIFIED_NAME.to_string()), module_id.clone());
             self.file_to_nodes
                 .entry(file.to_string())
                 .or_default()
@@ -872,7 +916,7 @@ impl<'a> Builder<'a> {
                 name: name.to_string(),
                 qualified_name: qualified_name.to_string(),
                 kind: kind.to_string(),
-                file: "<external>".to_string(),
+                file: EXTERNAL_FILE.to_string(),
                 range: module_range(),
                 name_range: None,
                 content_hash: None,
@@ -1072,8 +1116,8 @@ impl<'a> Builder<'a> {
         }
         let package = infer_package(target_file);
         let ext_did = match &package {
-            Some(p) => format!("{}::{}", p, target_name),
-            None => format!("{}::{}", target_file, target_name),
+            Some(p) => make_external_symbol_id(p, target_name),
+            None => make_external_symbol_id(target_file, target_name),
         };
         self.add_stub_node(
             &ext_did,
@@ -1098,9 +1142,15 @@ impl<'a> Builder<'a> {
                 return; // project file without a module node — skip
             }
             let package = infer_package(target_file).unwrap_or_else(|| "unknown".to_string());
-            target_module = format!("{}::<module>", package);
+            target_module = make_external_module_id(&package);
             if !self.layer.nodes.contains_key(&target_module) {
-                self.add_stub_node(&target_module, &package, "<module>", "module", &package);
+                self.add_stub_node(
+                    &target_module,
+                    &package,
+                    MODULE_QUALIFIED_NAME,
+                    "module",
+                    &package,
+                );
             }
         }
         self.try_add_edge(
@@ -1168,7 +1218,7 @@ impl<'a> Builder<'a> {
                         }
                         match package {
                             Some(pkg) => {
-                                let ext_did = format!("{}::{}", pkg, supertype.name);
+                                let ext_did = make_external_symbol_id(&pkg, &supertype.name);
                                 self.add_stub_node(
                                     &ext_did,
                                     &supertype.name,
@@ -1373,6 +1423,25 @@ mod tests {
         // Mirrors graph/identity.py:58 — make_module_durable_id.
         assert_eq!(make_module_durable_id("main.py"), "<module>main.py");
         assert_eq!(make_module_durable_id("pkg/mod.py"), "<module>pkg/mod.py");
+    }
+
+    #[test]
+    fn node_population_uses_external_flag_and_module_id() {
+        let mut external = node("unknown", EXTERNAL_FILE);
+        external.external = true;
+        assert_eq!(
+            external.population("requests::Session"),
+            Population::External
+        );
+
+        let module = node("module", "main.py");
+        assert_eq!(
+            module.population(&make_module_durable_id("main.py")),
+            Population::Module
+        );
+
+        let entity = node("function", "main.py");
+        assert_eq!(entity.population("01M2ER6S3JQ418NNVKPV4FEE2A"), Population::Entity);
     }
 
     #[test]

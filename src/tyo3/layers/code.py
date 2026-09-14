@@ -18,7 +18,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Literal
 
 from tyo3.graph.applier import symbol_node_from_dto
-from tyo3.graph.identity import is_entity_durable_id
+from tyo3.graph.identity import is_entity_node
 from tyo3.layers.base import LayerDiff
 
 if TYPE_CHECKING:
@@ -43,7 +43,8 @@ class CodeLayerView:
         Reads the snapshot's own frozen-database ``full_code_delta()`` and indexes
         its ``nodes_upserted`` — a pure read, no graph construction, no session
         state. Includes ``<module>`` / ``<external>`` synthetics; entity filtering
-        happens in ``ids()`` / ``value()`` via :func:`is_entity_durable_id`.
+        happens in ``ids()`` / ``value()`` via :func:`is_entity_node`, which reads
+        each node's producer-set ``external`` flag.
         """
         if self._nodes is None:
             delta = self._snapshot._native().full_code_delta()
@@ -55,8 +56,8 @@ class CodeLayerView:
 
         Excludes ``<module>`` and ``<external>`` synthetics.
         """
-        for did in self._node_index:
-            if is_entity_durable_id(did):
+        for did, n in self._node_index.items():
+            if is_entity_node(did, external=n["external"]):
                 yield did
 
     def value(self, durable_id: str) -> SymbolNode | None:
@@ -67,7 +68,7 @@ class CodeLayerView:
         graph would return.
         """
         n = self._node_index.get(durable_id)
-        if n is None or not is_entity_durable_id(durable_id):
+        if n is None or not is_entity_node(durable_id, external=n["external"]):
             return None
         return symbol_node_from_dto(n)
 
@@ -93,8 +94,8 @@ def _code_layer_diff_detail(after: CodeLayerView, before: CodeLayerView) -> Any:
     Node-only set/hash comparison over the two snapshots' native node lists; no
     graph is built (edges are out of scope for the code ``LayerView.diff``).
     """
-    after_ids = {did for did in after._node_index if is_entity_durable_id(did)}
-    before_ids = {did for did in before._node_index if is_entity_durable_id(did)}
+    after_ids = {did for did, n in after._node_index.items() if is_entity_node(did, external=n["external"])}
+    before_ids = {did for did, n in before._node_index.items() if is_entity_node(did, external=n["external"])}
 
     # Simple set delta for now — Step 3 enriches with changed/moved/edges.
     from dataclasses import dataclass

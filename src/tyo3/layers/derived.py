@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
-from tyo3.graph.identity import is_entity_durable_id
+from tyo3.graph.identity import is_entity_node
 from tyo3.layers.base import LayerDiff
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ class DerivedLayerView:
 
         for idx in graph._graph.node_indices():
             node = graph._graph[idx]
-            if not is_entity_durable_id(node.durable_id):
+            if not is_entity_node(node.durable_id, external=node.external):
                 continue
             if entity_kinds is not None and node.kind.value not in entity_kinds:
                 continue

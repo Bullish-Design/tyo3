@@ -65,31 +65,49 @@ def make_module_durable_id(file: str) -> str:
     return f"<module>{file}"
 
 
-def is_entity_durable_id(durable_id: str) -> bool:
-    """True when *durable_id* refers to a code entity (not a synthetic node).
+def is_entity_node(durable_id: str, *, external: bool) -> bool:
+    """True when this node is a real code entity, not a synthetic.
 
-    Synthetics include ``<module>`` module nodes and ``<external>`` stub
-    nodes.  Entity ids are ULID-based (26 uppercase alphanumeric chars).
+    *external* comes from the producer (``CodeNodeDto.external`` /
+    ``SymbolNode.external``) and is the **only** reliable discriminator for an
+    external stub. Stub ids are ordinary ``"package::name"`` strings —
+    ``"requests::Session"``, ``"unknown::<module>"`` — and carry no prefix
+    (`rust/src/code_layer.rs` ``ensure_external_target`` / ``add_import_edge``).
+    Only the node's ``file`` field holds the ``"<external>"`` sentinel, and only
+    the producer sets ``external``.
+
+    Classifying by id shape alone misreads every external stub as an entity;
+    that was the defect this function replaces. Prefer it over
+    :func:`is_entity_durable_id` wherever the node is in hand.
     """
-    if durable_id.startswith(("<module>", "<external>")):
+    if external:
         return False
-    # ULIDs are 26 chars, uppercase alphanumeric.
-    if len(durable_id) == 26 and durable_id[:2].isalnum():
-        return True
-    # Fallback: treat as entity if it doesn't start with a special prefix.
-    return not durable_id.startswith("<")
+    return not durable_id.startswith("<module>")
+
+
+def is_entity_durable_id(durable_id: str) -> bool:
+    """True when *durable_id* is not a synthetic **module** id.
+
+    Use only where the node itself is unavailable. This **cannot** detect an
+    external stub — stub ids carry no distinguishing prefix. Use
+    :func:`is_entity_node`, which takes the producer's ``external`` flag, for a
+    complete answer.
+    """
+    return not durable_id.startswith("<module>")
 
 
 def file_from_durable_id(durable_id: str) -> str:
     """Extract the file path from a durable_id.
 
     For entity nodes, the session's ``locate()`` is the authoritative source.
-    This is a fast syntactic fallback for module nodes and external stubs.
+    This is a fast syntactic fallback for module nodes.
+
+    It cannot resolve an external stub: stub ids carry no ``"<external>"``
+    prefix (only the node's ``file`` field does), so a stub falls through to the
+    ``"::"`` split below and yields its package name. Read ``node.file`` instead.
     """
     if durable_id.startswith("<module>"):
         return durable_id[len("<module>") :]
-    if durable_id.startswith("<external>"):
-        return "<external>"
     # For ULID-based ids: locate() is authoritative — callers should use
     # session.locate(). This fallback splits on '::' for compound ids.
     return durable_id.split("::", 1)[0]
