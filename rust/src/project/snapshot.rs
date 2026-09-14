@@ -58,22 +58,7 @@ impl PySnapshot {
     fn full_code_delta<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let state = clone_locked_state(&self.inner, "full_code_delta")?;
         let revision = self.revision;
-        let empty = crate::code_layer::CodeLayer::new();
-        let delta = py.detach(move || {
-            match state.code_layer.as_deref() {
-                Some(layer) => layer.diff_from(&empty, revision, true),
-                None => {
-                    let (_next, delta) = crate::code_layer::produce_code_delta(
-                        &state,
-                        &empty,
-                        revision,
-                        true,
-                        None,
-                    );
-                    delta
-                }
-            }
-        });
+        let delta = py.detach(move || full_code_delta_for(&state, revision));
         pythonize(py, &delta).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 

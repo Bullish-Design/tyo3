@@ -674,22 +674,7 @@ impl PyTyProject {
             let head = guard.as_ref().unwrap();
             (head.read_clone(), head.store.revision().0)
         };
-        let empty = crate::code_layer::CodeLayer::new();
-        let delta = py.detach(move || {
-            match state.code_layer.as_deref() {
-                Some(layer) => layer.diff_from(&empty, revision, true),
-                None => {
-                    let (_next, delta) = crate::code_layer::produce_code_delta(
-                        &state,
-                        &empty,
-                        revision,
-                        true,
-                        None,
-                    );
-                    delta
-                }
-            }
-        });
+        let delta = py.detach(move || full_code_delta_for(&state, revision));
         pythonize(py, &delta).map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 

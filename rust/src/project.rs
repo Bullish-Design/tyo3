@@ -261,6 +261,32 @@ pub(crate) fn clone_locked_state<T: ReadCloneSource>(
     Ok(guard.as_ref().unwrap().read_clone())
 }
 
+/// Serve `state`'s committed code layer as a full (`rescan = true`) delta, or
+/// rebuild it when no layer is carried.
+///
+/// A carried layer is byte-equivalent to a fresh full `Builder::build`
+/// (`code_layer.rs:525`, proved by
+/// `scoped_producer_matches_full_rebuild_across_generations`), so a miss costs
+/// speed, never correctness. Pure and GIL-free: callers wrap it in `py.detach`.
+///
+/// ONE definition, two callers (`PySnapshot::full_code_delta` and
+/// `PyTyProject::full_code_delta`). Only the latter is covered by the parity
+/// oracle — keep them on this single path so the uncovered one cannot drift.
+pub(crate) fn full_code_delta_for(
+    state: &TyProjectState,
+    revision: u64,
+) -> dto::CodeDeltaDto {
+    let empty = crate::code_layer::CodeLayer::new();
+    match state.code_layer.as_deref() {
+        Some(layer) => layer.diff_from(&empty, revision, true),
+        None => {
+            let (_next, delta) =
+                crate::code_layer::produce_code_delta(state, &empty, revision, true, None);
+            delta
+        }
+    }
+}
+
 pub(crate) fn config_error_to_pyerr(err: config::ConfigError) -> PyErr {
     match err {
         config::ConfigError::UnknownVersion(_) => FormatVersionError::new_err(err.to_string()),
