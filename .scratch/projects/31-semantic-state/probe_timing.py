@@ -5,8 +5,8 @@ Run from the repository root:
       .scratch/projects/31-semantic-state/probe_timing.py .'
 
 Edits one source file and restores it. Reports head/snapshot full_code_delta
-before the first commit (fallback rebuild), after it (carried layer), and for a
-time-travel snapshot (fallback by design).
+with the initial layer materialized at open, after a commit (carried layer), and
+for a time-travel snapshot (fallback by design).
 """
 
 import time, sys
@@ -22,11 +22,11 @@ def t(fn, n=1):
         a = time.perf_counter(); r = fn(); best.append(time.perf_counter()-a)
     return min(best), r
 
-# 1. pre-commit head full_code_delta (head.code_layer is empty -> fallback rebuild)
+# 1. pre-commit head full_code_delta (initial layer was materialized at open)
 d0, delta0 = t(inner.full_code_delta)
 print(f"pre-commit  head full_code_delta : {d0:.3f}s  nodes={len(delta0['nodes_upserted'])} edges={len(delta0['edges_added'])}")
 d0b, _ = t(inner.full_code_delta)
-print(f"pre-commit  head full_code_delta again: {d0b:.3f}s   (salsa warm, builder still runs)")
+print(f"pre-commit  head full_code_delta again: {d0b:.3f}s   (carried layer)")
 
 # 2. pre-commit snapshot
 snap0 = s.snapshot()

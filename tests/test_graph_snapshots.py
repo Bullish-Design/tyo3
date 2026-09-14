@@ -55,7 +55,7 @@ def test_session_graph_updates_after_edit(tmp_path: StdPath) -> None:
 
 
 def test_head_and_snapshot_graphs_agree_before_and_after_commit(tmp_path: StdPath) -> None:
-    """The fallback and carried-layer paths must describe the same graph."""
+    """Head and same-revision snapshot layers must describe the same graph."""
     (tmp_path / "a.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as session:
         before_head = session.graph
@@ -70,6 +70,28 @@ def test_head_and_snapshot_graphs_agree_before_and_after_commit(tmp_path: StdPat
         with session.snapshot() as after_snapshot:
             after_graph = after_snapshot.graph()
             assert after_head.node_count > 0
+            _assert_same_structure(after_head, after_graph)
+
+
+def test_empty_project_layer_miss_is_benign_before_and_after_commit(tmp_path: StdPath) -> None:
+    """An empty layer fallback remains an empty graph across a commit."""
+    config = "[project]\nname = 'empty-layer'\nversion = '0.1.0'\n"
+    (tmp_path / "pyproject.toml").write_text(config)
+    with TyO3Session(str(tmp_path)) as session:
+        before_head = session.graph
+        with session.snapshot() as before_snapshot:
+            before_graph = before_snapshot.graph()
+            assert before_head.node_count == 0
+            assert before_graph.node_count == 0
+            _assert_same_structure(before_head, before_graph)
+
+        session.edit("pyproject.toml", config + "# changed\n")
+
+        after_head = session.graph
+        with session.snapshot() as after_snapshot:
+            after_graph = after_snapshot.graph()
+            assert after_head.node_count == 0
+            assert after_graph.node_count == 0
             _assert_same_structure(after_head, after_graph)
 
 

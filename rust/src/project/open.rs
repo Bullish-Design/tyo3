@@ -171,6 +171,24 @@ pub(crate) fn build_head_with_config(
     }
 }
 
+/// Materialize the initial code layer after open-time identity reconciliation.
+///
+/// The layer is derived from the reconciled registry, so this must run after
+/// `run_identity_reconciliation` and before the head is exposed to reads. The
+/// producer also returns a delta, but open has no consumer for it; only the
+/// resulting layer is published into `HeadState`.
+pub(crate) fn materialize_initial_code_layer(head: &mut HeadState) {
+    let state = head.read_clone();
+    let (layer, _delta) = crate::code_layer::produce_code_delta(
+        &state,
+        &crate::code_layer::CodeLayer::new(),
+        head.store.revision().0,
+        true,
+        None,
+    );
+    head.code_layer = Arc::new(layer);
+}
+
 /// Build an independent, revision-pinned `ProjectDatabase` over a frozen overlay.
 ///
 /// Construction mirrors `build_head` (discover → apply user config → fallible,

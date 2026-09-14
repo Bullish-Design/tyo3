@@ -233,10 +233,10 @@ impl HeadState {
     /// The head's code layer when it is real, `None` while it is still the
     /// empty placeholder installed by `build_head_with_config` (`open.rs:168`).
     ///
-    /// The head layer is built lazily at the first reconciling commit, never at
-    /// open (`commit.rs:849-851`). Treating the empty placeholder as a miss
-    /// keeps pre-commit reads on the rebuild fallback, which yields the same
-    /// (empty) delta — so this can only cost speed, never correctness.
+    /// Non-empty projects materialize the head layer at open after identity
+    /// reconciliation. Treating the empty placeholder as a miss keeps empty
+    /// projects on the rebuild fallback, which yields the same (empty) delta —
+    /// so this can only cost speed, never correctness.
     ///
     /// Callers that pin a NON-head revision must not use this: the head layer is
     /// valid only for the head revision (`methods.rs:607-613`).
@@ -298,10 +298,12 @@ devenv shell -- bash -c 'cd "$DEVENV_ROOT" && PYTHONPATH=src python \
   .scratch/projects/31-semantic-state/probe_read_clone.py . repo-root'
 ```
 
-Expected: every figure within run-to-run noise of INVESTIGATION §6.3 / §14.2 —
-carried-layer `full_code_delta` ≈ 0.15–0.18 s, fallback ≈ 4.1–4.4 s, same-revision
-snapshots ≈ 2 MiB each. A movement outside noise means a step changed behaviour;
-bisect the three lanes.
+Expected for the original three Project 31 lanes: every figure within run-to-run
+noise of INVESTIGATION §6.3 / §14.2 — carried-layer `full_code_delta` ≈ 0.15–0.18
+s, fallback ≈ 4.1–4.4 s, same-revision snapshots ≈ 2 MiB each. The later eager
+open follow-up supersedes the pre-commit head fallback; its measurements are in
+INVESTIGATION §14.5. A movement outside the applicable band means a step
+changed behaviour; bisect the relevant lane.
 
 Read `probe_memory.py`'s confound note (INVESTIGATION §14.2) before quoting its
 per-revision figure: it is an upper bound, not an isolated layer measurement.
@@ -312,13 +314,11 @@ per-revision figure: it is an upper bound, not an isolated layer measurement.
 
 # After this project
 
-Nothing in this area is queued. The two sized-but-unscheduled follow-ups are in
-INVESTIGATION §15.2:
+The long-lived-session follow-up has been implemented in the
+`31-eager-open-layer` lane: `open()` materializes the initial code layer after
+identity reconciliation, so repeated read-only graph calls use the carried
+layer. The full startup/read tradeoff is recorded in INVESTIGATION §14.5.
 
-1. **Read-only sessions never get project 30's win.** Measured 4.40 s per
-   `full_code_delta`, unbounded repetition, for any session that never commits.
-   Blocked on an explicit decision about architectural constraint 13 ("no read
-   operation gains a write side effect"). The largest remaining performance
-   defect here.
-2. **Per-revision layer retention for time travel.** Costs ~12.83 MiB/revision
-   and needs a retention bound. Only worth it if time travel becomes hot.
+The remaining sized follow-up is per-revision layer retention for time travel.
+It costs ~12.83 MiB/revision and needs a retention bound; only pursue it if time
+travel becomes a hot workload.

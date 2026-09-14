@@ -85,6 +85,10 @@ impl PyTyProject {
         // deferred-publish commit path).
         let open_rev = head.store.revision();
         run_identity_reconciliation(&mut head, None, open_rev);
+        // Materialize the initial layer now that its reconciled registry is
+        // complete. Long-lived read-only sessions then take the carried-layer
+        // path instead of rebuilding the full graph on every read.
+        materialize_initial_code_layer(&mut head);
         // Persist the reconciled registry at open so a reopen restores bindings
         // (§5.10). Previously done inside reconciliation; Phase 5 makes identity
         // persistence an explicit, propagated step.

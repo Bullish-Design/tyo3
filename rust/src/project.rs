@@ -93,14 +93,15 @@ pub(crate) struct TyProjectState {
     pub(crate) authored: Option<AuthoredStore>,
     /// The committed code layer for this state's revision, when one exists.
     ///
-    /// `None` is used by read clones taken before the first reconciling commit
-    /// (the empty placeholder from `open.rs:168`), time-travel snapshots that
-    /// cannot use the head layer (`methods.rs:607-615`), the pre-reconcile
-    /// extraction state (`commit.rs:356-365`), `build_frozen` (`open.rs:243`),
-    /// and test constructors. A miss triggers a stateless full rebuild: both
-    /// consumers discard the rebuilt layer, so this costs speed on every call,
-    /// never correctness. This is not Project 29 DESIGN §5's "lazily produced
-    /// layer" or a lazy cache.
+    /// The normal non-empty head carries its initial layer from `open()` after
+    /// identity reconciliation. `None` remains legitimate for empty-project
+    /// heads (the empty placeholder is treated as a miss), time-travel
+    /// snapshots that cannot use the head layer (`methods.rs:607-615`), the
+    /// pre-reconcile extraction state (`commit.rs:356-365`), `build_frozen`
+    /// (`open.rs:build_frozen`), and test constructors. A miss triggers a stateless full
+    /// rebuild: both consumers discard the rebuilt layer, so this costs speed
+    /// on every call, never correctness. This is not Project 29 DESIGN §5's
+    /// "lazily produced layer" or a lazy cache.
     pub(crate) code_layer: Option<Arc<crate::code_layer::CodeLayer>>,
 }
 
@@ -145,7 +146,8 @@ pub(crate) struct HeadState {
     /// including synthetic `<module>` nodes and external stubs. It is never
     /// persisted and is discarded by `reload()` (`methods.rs:141` →
     /// `open.rs:168`); unlike the registry, it is not a last-known record. It
-    /// is produced from the reconciled registry, so `commit.rs:905` must precede
+    /// is materialized at open after identity reconciliation and then produced
+    /// in-commit from the reconciled registry, so `commit.rs:905` must precede
     /// `:916`. Maintained in-commit by the scoped producer
     /// (`produce_layer` → `CodeLayer::diff_from`), its `reverse_deps` feeds the
     /// transitive, container-granular affected closure at the source.
@@ -198,9 +200,8 @@ impl ReadCloneSource for HeadState {
             hash_policies: self.hash_policies.clone(),
             default_hash_profile: self.default_hash_profile.clone(),
             authored: None,
-            // The head starts with an empty layer and builds its first real
-            // layer on the first commit. Treat that empty value as a cache miss
-            // so pre-commit reads retain the rebuild fallback.
+            // Empty projects retain the empty placeholder; treat it as a cache
+            // miss. Non-empty heads were materialized during open.
             code_layer: self.servable_code_layer(),
         }
     }
@@ -210,10 +211,10 @@ impl HeadState {
     /// The head's code layer when it is real, `None` while it is still the
     /// empty placeholder installed by `build_head_with_config` (`open.rs:168`).
     ///
-    /// The head layer is built at the first reconciling commit, never at open
-    /// (`commit.rs:849-851`). Treating the empty placeholder as a miss keeps
-    /// pre-commit reads on the rebuild fallback, which yields the same (empty)
-    /// delta — so this can only cost speed, never correctness.
+    /// Non-empty projects materialize their initial layer during `open()`
+    /// after identity reconciliation. Treating an empty placeholder as a miss
+    /// keeps genuinely empty projects on the same empty fallback result, so
+    /// this remains a speed discriminator rather than a correctness condition.
     ///
     /// Callers that pin a non-head revision must not use this: the head layer
     /// is valid only for the head revision (`methods.rs:607-615`).
@@ -334,6 +335,7 @@ pub(crate) use snapshot::*;
 #[cfg(test)]
 mod semantic_state_tests {
     use super::*;
+    use std::io::Write;
 
     fn empty_head() -> (tempfile::TempDir, HeadState) {
         let dir = tempfile::tempdir().unwrap();
@@ -374,6 +376,25 @@ mod semantic_state_tests {
 
         let servable = head.servable_code_layer().expect("non-empty layer is servable");
         assert!(Arc::ptr_eq(&servable, &head.code_layer));
+    }
+
+    #[test]
+    fn initial_code_layer_is_materialized_after_reconciliation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut file = std::fs::File::create(dir.path().join("a.py")).unwrap();
+        file.write_all(b"value = 42\n").unwrap();
+        let root = SystemPathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
+
+        let mut store = ContentStore::new();
+        store.ingest_project(&root, is_project_relevant);
+        let mut head = build_head(root, store, IdentityRegistry::default());
+        let revision = head.store.revision();
+        run_identity_reconciliation(&mut head, None, revision);
+
+        materialize_initial_code_layer(&mut head);
+
+        assert!(!head.code_layer.is_empty());
+        assert!(head.servable_code_layer().is_some());
     }
 }
 

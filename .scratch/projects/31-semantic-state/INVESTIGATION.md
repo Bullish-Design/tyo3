@@ -771,6 +771,38 @@ dependency through the `snapshot.rs` glob re-export. `IMPLEMENTATION.md` and
 the current-summary portions of this document have been updated accordingly;
 historical pre-implementation anchors remain labelled by context.
 
+### 14.5 After eager initial layer materialization (2026-09-14)
+
+The follow-up decision for long-lived read-only sessions was implemented in the
+`31-eager-open-layer` lane. `open()` now runs the existing full code-layer
+producer immediately after open-time identity reconciliation and stores the
+result on `HeadState`. The open-time delta is discarded because there is no
+commit consumer; subsequent head and same-revision snapshot reads use the
+carried layer. Empty projects still retain the empty placeholder and use the
+stateless fallback, which remains benign.
+
+Three repository-scale startup probes reported:
+
+| Run | `open()` | first `full_code_delta` | repeated `full_code_delta` |
+|---|---:|---:|---:|
+| 1 | 4.681 s | 0.171 s | 0.174 s |
+| 2 | 4.698 s | 0.193 s | 0.176 s |
+| 3 | 4.693 s | 0.190 s | 0.173 s |
+
+Thus the old roughly 4.4 s first-read penalty moved into the roughly 4.69 s
+open path, while repeated reads are now roughly 0.17–0.19 s. The existing
+timing probe also reported pre-commit head reads at **0.147–0.196 s** across
+three runs; time-travel remained the intentional fallback at **4.041–4.857 s**.
+The graph-snapshot regression stayed green, so this is a cost-placement change,
+not a graph-content change.
+
+A focused RSS probe measured **276.3 MiB** immediately after open and **293.3
+MiB** after eight same-revision snapshots (**+17.0 MiB**, **2.12 MiB/snapshot**).
+This is consistent with the existing shared-`Arc` snapshot behavior. It is not
+an isolated layer-size measurement; Project 30's counting-allocator result of
+**12.83 MiB** for one layer remains the correct layer-memory reference. The
+distinct-revision RSS result remains the commit-confounded upper bound in §14.4.
+
 ## 15. Risks and follow-up work
 
 ### 15.1 Risks of the recommended design
@@ -783,13 +815,11 @@ historical pre-implementation anchors remain labelled by context.
 
 ### 15.2 Follow-ups, sized but not scheduled
 
-1. **Read-only sessions never get project 30's win** (§6.4). Measured at
-   **4.40 s per `full_code_delta` call, unbounded repetition**, for any session
-   that never commits — including a watch-only daemon. Fixing it needs either
-   layer production at `open()` (rejected at `commit.rs:849-851`) or a read-path
-   memo, which architectural constraint 13 forbids. **This is the largest
-   remaining performance defect in this area and needs an explicit decision on
-   constraint 13 before it can be worked.** Size as its own project.
+1. **Read-only sessions never get project 30's win** (§6.4) — resolved by the
+   eager-open follow-up in §14.5. The full layer build is now paid once during
+   `open()` and repeated reads use the carried layer. The open-time cost is
+   intentionally about 4.69 s at repository scale; no read operation gained a
+   write side effect, so architectural constraint 13 remains intact.
 2. **Time-travel snapshots have no layer.** Retaining layers per revision costs a
    measured **13.42 MiB/revision** (§14.2) and would need a retention bound —
    the risk project 30 DESIGN §4.1 recorded. Only worth it if time travel becomes
@@ -816,10 +846,9 @@ historical pre-implementation anchors remain labelled by context.
    recording the decision, so the question is not reopened from project 29 §5 a
    third time.
 2. **Is architectural constraint 13 ("no read operation gains a write side
-   effect") negotiable for the pre-first-commit head layer?** A one-line memo
-   under the existing head lock would remove a measured 4.40 s per call from
-   read-only sessions. This is the only question in this investigation whose
-   answer is not determined by the code.
+   effect") negotiable for the pre-first-commit head layer?** Resolved for the
+   initial layer: materialization is part of `open()` initialization, not a
+   read-side write. The constraint still governs future read-path memoization.
 3. **Should `Baseline`'s triple `{ registry, authored, code_layer }` be named?**
    If the desire to name the publication boundary persists after this report, the
    honest object is `Baseline`, which already exists (`commit.rs:524-532`).
@@ -831,8 +860,8 @@ historical pre-implementation anchors remain labelled by context.
 
 ## 17. Decision and implementation outcome
 
-**DOCUMENT ONLY with the two approved deduplications implemented.** No
-`SemanticState` type was introduced.
+**IMPLEMENTED with the two approved deduplications and the eager-open follow-up.**
+No `SemanticState` type was introduced.
 
 - **Do not implement a `SemanticState` type.** Designs B, C and D are rejected on
   evidence (§8): the invariant is false inside the commit window, the grouping
@@ -843,11 +872,15 @@ historical pre-implementation anchors remain labelled by context.
   registry/layer asymmetry; `full_code_delta_for` is shared from
   `project.rs:291`; and `HeadState::servable_code_layer` is shared from
   `project.rs:220-221`. No new types, no `Option` changes, no wire change, and
-  no measurable performance or memory movement.
+  no measurable performance or memory movement within the refactor itself.
+- The long-lived-session follow-up is implemented in §14.5: the initial code
+  layer is materialized after open-time reconciliation, moving the first-read
+  rebuild cost into startup while preserving the carried-layer fast path.
 - The deliberate `is_head` guard remains visible at `methods.rs:613`, and the
   post-implementation graph, parity, test, timing, and memory evidence is
-  recorded in §14.4.
+  recorded in §14.4 and §14.5.
 - **Project 29 §5 is superseded.** Its "read clone / snapshot owns identities plus
-  a *lazily produced* layer" is not what the code does: the layer is eagerly
-  carried, and the fallback is a stateless recompute that memoises nothing
-  (§6.2). Do not quote it as current.
+  a *lazily produced* layer" is not what the code does: the initial layer is
+  eagerly materialized at open, later layers are carried through commits, and
+  the fallback is a stateless recompute that memoises nothing (§6.2). Do not
+  quote it as current.

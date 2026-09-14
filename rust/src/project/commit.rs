@@ -846,9 +846,8 @@ pub(crate) fn native_to_graph(root: &SystemPathBuf, native: &str) -> Option<Stri
 /// - `rescan` (or an unscoped write) → a full build diffed against an empty
 ///   layer, i.e. a full `rescan`-flagged delta the Python applier applies
 ///   wholesale.
-/// - an empty `prev` (first write of a session — the head layer is built lazily,
-///   never at open, to keep `open()` off the producer's cost path) → a one-time
-///   full build, likewise emitted as a full delta.
+/// - an empty `prev` (an empty project, an unmaterialized test state, or a
+///   legacy/recovery path) → a full build, likewise emitted as a full delta.
 /// - otherwise → the scoped producer over the dirty graph paths (the identity
 ///   scope = changed ∪ created ∪ deleted), expanding one-hop importers and
 ///   maintaining `reverse_deps` edge-by-edge.
