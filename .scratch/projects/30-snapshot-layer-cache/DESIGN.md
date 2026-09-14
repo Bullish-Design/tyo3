@@ -46,6 +46,39 @@ full_code_delta (cold)  1.519s
 The 0.519s repeat is the floor a warm Salsa gives you. It is not the fix — the
 Builder still walks every file.
 
+### 1.4 After (2026-09-14)
+
+The same repository-root session was measured after the carried-layer path was
+landed. At this run the native delta contained 167 files, 3,393 nodes, and
+36,268 edges. The first-snapshot decomposition was:
+
+```
+full_code_delta   (Rust CodeLayer::diff_from)   0.141s   13%
+apply_code_delta  (Python, wholesale replace)  0.473s   44%
+refresh_diagnostics (ty check)                 0.454s   43%
+                                          total  1.069s
+```
+
+The direct first `snapshot.graph()` measurement was 1.388s, with the second
+call on that snapshot at 0.0000s. The component timings vary with process
+warmth, but the redundant full builder is gone: `full_code_delta` is now the
+cost of `CodeLayer::diff_from` rather than a full rebuild.
+
+Four successive edits, each followed by a new snapshot, reproduced the same
+shape:
+
+| Edit | commit | first `snap.graph()` | memoized `snap.graph()` |
+|---|---:|---:|---:|
+| 1 | 8.465s | 1.063s | 0.0000s |
+| 2 | 8.065s | 1.157s | 0.0000s |
+| 3 | 8.155s | 1.088s | 0.0000s |
+| 4 | 7.994s | 1.216s | 0.0000s |
+
+The commit timings are dominated by this repository-root fixture's existing
+analysis work; the snapshot graph timings show the per-revision improvement.
+Step 0's retained-layer measurement remains 13,458,799 bytes / 12.83 MiB at
+repository scale, with the pinned frozen state at 1,079,359 bytes / 1.03 MiB.
+
 ---
 
 ## 2. The mechanism
