@@ -527,7 +527,7 @@ pub(crate) struct Baseline {
     /// The code layer before the in-commit producer ran. A failed commit must
     /// restore it so a torn (half-re-derived) layer is never observable (§6.1 /
     /// rollback test 3).
-    code_layer: crate::code_layer::CodeLayer,
+    code_layer: Arc<crate::code_layer::CodeLayer>,
 }
 
 /// TEST-ONLY: fire the armed one-shot fault if it names `stage`. The arm is
@@ -910,9 +910,9 @@ pub(crate) fn run_staged(
         // commit delta (Project 31, #2): graph consumers build on demand from
         // `full_code_delta()`, so the producer's diff is dropped here. Runs inside
         // the lock, before the deferred publish; rolled back via the Baseline.
-        let prev = std::mem::take(&mut head.code_layer);
+        let prev = Arc::clone(&head.code_layer);
         let state = head.read_clone();
-        let (next, _code_delta) = produce_layer(&state, &prev, &staged, next_rev);
+        let (next, _code_delta) = produce_layer(&state, prev.as_ref(), &staged, next_rev);
 
         // affected_ids = transitive, container-granular closure of changed ∪
         // deleted over the freshly-maintained reverse_deps, seeding deletions
@@ -945,7 +945,7 @@ pub(crate) fn run_staged(
             .collect();
         identity.affected_files = affected_files.into_iter().collect();
 
-        head.code_layer = next;
+        head.code_layer = Arc::new(next);
 
         // Code-layer staging boundary fault seam: a producer/code-layer failure
         // must publish no partial revision (rollback test 3).

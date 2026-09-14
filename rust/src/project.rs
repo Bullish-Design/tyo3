@@ -132,7 +132,7 @@ pub(crate) struct HeadState {
     /// the commit re-derives the dirty scope over the prior layer and the commit
     /// reads its `reverse_deps` to compute the transitive, container-granular
     /// affected closure at the source (never-miss).
-    pub(crate) code_layer: crate::code_layer::CodeLayer,
+    pub(crate) code_layer: Arc<crate::code_layer::CodeLayer>,
     /// Paths carrying a genuinely *unsaved* overlay edit (from `edit` /
     /// `edit_virtual`), as opposed to content ingested from disk at open or via
     /// `sync_path`. The watcher's buffer-wins rule (a disk event is dropped when

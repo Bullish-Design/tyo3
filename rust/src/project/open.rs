@@ -165,7 +165,7 @@ pub(crate) fn build_head_with_config(
         default_hash_profile,
         config,
         authored: AuthoredStore::default(),
-        code_layer: crate::code_layer::CodeLayer::new(),
+        code_layer: Arc::new(crate::code_layer::CodeLayer::new()),
         unsaved_overlays: HashSet::new(),
         armed_fault: None,
     }
