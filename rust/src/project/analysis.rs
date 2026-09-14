@@ -114,20 +114,23 @@ pub(crate) fn compute_document_symbols(
     } else {
         Some(state.default_hash_profile.as_str())
     };
+    let ctx = convert::symbols::SymbolWalkCtx {
+        hierarchical: &hierarchical,
+        source: &source_str,
+        stmt_index: &stmt_index,
+        line_index: &line_index,
+        file_path: &file_path,
+        registry: &state.registry,
+        hash_policies: policies_ref,
+        default_profile_name: default_profile,
+    };
     for (id, info) in hierarchical.iter() {
         convert::symbols::collect_symbols_recursive(
-            &hierarchical,
+            &ctx,
             id,
             &info,
-            &source_str,
-            &stmt_index,
-            &line_index,
-            &file_path,
             None,
             None,
-            &state.registry,
-            policies_ref,
-            default_profile,
             &mut symbols,
         );
     }

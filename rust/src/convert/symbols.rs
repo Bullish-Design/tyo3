@@ -67,52 +67,66 @@ pub fn convert_symbol(
 }
 
 /// Recursively collect document symbols from a hierarchical symbol tree.
-// Threads a fixed analysis context (source/index/registry/hash policies) plus
-// the current tree node through the recursion; folding the context into a struct
-// is a tracked follow-up (see PROGRESS §9.14).
-#[allow(clippy::too_many_arguments)]
+///
+/// `SymbolWalkCtx` holds the immutable analysis inputs shared by every node in
+/// the walk; the remaining arguments are the current cursor and accumulator.
+pub(crate) struct SymbolWalkCtx<'a> {
+    pub(crate) hierarchical: &'a ty_ide::HierarchicalSymbols,
+    pub(crate) source: &'a str,
+    pub(crate) stmt_index:
+        &'a std::collections::HashMap<ruff_text_size::TextRange, &'a ruff_python_ast::Stmt>,
+    pub(crate) line_index: &'a ruff_source_file::LineIndex,
+    pub(crate) file_path: &'a str,
+    pub(crate) registry: &'a IdentityRegistry,
+    pub(crate) hash_policies:
+        Option<&'a std::collections::HashMap<String, crate::hash::HashPolicy>>,
+    pub(crate) default_profile_name: Option<&'a str>,
+}
+
 pub fn collect_symbols_recursive(
-    hierarchical: &ty_ide::HierarchicalSymbols,
+    ctx: &SymbolWalkCtx<'_>,
     id: ty_ide::SymbolId,
     info: &ty_ide::SymbolInfo,
-    source: &str,
-    stmt_index: &std::collections::HashMap<ruff_text_size::TextRange, &ruff_python_ast::Stmt>,
-    line_index: &ruff_source_file::LineIndex,
-    file_path: &str,
     parent_name: Option<&str>,
     parent_identity_path: Option<&str>,
-    registry: &IdentityRegistry,
-    hash_policies: Option<&std::collections::HashMap<String, crate::hash::HashPolicy>>,
-    default_profile_name: Option<&str>,
     symbols: &mut Vec<dto::SymbolDto>,
 ) {
     let qualified = parent_name.map(|p| format!("{}.{}", p, info.name));
     let identity_path = match parent_identity_path {
         Some(p) => format!("{}::{}", p, info.name),
-        None => format!("{}::{}", file_path, info.name),
+        None => format!("{}::{}", ctx.file_path, info.name),
     };
-    let anchor = registry.by_path(&identity_path).and_then(|id| registry.get(id));
+    let anchor = ctx
+        .registry
+        .by_path(&identity_path)
+        .and_then(|id| ctx.registry.get(id));
 
     // Compute per-profile content hashes from a canonical rendering of the
     // entity's AST subtree (looked up in `stmt_index` by `full_range`).
     let mut content_hashes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let default_hash = if let Some(policies) = hash_policies {
+    let default_hash = if let Some(policies) = ctx.hash_policies {
         for (profile_name, policy) in policies {
-            let nf = crate::hash::entity_normal_form(stmt_index, info.full_range, source, policy);
+            let nf = crate::hash::entity_normal_form(
+                ctx.stmt_index,
+                info.full_range,
+                ctx.source,
+                policy,
+            );
             let h = crate::hash::hash_entity(&nf);
             content_hashes.insert(profile_name.clone(), h.0.to_string());
         }
         // The default content_hash is the one under the default profile.
-        default_profile_name.and_then(|pn| content_hashes.get(pn).cloned())
+        ctx.default_profile_name
+            .and_then(|pn| content_hashes.get(pn).cloned())
     } else {
         // No per-profile hashes configured: use the identity anchor hash.
         anchor.map(|a| a.content_hash.0.to_string())
     };
 
     let sym = convert_symbol(
-        source,
-        line_index,
-        file_path,
+        ctx.source,
+        ctx.line_index,
+        ctx.file_path,
         &info.name,
         &info.kind,
         info.deprecated,
@@ -131,20 +145,13 @@ pub fn collect_symbols_recursive(
         None => &info.name,
     };
 
-    for (child_id, child_info) in hierarchical.children(id) {
+    for (child_id, child_info) in ctx.hierarchical.children(id) {
         collect_symbols_recursive(
-            hierarchical,
+            ctx,
             child_id,
             &child_info,
-            source,
-            stmt_index,
-            line_index,
-            file_path,
             Some(own_name),
             Some(&identity_path),
-            registry,
-            hash_policies,
-            default_profile_name,
             symbols,
         );
     }
