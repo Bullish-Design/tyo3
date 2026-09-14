@@ -266,6 +266,24 @@ impl CodeLayer {
         removed
     }
 
+    /// Derive the reverse-dependency index from the canonical dependency edges.
+    ///
+    /// `reverse_deps` remains a maintained read index for fast closure walks,
+    /// but this function is the authoritative definition used by debug
+    /// assertions and multi-generation tests.
+    pub fn derived_reverse_deps(&self) -> BTreeMap<String, BTreeSet<String>> {
+        let mut derived = BTreeMap::new();
+        for edge in &self.edges {
+            if edge.kind.is_dependency() {
+                derived
+                    .entry(edge.target.clone())
+                    .or_insert_with(BTreeSet::new)
+                    .insert(edge.source.clone());
+            }
+        }
+        derived
+    }
+
     /// Transitive closure of `seeds` under inbound (who-depends-on-me) edges:
     /// the seeds plus every id that reference/import/inherit-depends on them,
     /// transitively. The result always contains the seeds themselves.
@@ -483,6 +501,12 @@ pub fn produce_code_delta(
     let mut builder = Builder::new(state);
     builder.build();
     let next = builder.layer;
+    #[cfg(debug_assertions)]
+    debug_assert_eq!(
+        next.reverse_deps,
+        next.derived_reverse_deps(),
+        "maintained reverse_deps diverged from canonical dependency edges"
+    );
     let delta = next.diff_from(prev, revision, rescan || prev.is_empty());
     (next, delta)
 }
@@ -513,6 +537,12 @@ pub fn produce_code_delta_scoped(
     let mut builder = Builder::seeded(state, prev);
     builder.build_scoped(seed_dirty);
     let next = builder.layer;
+    #[cfg(debug_assertions)]
+    debug_assert_eq!(
+        next.reverse_deps,
+        next.derived_reverse_deps(),
+        "maintained reverse_deps diverged from canonical dependency edges"
+    );
     let delta = next.diff_from(prev, revision, false);
     (next, delta)
 }
@@ -1457,6 +1487,30 @@ mod tests {
     /// Build a `TyProjectState` over a temp dir with the given files and a
     /// populated identity registry (so the producer can attach durable ids).
     fn reconciled_state(files: &[(&str, &str)]) -> (tempfile::TempDir, TyProjectState) {
+        reconciled_state_at(files, None, 1)
+    }
+
+    /// Build a state over a new filesystem generation while carrying forward
+    /// the prior identity registry. This mirrors the commit sequence closely
+    /// enough to exercise scoped layer maintenance across edits and deletion.
+    fn reconciled_state_at(
+        files: &[(&str, &str)],
+        prior: Option<crate::identity::IdentityRegistry>,
+        revision: u64,
+    ) -> (tempfile::TempDir, TyProjectState) {
+        let dir = tempfile::tempdir().unwrap();
+        let state = reconciled_state_at_in(dir.path(), files, prior, revision);
+        (dir, state)
+    }
+
+    /// Rebuild a state over a fixed root so successive generations retain the
+    /// same qualified paths and therefore exercise stable identity bindings.
+    fn reconciled_state_at_in(
+        dir: &std::path::Path,
+        files: &[(&str, &str)],
+        prior: Option<crate::identity::IdentityRegistry>,
+        revision: u64,
+    ) -> TyProjectState {
         use ruff_python_ast::name::Name;
         use ty_project::{ProjectDatabase, ProjectMetadata};
 
@@ -1464,12 +1518,17 @@ mod tests {
         use crate::hash::HashPolicy;
         use crate::overlay::OverlaySystem;
 
-        let dir = tempfile::tempdir().unwrap();
-        let mut toml = std::fs::File::create(dir.path().join("pyproject.toml")).unwrap();
+        let mut toml = std::fs::File::create(dir.join("pyproject.toml")).unwrap();
         toml.write_all(b"[project]\nname = \"test\"\nversion = \"0.1.0\"\n")
             .unwrap();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|ext| ext == "py") {
+                std::fs::remove_file(path).unwrap();
+            }
+        }
         for (rel, content) in files {
-            let path = dir.path().join(rel);
+            let path = dir.join(rel);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).unwrap();
             }
@@ -1480,7 +1539,7 @@ mod tests {
         }
 
         let root = ruff_db::system::SystemPathBuf::from_path_buf(
-            dir.path().canonicalize().unwrap().to_path_buf(),
+            dir.canonicalize().unwrap().to_path_buf(),
         )
         .unwrap();
         let system = OverlaySystem::live(root.clone(), ContentStore::new().capture());
@@ -1491,7 +1550,7 @@ mod tests {
         let mut state = TyProjectState {
             db,
             root,
-            registry: crate::identity::IdentityRegistry::default(),
+            registry: prior.unwrap_or_default(),
             hash_policy: HashPolicy::default(),
             hash_policies: std::collections::HashMap::new(),
             default_hash_profile: "structure".to_string(),
@@ -1499,10 +1558,12 @@ mod tests {
         };
         // Reconcile identity so every entity has a durable id.
         let entities = crate::entity::extract_entities(&state);
-        let mut registry = crate::identity::IdentityRegistry::default();
-        crate::identity::reconcile(&mut registry, &entities, crate::content::Revision(1));
-        state.registry = registry;
-        (dir, state)
+        crate::identity::reconcile(
+            &mut state.registry,
+            &entities,
+            crate::content::Revision(revision),
+        );
+        state
     }
 
     fn edges_of_kind(layer: &CodeLayer, kind: EdgeKind) -> Vec<&Edge> {
@@ -1585,5 +1646,107 @@ class User(Base):
         assert!(d2.nodes_moved.is_empty());
         assert!(d2.edges_added.is_empty(), "no edges added: {:?}", d2.edges_added);
         assert!(d2.edges_removed.is_empty());
+    }
+
+    #[test]
+    fn scoped_producer_prunes_parallel_edges_and_deleted_targets() {
+        let gen1_b = "from a import Base\n\nclass User(Base):\n    def save(self):\n        return Base.save(self)\n";
+        let generations = tempfile::tempdir().unwrap();
+        let state1 = reconciled_state_at_in(
+            generations.path(),
+            &[("a.py", "class Base:\n    def save(self):\n        return 1\n"), ("b.py", gen1_b)],
+            None,
+            1,
+        );
+        let empty = CodeLayer::new();
+        let (layer1, _delta1) = produce_code_delta(&state1, &empty, 1, true, None);
+        assert_eq!(layer1.reverse_deps, layer1.derived_reverse_deps());
+
+        let state2 = reconciled_state_at_in(
+            generations.path(),
+            &[("a.py", "class Base:\n    def save(self):\n        return 1\n"), ("b.py", "from a import Base\n\nclass User(Base):\n    def save(self):\n        return Base.save(self) + 1\n")],
+            Some(state1.registry.clone()),
+            2,
+        );
+        let (layer2, _delta2) = produce_code_delta_scoped(
+            &state2,
+            &layer1,
+            &HashSet::from([String::from("b.py")]),
+            2,
+        );
+        assert_eq!(layer2.reverse_deps, layer2.derived_reverse_deps());
+
+        let base_id = layer2
+            .nodes
+            .iter()
+            .find(|(_, node)| node.name == "Base")
+            .map(|(id, _)| id.clone())
+            .expect("Base node");
+        let user_id = layer2
+            .nodes
+            .iter()
+            .find(|(_, node)| node.name == "User")
+            .map(|(id, _)| id.clone())
+            .expect("User node");
+        let gen2_sources = layer2
+            .reverse_deps
+            .get(&base_id)
+            .expect("Base reverse-dependency entry");
+        assert!(gen2_sources.contains(&user_id));
+        assert_eq!(
+            gen2_sources.len(),
+            2,
+            "inheritance and reference edges both depend on Base"
+        );
+
+        let state3 = reconciled_state_at_in(
+            generations.path(),
+            &[("a.py", "class Base:\n    def save(self):\n        return 1\n"), ("b.py", "from a import Base\n\nclass User(Base):\n    def save(self):\n        return 1\n")],
+            Some(state2.registry.clone()),
+            3,
+        );
+        let (layer3, _delta3) = produce_code_delta_scoped(
+            &state3,
+            &layer2,
+            &HashSet::from([String::from("b.py")]),
+            3,
+        );
+        assert_eq!(layer3.reverse_deps, layer3.derived_reverse_deps());
+        assert_eq!(
+            layer3.reverse_deps.get(&base_id),
+            Some(&BTreeSet::from([user_id.clone()])),
+            "removing one parallel dependency edge keeps the other"
+        );
+
+        let state4 = reconciled_state_at_in(
+            generations.path(),
+            &[("a.py", "class Base:\n    def save(self):\n        return 1\n"), ("b.py", "class User:\n    def save(self):\n        return 1\n")],
+            Some(state3.registry.clone()),
+            4,
+        );
+        let (layer4, _delta4) = produce_code_delta_scoped(
+            &state4,
+            &layer3,
+            &HashSet::from([String::from("b.py")]),
+            4,
+        );
+        assert_eq!(layer4.reverse_deps, layer4.derived_reverse_deps());
+        assert!(!layer4.reverse_deps.contains_key(&base_id));
+
+        let state5 = reconciled_state_at_in(
+            generations.path(),
+            &[("b.py", "class User:\n    def save(self):\n        return 1\n")],
+            Some(state4.registry.clone()),
+            5,
+        );
+        let (layer5, _delta5) = produce_code_delta_scoped(
+            &state5,
+            &layer4,
+            &HashSet::from([String::from("a.py")]),
+            5,
+        );
+        assert_eq!(layer5.reverse_deps, layer5.derived_reverse_deps());
+        assert!(!layer5.nodes.contains_key(&base_id));
+        assert!(!layer5.reverse_deps.contains_key(&base_id));
     }
 }

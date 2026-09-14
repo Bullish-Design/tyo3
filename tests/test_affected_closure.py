@@ -30,6 +30,30 @@ def _affected_names(session: TyO3Session, ids) -> set[str]:
     return {by_id[i] for i in ids if i in by_id}
 
 
+def _full_delta_dependency_closure(session: TyO3Session, seeds, deleted) -> set[str]:
+    """Recompute the dependency closure from the public full code delta.
+
+    Deleted ids are intentionally omitted: they are absent from the current
+    full delta and the commit's closure handles their prior-layer edges.
+    """
+    full = session._inner.full_code_delta()
+    node_ids = {node["durable_id"] for node in full["nodes_upserted"]}
+    reverse: dict[str, set[str]] = {}
+    for edge in full["edges_added"]:
+        if edge["kind"] in {"references", "imports", "inherits", "overrides"}:
+            reverse.setdefault(edge["destination_id"], set()).add(edge["source_id"])
+
+    closure: set[str] = set()
+    queue = [seed for seed in set(seeds) - set(deleted) if seed in node_ids]
+    while queue:
+        current = queue.pop()
+        if current in closure:
+            continue
+        closure.add(current)
+        queue.extend(source for source in reverse.get(current, ()) if source in node_ids)
+    return closure
+
+
 def test_member_body_edit_reaches_named_consumers(tmp_path: StdPath) -> None:
     """Editing only ``Widget.draw``'s body reports ``Widget``, ``make_widget``
     and ``render`` — container-granular coverage via the class hash + the named
@@ -176,4 +200,49 @@ def test_deleted_base_reports_dependents_from_prior_layer(tmp_path: StdPath) -> 
         assert derived_id in set(delta.affected_ids), (
             "deleting Base must still report its dependent Derived (seeded from "
             f"the prior layer's reverse-deps); affected={list(delta.affected_ids)}"
+        )
+
+
+def test_commit_affected_ids_cover_full_delta_dependency_closure(tmp_path: StdPath) -> None:
+    """The commit funnel's affected ids cover the closure of current edges.
+
+    This independently recomputes the expected closure from ``full_code_delta``
+    after the commit, while excluding deleted seeds that only exist in the
+    prior layer.
+    """
+    (tmp_path / "base.py").write_text(
+        textwrap.dedent("""\
+            class Base:
+                def greet(self):
+                    return "hi"
+        """)
+    )
+    (tmp_path / "derived.py").write_text(
+        textwrap.dedent("""\
+            from base import Base
+
+            class Derived(Base):
+                pass
+        """)
+    )
+    with TyO3Session(str(tmp_path)) as s:
+        _ = s.graph
+        delta = s.edit(
+            "base.py",
+            textwrap.dedent("""\
+                class Base:
+                    def greet(self):
+                        return "hello"
+            """),
+        )
+
+        expected = _full_delta_dependency_closure(
+            s,
+            set(delta.changed_ids) | set(delta.created_ids),
+            delta.deleted_ids,
+        )
+        assert expected <= set(delta.affected_ids), (
+            "commit affected_ids must cover the dependency closure recomputed "
+            f"from full_code_delta: expected={sorted(expected)}, "
+            f"actual={sorted(delta.affected_ids)}"
         )
