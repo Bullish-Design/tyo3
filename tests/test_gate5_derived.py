@@ -761,7 +761,7 @@ def test_gc_evicts_orphans_and_preserves_active_and_prior_versions():
     cache.put(CacheKey("h1", "v2"), b"a1_v2")  # prior version (uncollected)
 
     # h1 and h2 are reachable in current v1; h3 is orphan. v2 is not collected.
-    cache.gc({"h1:v1", "h2:v1"})
+    assert cache.gc({"h1:v1", "h2:v1"}) == 1
 
     assert cache.get(CacheKey("h1", "v1")) == b"a1"  # reachable → retained
     assert cache.get(CacheKey("h2", "v1")) == b"a2"  # reachable → retained
@@ -770,7 +770,7 @@ def test_gc_evicts_orphans_and_preserves_active_and_prior_versions():
 
     # Empty reachable set deletes nothing (collects no versions — safe).
     cache.put(CacheKey("h3", "v1"), b"a3")
-    cache.gc(set())
+    assert cache.gc(set()) == 0
     assert cache.get(CacheKey("h3", "v1")) == b"a3"
 
     shutil.rmtree(d, ignore_errors=True)
@@ -801,6 +801,28 @@ def test_fs_store_iter_keys_round_trips():
         assert store.get(k) == k.encode()
 
     shutil.rmtree(d, ignore_errors=True)
+
+
+def test_fs_store_prune_removes_only_reachable_version_orphans(tmp_path):
+    """FsStore pruning removes stale files and empty shards without touching
+    another generator version or an in-flight temporary write."""
+    from tyo3.stores.fs import FsStore
+
+    store = FsStore(tmp_path / "cache")
+    store.put("aa11:v1", b"active")
+    store.put("bb22:v1", b"orphan")
+    store.put("bb22:v2", b"rollback")
+    store.put("cc33:v1", b"orphan in its own shard")
+    tmp_path_for_orphan = store._path("bb22:v1").with_suffix(".tmp")
+    tmp_path_for_orphan.write_bytes(b"in-flight")
+
+    assert store.prune({"aa11:v1"}) == 2
+    assert store.get("aa11:v1") == b"active"
+    assert store.get("bb22:v1") is None
+    assert store.get("bb22:v2") == b"rollback"
+    assert store.get("cc33:v1") is None
+    assert not store._path("cc33:v1").parent.exists()
+    assert tmp_path_for_orphan.exists()
 
 
 def test_session_gc_deletes_orphan_artifact(tmp_path):
@@ -857,3 +879,70 @@ gc = "orphans"
 
         assert not layer.cache.has(orphan)  # unreachable → evicted
         assert session.derived("upper", foo_id).artifact is not None  # reachable → kept
+
+
+def test_session_gc_retains_artifact_for_retained_snapshot(tmp_path):
+    """GC preserves artifacts still addressable from the retained MVCC window."""
+    from tyo3 import TyO3Session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text('[project]\nname = "test"\n')
+    (proj / "a.py").write_text("def foo():\n    return 1\n")
+
+    cfg_dir = proj / ".tyo3"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text("""\
+schema_version = 1
+
+[spine]
+retain_cap = 4
+
+[hashing.profiles.structure]
+
+[layers.upper]
+origin = "derived"
+depends_on = ["code"]
+generator = "echo_gen"
+generator_version = "v1"
+hash_profile = "structure"
+store = "kv"
+serving = "block"
+entity_kinds = ["function"]
+
+[generators.echo_gen]
+type = "python"
+callable = "tests.test_gate5_derived:echo_generator"
+
+[stores.kv]
+backend = "fs"
+path = "cache/upper"
+gc = "orphans"
+""")
+
+    with TyO3Session(str(proj)) as session:
+        foo_id = session.id_for("a.py", 1, 5)
+        assert foo_id
+        old_snapshot = session.snapshot()
+        try:
+            old_artifact = old_snapshot.derived("upper", foo_id).artifact
+            assert old_artifact is not None
+            old_revision = old_snapshot.revision
+            layer = session._get_derivation().layer("upper")
+            old_key = layer.last_good_store_key(foo_id)
+            assert old_key is not None
+        finally:
+            old_snapshot.close()
+
+        session.edit("a.py", "def foo():\n    return 2\n")
+        new_artifact = session.derived("upper", foo_id).artifact
+        assert new_artifact is not None
+        new_key = layer.last_good_store_key(foo_id)
+        assert new_key is not None
+        assert new_key != old_key
+
+        session.gc()
+
+        with session.snapshot(at=old_revision) as retained_snapshot:
+            assert retained_snapshot.derived("upper", foo_id).artifact == old_artifact
+        assert session.derived("upper", foo_id).artifact == new_artifact

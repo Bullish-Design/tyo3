@@ -72,22 +72,17 @@ class ArtifactCache:
     def delete(self, key: CacheKey) -> None:
         self._store.delete(key.to_store_key())
 
-    def gc(self, reachable_keys: set[str]) -> None:
+    def gc(self, reachable_keys: set[str]) -> int:
         """Delete artifacts whose store key is not in *reachable_keys*.
 
         *reachable_keys* are full store keys (``input_hash:generator_version``)
         for the one generator_version being collected; keys for other versions
-        are not passed in and so are retained (rollback support). A store with
-        no ``iter_keys`` (e.g. the vector store) is a no-op. Empty
-        *reachable_keys* deletes nothing (safe).
+        are not passed in and so are retained (rollback support). The backend
+        owns enumeration and deletion through ``Store.prune``. A legacy custom
+        store without ``prune`` remains a safe no-op. Empty *reachable_keys*
+        deletes nothing (safe).
         """
-        iter_keys = getattr(self._store, "iter_keys", None)
-        if iter_keys is None:
-            return
-        versions = {k.split(":", 1)[1] for k in reachable_keys if ":" in k}
-        for key in list(iter_keys()):
-            parts = key.split(":", 1)
-            if len(parts) != 2 or parts[1] not in versions:
-                continue  # malformed or a different generator_version — retained
-            if key not in reachable_keys:
-                self.delete(CacheKey.from_store_key(key))
+        prune = getattr(self._store, "prune", None)
+        if prune is None:
+            return 0
+        return prune(reachable_keys)

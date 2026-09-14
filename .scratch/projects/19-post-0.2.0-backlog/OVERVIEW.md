@@ -12,20 +12,18 @@
 
 | # | Item | Kind | Status |
 |---|------|------|--------|
-| 1 | FsStore garbage collection | bounded gap | **open** (this doc §1) |
+| 1 | FsStore garbage collection | bounded gap | ✅ **done** |
 | 2 | Symbol/entity walk context-struct | cleanup | **planned** → `.scratch/projects/18-symbol-entity-walk-refactor/OVERVIEW.md` |
 | 3 | Optional store backends (qdrant, sqlite-vec) | feature | **open** (this doc §3) |
 | 4 | Watcher-driven cross-file move detection | bounded gap | **open** (this doc §4) |
 | 5 | Stale "deferred to Phase N" doc comments | cleanup | ✅ **done** (commit `7f8d30b`, released in 0.2.0) |
 
-Suggested order if picking up: **#2** (pure mechanical, zero risk, already
-planned) → **#1** (self-contained, well-understood fix) → **#4** (needs a focused
-reconcile investigation) → **#3** (real feature, only when a backend is actually
-wanted).
+Suggested order if picking up: **#4** (needs a focused reconcile investigation)
+→ **#3** (real feature, only when a backend is actually wanted).
 
 ---
 
-## 1. FsStore garbage collection
+## 1. FsStore garbage collection ✅ done
 
 ### What it is
 Derived layers cache one artifact per entity in a *store*. The filesystem store
@@ -33,7 +31,7 @@ Derived layers cache one artifact per entity in a *store*. The filesystem store
 `"<input_hash>:<generator_version>"` is written to
 
 ```
-<cache_root>/<dd>/<dd>/<digest>      where digest = sha256(store_key).hexdigest()
+<cache_root>/<version_enc>/<input_hash[:2]>/<input_hash>
 ```
 
 "GC" = deleting artifacts whose key is no longer referenced by any live entity
@@ -41,45 +39,39 @@ Derived layers cache one artifact per entity in a *store*. The filesystem store
 derived cache only grows. **Not a correctness bug** — stale files are simply
 never read again — purely unbounded disk growth.
 
-### Why it isn't implemented (the actual blocker)
-The on-disk filename is **`sha256(store_key)`** — a *one-way* hash. The current
-GC code (`derive/dag.py::_gc_store`) walks the cache directory, takes each
-on-disk `digest` (`parts[2]`), and tries to recover the store key from it to test
-reachability. **You can't invert sha256**, so it can't match disk files to the
-reachable-key set and bails (`pass`). `ArtifactCache.gc` (`derive/cache.py:75`)
-is likewise a documented no-op.
+### What was missing
+GC was implemented by `ArtifactCache` in terms of the filesystem store's
+`iter_keys` helper, so the cache layer owned backend layout knowledge and vector
+stores could not participate. The DAG also considered only the current HEAD,
+which could remove an artifact still needed by a retained time-travel revision.
 
-### The fix (forward-hash, mark-and-sweep)
-The inversion is unnecessary. `gc_orphans` already computes the set of **reachable
-store keys** (`{f"{h}:{version}"}` over every live `content_hash`). Hash those
-*forward* to get the reachable **digest** set, enumerate the disk, and delete any
-digest not in it:
+### The fix (implemented)
+Pruning is now owned by each store backend:
 
-1. Add a method to the `Store` protocol (`stores/base.py`):
+1. `Store.prune(reachable_keys)` is part of the store protocol and returns the
+   number of deleted artifacts.
+2. `FsStore.prune` enumerates its structural key layout, deletes only
+   unreachable keys in the supplied generator-version spaces, preserves other
+   versions for rollback, and removes empty shard directories.
+3. `ArtifactCache.gc` delegates to `Store.prune`; the DAG no longer knows how a
+   backend enumerates artifacts.
+4. `LanceDbStore.prune` applies the same version-scoped reachability rule to
+   rows.
+
+The protocol shape is:
+
    ```python
-   def prune(self, reachable_keys: set[str]) -> int: ...   # returns #deleted
+   def prune(self, reachable_keys: set[str]) -> int: ...
    ```
-   Each backend owns its own layout, so reachability lives behind the abstraction
-   (the dag layer must not know FsStore's digest scheme — that coupling is the
-   current bug's root).
-2. `FsStore.prune`: `reachable_digests = {sha256(k.encode()).hexdigest() for k in
-   reachable_keys}`; `for f in root.rglob("*")` (skip `*.tmp`): if `f.is_file()`
-   and `f.name not in reachable_digests`, `unlink()`. Prune now-empty shard dirs.
-3. Replace `_gc_store`'s broken directory-inversion with `store.prune(reachable_keys)`.
-4. `VectorStore`/lancedb: a `prune` that deletes rows whose id ∉ reachable_keys
-   (or leave `gc != "orphans"` layers untouched, as today).
+The DAG unions reachability across every retained MVCC revision and each
+layer's last-good bindings. Traced layers are conservatively skipped because
+their historical producer read-set keys cannot be reconstructed without
+rerunning user code. Empty reachability remains a safe no-op.
 
-### The one real design question: *reachability across revisions*
-`gc_orphans` currently builds reachable keys from **the current head graph only**.
-But snapshots time-travel and `serving = "stale"` layers keep last-good artifacts,
-so an artifact reachable from a *retained* (non-head) revision would be wrongly
-pruned. Decide the policy:
-- **Conservative (recommended first):** union reachable hashes across the store's
-  retained-revision window (and/or each layer's `_last_good` bindings), so GC
-  only reaps artifacts unreachable from *any* live revision.
-- Keep the existing `gc = "orphans"` opt-in per store, and the
-  cross-generator_version retention (other versions preserved for rollback) — GC
-  only ever prunes within the active version space.
+### Policy
+The conservative retained-revision policy is implemented: GC only reaps
+artifacts unreachable from every live revision in the retention window, while
+`gc = "orphans"` remains opt-in and other generator versions remain intact.
 
 ### Files
 - `src/tyo3/stores/base.py` (protocol), `src/tyo3/stores/fs.py` (impl),
@@ -88,12 +80,10 @@ pruned. Decide the policy:
   (`gc_orphans` / delete the broken `_gc_store` inversion).
 
 ### Acceptance
-- A unit test: populate a layer, edit an entity so its hash changes (old artifact
-  now unreachable), run `session.gc()` (or the dag GC), assert the old digest file
-  is gone and every reachable artifact survives — and that a time-travel read of
-  the *old* snapshot still works if the policy says it should.
-- `gc = "orphans"` honoured; non-orphan stores untouched; other
-  generator_versions retained.
+- Unit coverage proves orphan deletion, reachable-artifact retention,
+  generator-version isolation, temporary-write preservation, shard cleanup, and
+  time-travel reads from retained snapshots.
+- `gc = "orphans"` is honoured; non-orphan stores remain untouched.
 
 ### Risk
 Over-pruning an artifact a retained snapshot still needs → wrong derived read on

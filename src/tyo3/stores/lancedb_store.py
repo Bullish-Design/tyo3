@@ -13,9 +13,9 @@ from typing import Any
 class LanceDbStore:
     """VectorStore backed by LanceDB (lazy import).
 
-    Note: this backend intentionally exposes no ``iter_keys``, so
-    ``ArtifactCache.gc`` is a deliberate no-op for vector layers — orphan GC of
-    the vector store is unimplemented (not silently broken).
+    Orphan GC is implemented by scanning rows and delegating deletion to
+    LanceDB; the backend still intentionally exposes no ``iter_keys`` because
+    row enumeration is its own concern.
     """
 
     def __init__(
@@ -113,6 +113,34 @@ class LanceDbStore:
             self._table.delete(f"key = '{key}'")
         except Exception as exc:
             raise StoreBackendBroken(f"LanceDB delete failed for key {key!r}: {exc}") from exc
+
+    def prune(self, reachable_keys: set[str]) -> int:
+        """Delete unreachable rows in the supplied generator-version spaces."""
+        if not reachable_keys:
+            return 0
+
+        versions = {key.split(":", 1)[1] for key in reachable_keys if ":" in key}
+        if not versions:
+            return 0
+
+        from tyo3.exceptions import StoreBackendBroken
+
+        self._ensure_table()
+        try:
+            rows = self._table.search().limit(10_000_000).to_list()
+            stale_keys = [
+                row["key"]
+                for row in rows
+                if ":" in row["key"]
+                and row["key"].split(":", 1)[1] in versions
+                and row["key"] not in reachable_keys
+            ]
+            for key in stale_keys:
+                escaped = key.replace("'", "''")
+                self._table.delete(f"key = '{escaped}'")
+            return len(stale_keys)
+        except Exception as exc:
+            raise StoreBackendBroken(f"LanceDB prune failed: {exc}") from exc
 
     def nearest(self, query: Sequence[float], k: int) -> list[tuple[str, float]]:
         """Return the k nearest neighbors to *query*.

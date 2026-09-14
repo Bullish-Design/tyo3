@@ -227,25 +227,36 @@ class DerivationDAG:
         """Evict orphaned derived artifacts per store GC policy (Step 9).
 
         Only layers with gc="orphans" are affected. Reachable keys are
-        derived from the current graph's entity content hashes. Keys from
-        non-active generator_versions are retained (rollback support).
+        derived from every entity at every retained revision, plus each
+        layer's last-good bindings. Keys from non-active generator_versions
+        are retained (rollback support). Traced layers are skipped because
+        their historical read-set keys cannot be reconstructed without
+        rerunning user producers.
         """
         if self.is_empty:
             return
 
         snap = session.snapshot()
+        retained = [snap]
         try:
             try:
-                g = snap.graph()
+                snap.graph()
             except RuntimeError:
                 # Graph build failed (e.g. missing identity) — skip GC.
                 return
-            # Collect all reachable input_hashes.
-            reachable_hashes: set[str] = set()
-            for node_idx in g._graph.node_indices():
-                node = g._graph[node_idx]
-                for h in node.content_hashes.values():
-                    reachable_hashes.add(h)
+
+            # Include the whole retained MVCC window. This keeps a cached
+            # artifact addressable by a time-travel snapshot until that
+            # revision is evicted, rather than collecting based on HEAD only.
+            from tyo3.exceptions import RevisionEvictedError
+
+            head = session.head
+            oldest = max(0, head - session.config.spine.retain_cap + 1)
+            for revision in range(oldest, head):
+                try:
+                    retained.append(session.snapshot(at=revision))
+                except RevisionEvictedError:
+                    continue
 
             for layer in self.iter_layers():
                 # Check GC policy from config.
@@ -255,12 +266,39 @@ class DerivationDAG:
                 if store_cfg is None or store_cfg.gc != "orphans":
                     continue
 
-                # Build reachable store keys for this layer.
-                reachable_keys: set[str] = {f"{h}:{layer.generator_version}" for h in reachable_hashes}
-                # GC through the ArtifactCache (walks FsStore directory).
+                # A traced key includes the producer's read-set fingerprint;
+                # its prior revisions are not derivable from graph contents.
+                # Keeping that store intact is the conservative choice.
+                if layer.is_traced:
+                    continue
+
+                reachable_keys: set[str] = set()
+                for candidate in retained:
+                    try:
+                        graph = candidate.graph()
+                    except RuntimeError:
+                        continue
+                    for node_idx in graph._graph.node_indices():
+                        node = graph._graph[node_idx]
+                        if not layer.applies_to(node.kind.value):
+                            continue
+                        try:
+                            _input, input_hash = self.resolve_input(layer, candidate, node.durable_id)
+                        except (KeyError, AttributeError):
+                            continue
+                        reachable_keys.add(layer.keys_for(input_hash).to_store_key())
+
+                # Preserve last-good artifacts even when their entity is no
+                # longer present in the retained graph window.
+                reachable_keys.update(
+                    key
+                    for key in layer._last_good.values()
+                    if key.partition(":")[2] == layer.generator_version
+                )
                 _gc_store(layer, reachable_keys)
         finally:
-            snap.close()
+            for candidate in retained:
+                candidate.close()
 
     def resolve_input(self, layer: DerivedLayer, snapshot: Snapshot, durable_id: str) -> tuple[Any, str]:
         """Resolve the input and input_hash for *durable_id* under *layer*.
@@ -619,10 +657,9 @@ def _kind_for_id(snapshot: Snapshot, durable_id: str) -> str:
 def _gc_store(layer: DerivedLayer, reachable_keys: set[str]) -> None:
     """Delete unreachable artifacts in this layer's generator_version space.
 
-    Delegates to ``ArtifactCache.gc``, which enumerates keys via the backend's
-    ``iter_keys``. A backend without ``iter_keys`` (the vector store) is a safe
-    no-op. Keys for other generator_versions are not in *reachable_keys* and are
-    preserved for rollback.
+    Delegates enumeration and deletion to the backing store through
+    ``ArtifactCache.gc``. Keys for other generator_versions are not in
+    *reachable_keys* and are preserved for rollback by the backend.
     """
     layer.cache.gc(reachable_keys)
 

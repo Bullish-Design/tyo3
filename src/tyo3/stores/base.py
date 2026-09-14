@@ -17,6 +17,8 @@ class Store(Protocol):
 
     def delete(self, key: str) -> None: ...
 
+    def prune(self, reachable_keys: set[str]) -> int: ...
+
 
 class VectorStore(Store, Protocol):
     """Adds nearest-neighbour search; ANN is delegated to the backend."""
