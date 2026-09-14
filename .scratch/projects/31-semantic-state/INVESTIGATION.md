@@ -5,6 +5,11 @@ Traced against the working tree at trunk `aa87019` (post-project-30) on
 reproduction command. Where the project-29 and project-30 documents disagree
 with the source, the source wins.
 
+The implementation has since landed in three independently pushed lanes. The
+pre-implementation duplication and line references below are retained where
+they explain the evidence; current post-implementation locations and
+measurements are recorded in §14.4 and the outcome in §17.
+
 ---
 
 ## 1. Executive summary
@@ -16,13 +21,13 @@ Project 29 §5 deferred a corrected `SemanticState { identities, code }` on HEAD
 Project 30 then moved the boundary. The current shape is:
 
 - HEAD owns `registry: IdentityRegistry` and `code_layer: Arc<CodeLayer>`
-  (`rust/src/project.rs:120`, `:141`).
+  (`rust/src/project.rs:128`, `:152`).
 - The read state carries `registry: IdentityRegistry` and
-  `code_layer: Option<Arc<CodeLayer>>` (`rust/src/project.rs:84`, `:99`).
-- Current-head snapshots serve the committed layer through `CodeLayer::diff_from`
-  (`rust/src/project/snapshot.rs:63`, `rust/src/project/methods.rs:677`).
-- A missing carried layer falls back to a full `Builder::build`
-  (`snapshot.rs:66`, `methods.rs:680`).
+  `code_layer: Option<Arc<CodeLayer>>` (`rust/src/project.rs:84`, `:104`).
+- Current-head snapshots serve the committed layer through the shared
+  `full_code_delta_for` helper (`rust/src/project.rs:291`) at
+  `snapshot.rs:61` and `methods.rs:673`.
+- A missing carried layer falls back to a full `Builder::build` in that helper.
 
 Three findings decide the question.
 
@@ -59,12 +64,11 @@ snapshot at repository scale (§6, reproducible). What remains is naming and
 documentation debt, plus two narrow, evidence-backed code cleanups that are not a
 new abstraction:
 
-- **Dedupe the serve-or-rebuild match.** `snapshot.rs:61-76` and
-  `methods.rs:675-690` are verbatim twins of the same twelve lines. Divergence
-  between them is a silent parity break.
-- **Dedupe the cache-hit rule.** `project.rs:193` and `methods.rs:611-615`
-  encode "serve the head layer only when it is real" twice, with different extra
-  conditions.
+- **Dedupe the serve-or-rebuild match.** This is now one helper at
+  `project.rs:291`, called by `snapshot.rs:61` and `methods.rs:673`.
+- **Dedupe the cache-hit rule.** This is now `HeadState::servable_code_layer`
+  at `project.rs:220-221`, with the deliberate `is_head` guard remaining at
+  `methods.rs:613`.
 
 One real gap is recorded but deliberately **not** fixed here: a session that
 never commits never builds a head layer (`open.rs:168`, `commit.rs:849-851`), so
@@ -191,11 +195,11 @@ All six `TyProjectState` construction sites, exhaustively
 | Site | Value | Why |
 |---|---|---|
 | `project.rs:173` `TyProjectState::read_clone` | propagates whatever it holds | a read clone of a read clone |
-| `project.rs:193` `HeadState::read_clone` | `Some(Arc)` iff `!head.code_layer.is_empty()` | pre-first-commit head has an empty layer; treat as a miss |
+| `project.rs:204` `HeadState::read_clone` | `head.servable_code_layer()` | pre-first-commit head has an empty layer; the helper treats it as a miss |
 | `project.rs:914` MVCC stress test | `None` | test scaffolding |
 | `commit.rs:364` pre-reconcile extraction state | `None` | this state exists only to run `extract_entities`; a layer is meaningless for it |
 | `open.rs:243` `build_frozen` | `None` | the frozen state is constructed before the caller decides what to attach |
-| `methods.rs:635` `snapshot()` | `Some(Arc)` iff `is_head && !is_empty` (`:611-615`) | a **time-travel** snapshot must not be served the head's layer |
+| `methods.rs:613` `snapshot()` | `head.servable_code_layer()` only when `is_head` | a **time-travel** snapshot must not be served the head's layer |
 
 So the `Option` is **not** vestigial — unlike the `Option<IdentityRegistry>`
 project 29 Step 2 removed, which had zero real `None` producers. Four of the six
@@ -267,25 +271,30 @@ not a natural domain object.
 
 > **"Lazily produced layer" is no longer an accurate description.** Nothing is
 > lazily *produced*. The read state carries an **eagerly published**
-> `Option<Arc<CodeLayer>>` (`project.rs:99`). On a miss, the fallback
-> recomputes from scratch on **every** call and throws the result away — both
-> call sites bind the produced layer to `_next` and drop it
-> (`snapshot.rs:66-73`, `methods.rs:680-687`). It is a stateless recompute, not
+> `Option<Arc<CodeLayer>>` (`project.rs:104`). On a miss, the fallback
+> recomputes from scratch on **every** call and throws the result away — the
+> shared helper binds the produced layer to `_next` and drops it
+> (`project.rs:291-303`). It is a stateless recompute, not
 > a lazy cache. Project 29 §5 must not be quoted as current.
 
-The asymmetry itself is documented in place at `project.rs:94-98`:
+The asymmetry itself is documented in place at `project.rs:94-104`:
 
 ```rust
 /// The committed code layer for this state's revision, when one exists.
 ///
-/// `None` is used by read clones taken before any commit has produced a
-/// layer, and by analysis/test constructors. Consumers fall back to a full
-/// rebuild when it is absent.
+/// `None` is used by read clones taken before the first reconciling commit
+/// (the empty placeholder from `open.rs:168`), time-travel snapshots that
+/// cannot use the head layer (`methods.rs:607-613`), the pre-reconcile
+/// extraction state (`commit.rs:356-365`), `build_frozen` (`open.rs:243`),
+/// and test constructors. A miss triggers a stateless full rebuild: both
+/// consumers discard the rebuilt layer, so this costs speed on every call,
+/// never correctness. This is not Project 29 DESIGN §5's "lazily produced
+/// layer" or a lazy cache.
 ```
 
-That comment is accurate but **incomplete** — it omits the time-travel case,
-which is the most important `None` producer (`methods.rs:607-615`). Fixing that
-comment is the single highest-value change this investigation found.
+That comment was corrected in Step 0 to include time travel and the other
+legitimate `None` producers. The fallback remains a stateless recompute, not a
+lazy cache.
 
 ### 6.3 The performance claim, reproduced
 
@@ -423,9 +432,9 @@ real regression risk, not a style preference.
 **Keep `IdentityRegistry` and `Arc<CodeLayer>` as distinct fields. Add no new
 state type. Remove the two duplications, and correct the comments.**
 
-### 9.1 The two verified duplications
+### 9.1 The two duplications (resolved)
 
-**(a) The serve-or-rebuild match, twice, verbatim.**
+**(a) The serve-or-rebuild match, twice, verbatim (before Step 1).**
 
 `rust/src/project/snapshot.rs:61-76`:
 
@@ -444,8 +453,8 @@ let delta = py.detach(move || {
 });
 ```
 
-`rust/src/project/methods.rs:675-690` is the same body **character for
-character** — verified:
+`rust/src/project/methods.rs:675-690` was the same body **character for
+character** — verified before implementation:
 
 ```sh
 diff <(sed -n '61,76p' rust/src/project/snapshot.rs) \
@@ -456,16 +465,17 @@ Both feed `apply_code_delta` (`views.py:293`, `session.py:241`). The asymmetry
 that makes this dangerous: **only the `methods.rs` copy is covered by the parity
 oracle.** `tests/test_final_parity_oracle.py:247` calls `assert_parity(session)`,
 which resolves to `session._inner.full_code_delta` (`tests/parity_oracle.py:417-420`)
-— i.e. `methods.rs:669`. The `snapshot.rs:58` copy has **no** oracle coverage.
-If a future edit touches one copy and not the other, a head graph and a snapshot
-graph at the same revision diverge, and the oracle stays green.
+— i.e. the head call site. The snapshot call site had **no** oracle coverage.
+Step 1 removed the second body; both call sites now call `full_code_delta_for`
+at `project.rs:291`, so they cannot drift independently.
 
 **(b) The cache-hit rule, twice, with different conditions.**
 
-- `project.rs:193` — `(!self.code_layer.is_empty()).then(|| Arc::clone(&self.code_layer))`
-- `methods.rs:611-615` — `if is_head && !head.code_layer.is_empty() { Some(Arc::clone(…)) } else { None }`
+- `project.rs:204` — `code_layer: self.servable_code_layer()`
+- `methods.rs:613` — `if is_head { head.servable_code_layer() } else { None }`
 
-The shared clause ("an empty layer is a miss, not a hit") is stated twice.
+The shared clause ("an empty layer is a miss, not a hit") is now stated once in
+`HeadState::servable_code_layer` (`project.rs:220-221`).
 `snapshot()` deliberately adds `is_head`; `read_clone` deliberately does not
 (a head read clone is always at head). That difference is correct and should be
 **named**, not left to be rediscovered.
@@ -473,24 +483,25 @@ The shared clause ("an empty layer is a miss, not a hit") is stated twice.
 ### 9.2 What Design A changes
 
 1. A single `pub(crate) fn full_code_delta_for(state: &TyProjectState, revision: u64) -> dto::CodeDeltaDto`
-   in `rust/src/project/snapshot.rs`, called by both `snapshot.rs:58` and
-   `methods.rs:669` inside their existing `py.detach(...)` wrappers. The GIL
-   handling stays at the call sites; only the pure computation moves.
+   in `rust/src/project.rs:291`, called by both `snapshot.rs:61` and
+   `methods.rs:673` inside their existing `py.detach(...)` wrappers. The GIL
+   handling stays at the call sites; only the pure computation moves. Spike 4
+   selected `project.rs` as the existing home for shared read-path helpers.
 2. A single `impl HeadState { pub(crate) fn servable_code_layer(&self) -> Option<Arc<CodeLayer>> }`
-   expressing "an empty head layer is a cache miss", used by `project.rs:193`
-   and by `methods.rs:611-615` (the latter keeping its explicit `is_head &&`
+   expressing "an empty head layer is a cache miss", used by `project.rs:204`
+   and by `methods.rs:613` (the latter keeping its explicit `is_head &&`
    guard, so the time-travel rule stays visible at the snapshot site).
 3. Comment corrections, which are the actual deliverable:
-   - `project.rs:94-98` — add the time-travel `None` producer and state that the
+   - `project.rs:94-104` — add the time-travel `None` producer and state that the
      fallback is a **stateless recompute**, not a lazy cache.
-   - `project.rs:120` / `:141` — state the ordering constraint of §4.2 and that
+   - `project.rs:123` / `:144` — state the ordering constraint of §4.2 and that
      the two planes are never interchangeable (registry: last-known, includes
      orphans, persisted; layer: current-revision, includes synthetics, never
      persisted).
    - `commit.rs:915` — state that the read clone taken there carries the R−1
      layer beside the R registry, that no consumer reads it, and that the field
      must not be relied on inside the commit.
-   - `methods.rs:611-615` — keep, and cross-reference the retention decision
+   - `methods.rs:607-613` — keep, and cross-reference the retention decision
      (project 30 DESIGN §4.1) so a future "just cache time-travel layers too"
      edit meets the 13.42 MiB/revision figure first.
 
@@ -542,7 +553,7 @@ extracted functions and four comment blocks (§9.2), in
 For the record, the signatures of the two extracted helpers:
 
 ```rust
-// rust/src/project/snapshot.rs — one definition, two call sites.
+// rust/src/project.rs — one definition, two call sites.
 /// Serve this state's committed code layer as a full (`rescan = true`) delta,
 /// or rebuild it when no layer is carried.
 ///
@@ -577,9 +588,9 @@ verify before every `save`.
 
 | Step | Lane | Change | Independent test |
 |---|---|---|---|
-| **0** | `31-step0-docs` | Comment corrections only (`project.rs:94-98`, `:118-120`, `:136-141`; `commit.rs:915`; `methods.rs:611-615`). No code. | `check-rust` + `clippy` + `tests` unchanged at 171/833. Zero behaviour risk. |
-| **1** | `31-step1-dedupe-serve` | Extract `full_code_delta_for`; call from `snapshot.rs:58` and `methods.rs:669`. `py.detach` stays at both call sites. | **`parity-oracle` first** (`methods.rs` is its input), then `tests`. Add one Python test asserting `session.snapshot().graph()` and `session.graph` agree node-for-node and edge-for-edge at the same revision — the invariant the duplication threatened. |
-| **2** | `31-step2-dedupe-hit-rule` | Add `HeadState::servable_code_layer`; use at `project.rs:193` and inside `methods.rs:611-615`, keeping the explicit `is_head &&` guard at the snapshot site. | Rust: a freshly built head yields `None`; with a non-empty layer assigned it yields `Some` and `Arc::ptr_eq` holds. Python: a time-travel snapshot's graph shows the **old** content while a head snapshot shows the new — the behavioural half of the `is_head` guard. |
+| **0** | `31-step0-docs` | Comment corrections only (`project.rs:94-104`, `:123-128`, `:144-152`; `commit.rs:915`; `methods.rs:607-613`). No code. | `check-rust` + `clippy` + `tests` unchanged at 171/833. Zero behaviour risk. |
+| **1** | `31-step1-dedupe-serve` | Extract `full_code_delta_for` in `project.rs:291`; call from `snapshot.rs:61` and `methods.rs:673`. `py.detach` stays at both call sites. | **`parity-oracle` first** (`methods.rs` is its input), then `tests`. Add one Python test asserting `session.snapshot().graph()` and `session.graph` agree node-for-node and edge-for-edge at the same revision — the invariant the duplication threatened. |
+| **2** | `31-step2-dedupe-hit-rule` | Add `HeadState::servable_code_layer`; use at `project.rs:204` and inside `methods.rs:613`, keeping the explicit `is_head` guard at the snapshot site. | Rust: a freshly built head yields `None`; with a non-empty layer assigned it yields `Some` and `Arc::ptr_eq` holds. Python: a time-travel snapshot's graph shows the **old** content while a head snapshot shows the new — the behavioural half of the `is_head` guard. |
 | **3** | `31-step3-measure` | No code. Re-run §6.3 and §14 probes; append results to this file. | Numbers within noise of §6.3 / §14. |
 
 Land each step green before starting the next. Steps 1 and 2 are independently
@@ -670,7 +681,7 @@ controlled pair:
 
 There is no way to remove that confound from a Python-level probe: distinct
 retained layers require distinct commits, and a time-travel snapshot retains no
-layer at all (`methods.rs:607-615`). An isolated figure needs the counting
+layer at all (`methods.rs:607-613`). An isolated figure needs the counting
 allocator that project 30 Step 0 used.
 
 Interpretation, stated to that precision:
@@ -711,6 +722,54 @@ snapshot graph 1.06–1.22 s) remain the reference; the debug figures above are
 consistent with them.
 
 ---
+
+### 14.4 After Project 31 (2026-09-14)
+
+The required probes were rerun after Steps 0–2 landed. The timing probe was
+run four times to check the tight (<20%) Spike 5 noise floor. The table shows
+the observed min–max across those four runs against the three-run Spike 5
+range; the acceptance band is ±20% around that earlier range.
+
+| Path | Spike 5 range | After range | Result |
+|---|---:|---:|---|
+| pre-commit head `full_code_delta` | 4.504–4.720 s | 4.718–5.452 s | within band |
+| pre-commit head warm repeat | 2.846–3.074 s | 2.989–3.649 s | within band |
+| pre-commit snapshot `full_code_delta` | 4.008–4.221 s | 4.289–4.964 s | within band |
+| commit | 2.911–2.943 s | 3.045–3.633 s | one high sample; other three 3.045–3.295 s |
+| post-commit head `full_code_delta` | 0.152–0.171 s | 0.176–0.191 s | within band |
+| post-commit head snapshot `full_code_delta` | 0.144–0.158 s | 0.155–0.185 s | within band |
+| time-travel snapshot `full_code_delta` | 4.089–4.257 s | 4.130–4.870 s | within band |
+| head `orphaned()` ×200 | 0.223–0.258 ms | 0.228–0.336 ms | one high sample; no cleanup path involved |
+| `session.snapshot()` ×200 | 8.583–9.137 ms | 9.262–11.402 ms | one high sample; same order of magnitude |
+
+The four primary full-code-delta paths stayed within the Spike 5 acceptance
+band, including the carried-layer fast paths and both stateless fallbacks. The
+isolated high samples were in auxiliary measurements; a final timing run
+returned 4.718 s / 0.177 s / 0.155 s / 4.130 s for pre-commit head, carried
+head, carried snapshot, and time travel respectively.
+
+The post-refactor memory probe reported:
+
+```
+baseline RSS after 1 commit + 1 transient snapshot: 284.5 MiB
+8 snapshots @ same revision : 298.0 MiB   (+13.5 MiB, 1.69 MiB/snapshot)
+after closing them          : 298.0 MiB
+8 snapshots @ 8 revisions   : 411.6 MiB   (+113.6 MiB, 14.20 MiB/revision)
+```
+
+The absolute RSS is lower than the earlier run, while the same-revision
+marginal cost remains in the same range and the distinct-revision figure is
+still the known commit-confounded upper bound. The probe also reported
+`latest.files()` at **2.966 ms/call** at repository scale, the same millisecond
+order as the baseline read-clone measurement. These results show no measurable
+performance or memory movement from the refactor.
+
+The chosen helper location differs from the original implementation proposal:
+Spike 4 selected `rust/src/project.rs`, next to `clone_locked_state`, because
+it is the existing home for shared read-path helpers and avoids an indirect
+dependency through the `snapshot.rs` glob re-export. `IMPLEMENTATION.md` and
+the current-summary portions of this document have been updated accordingly;
+historical pre-implementation anchors remain labelled by context.
 
 ## 15. Risks and follow-up work
 
@@ -770,23 +829,24 @@ consistent with them.
 
 ---
 
-## 17. Decision
+## 17. Decision and implementation outcome
 
-**DOCUMENT ONLY.**
+**DOCUMENT ONLY with the two approved deduplications implemented.** No
+`SemanticState` type was introduced.
 
 - **Do not implement a `SemanticState` type.** Designs B, C and D are rejected on
   evidence (§8): the invariant is false inside the commit window, the grouping
   omits `authored`, the lifetimes differ across `reload()`, and the memory
   measurement forbids any owned duplicate.
-- **Do not close the project outright** (Design E). Three concrete defects remain:
-  one stale comment (`project.rs:94-98`, omits time travel) and two verbatim
-  duplications (`snapshot.rs:61-76` ≡ `methods.rs:675-690`; `project.rs:193` vs
-  `methods.rs:611-615`). The oracle covers only the `methods.rs` copy, so the
-  `snapshot.rs` copy could diverge with the suite green (§9.1).
-- **Implement Design A** as three small, independently-revertible lanes (§12),
-  each green before the next. Total change: two extracted functions and four
-  comment blocks. No new types, no `Option` changes, no wire change, no
-  measurable performance or memory movement.
+- **Design A is complete** in three small, independently pushed lanes (§12):
+  the comments now describe the four legitimate `None` producers and the
+  registry/layer asymmetry; `full_code_delta_for` is shared from
+  `project.rs:291`; and `HeadState::servable_code_layer` is shared from
+  `project.rs:220-221`. No new types, no `Option` changes, no wire change, and
+  no measurable performance or memory movement.
+- The deliberate `is_head` guard remains visible at `methods.rs:613`, and the
+  post-implementation graph, parity, test, timing, and memory evidence is
+  recorded in §14.4.
 - **Project 29 §5 is superseded.** Its "read clone / snapshot owns identities plus
   a *lazily produced* layer" is not what the code does: the layer is eagerly
   carried, and the fallback is a stateless recompute that memoises nothing

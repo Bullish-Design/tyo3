@@ -47,7 +47,7 @@ Counts must not drop. Steps 1 and 2 each *add* tests, so the final counts rise.
 
 **Risk.** None. Comments only.
 
-## 0.1 `rust/src/project.rs:94-98` — the carried-layer field
+## 0.1 `rust/src/project.rs:94-104` — the carried-layer field
 
 Today's comment omits the most important `None` producer and misdescribes the
 fallback:
@@ -64,17 +64,17 @@ Replace the body with all four producers and the correct fallback semantics:
 
 - a read clone taken before the first reconciling commit (the head layer is
   still the empty placeholder from `open.rs:168`);
-- **a time-travel snapshot** — `methods.rs:607-615` deliberately withholds the
+- **a time-travel snapshot** — `methods.rs:607-613` deliberately withholds the
   head layer, which is only valid for the head revision;
 - the pre-reconcile extraction state (`commit.rs:356-365`);
 - `build_frozen` (`open.rs:243`) and test constructors.
 
 State plainly: **the fallback is a stateless recompute, not a lazy cache.** Both
-call sites discard the rebuilt layer (`snapshot.rs:66`, `methods.rs:680`), so a
+call sites discard the rebuilt layer (`snapshot.rs:61`, `methods.rs:673`), so a
 miss costs speed on *every* call, never correctness. Project 29 DESIGN §5's
 "lazily produced layer" is superseded — say so, so the phrase is not reintroduced.
 
-## 0.2 `rust/src/project.rs:120` and `:141` — the two planes
+## 0.2 `rust/src/project.rs:128` and `:152` — the two planes
 
 On `HeadState.registry` and `HeadState.code_layer`, record the asymmetry that
 makes them non-interchangeable (INVESTIGATION §4.1), in one line each:
@@ -98,7 +98,7 @@ touches only `state.root`, `state.db`, `state.registry` and
 `state.hash_policies` (`code_layer.rs:561-573`). Add: **do not start reading
 `state.code_layer` inside the commit** — it is stale by construction there.
 
-## 0.4 `rust/src/project/methods.rs:607-615` — the retention decision
+## 0.4 `rust/src/project/methods.rs:607-613` — the retention decision
 
 The existing comment is correct. Add the cost, so a future "cache time-travel
 layers too" edit meets the number first: project 30 Step 0 measured a retained
@@ -124,22 +124,23 @@ off the parity oracle.
 **Risk.** Low, but this is the highest-risk step in the project: it touches the
 oracle's input. Run `parity-oracle` first.
 
-## 1.1 The duplication, verified
+## 1.1 The duplication, verified before Step 1
 
 ```sh
 diff <(sed -n '61,76p' rust/src/project/snapshot.rs) \
-     <(sed -n '675,690p' rust/src/project/methods.rs)   # no output today
+     <(sed -n '675,690p' rust/src/project/methods.rs)   # no output at baseline
 ```
 
 `tests/test_final_parity_oracle.py:247` calls `assert_parity(session)`, which
 resolves through `tests/parity_oracle.py:417-420` to
-`session._inner.full_code_delta` — i.e. `methods.rs:669` **only**. The
-`snapshot.rs:58` copy has no oracle coverage and could diverge with the suite
-green. That asymmetry is the reason this step exists.
+`session._inner.full_code_delta` — i.e. the head call site **only**. Before
+Step 1, the snapshot call site had no oracle coverage and could diverge with
+the suite green. Step 1 removed that second body; both call sites now call the
+shared helper.
 
 ## 1.2 The extraction
 
-In `rust/src/project/snapshot.rs`, above `impl PySnapshot`:
+In `rust/src/project.rs`, next to `clone_locked_state`:
 
 ```rust
 /// Serve `state`'s committed code layer as a full (`rescan = true`) delta, or
@@ -169,10 +170,12 @@ pub(crate) fn full_code_delta_for(
 }
 ```
 
-`project.rs:279` already does `pub(crate) use snapshot::*;`, so `methods.rs`
-sees it through its `use super::*`.
+This is the existing home for shared read-path helpers. Every project
+submodule imports the shared state and helpers through `use super::*`, so both
+callers see the helper directly without making `snapshot.rs` an indirect
+dependency.
 
-Both call sites collapse to (`snapshot.rs:58`, `methods.rs:669`):
+Both call sites collapse to (`snapshot.rs:61`, `methods.rs:673`):
 
 ```rust
 let delta = py.detach(move || full_code_delta_for(&state, revision));
@@ -213,8 +216,8 @@ devenv shell -- tests
 
 ## 2.1 The duplication
 
-- `project.rs:193` — `(!self.code_layer.is_empty()).then(|| Arc::clone(&self.code_layer))`
-- `methods.rs:611-615` — `if is_head && !head.code_layer.is_empty() { Some(Arc::clone(…)) } else { None }`
+- `project.rs:221` — `(!self.code_layer.is_empty()).then(|| Arc::clone(&self.code_layer))`
+- `methods.rs:613` — `if is_head { head.servable_code_layer() } else { None }`
 
 The shared clause is duplicated; the `is_head` clause is **deliberate** and
 belongs only at the snapshot site. Preserve that distinction — do not fold
@@ -236,15 +239,15 @@ impl HeadState {
     /// (empty) delta — so this can only cost speed, never correctness.
     ///
     /// Callers that pin a NON-head revision must not use this: the head layer is
-    /// valid only for the head revision (`methods.rs:607-615`).
+    /// valid only for the head revision (`methods.rs:607-613`).
     pub(crate) fn servable_code_layer(&self) -> Option<Arc<crate::code_layer::CodeLayer>> {
         (!self.code_layer.is_empty()).then(|| Arc::clone(&self.code_layer))
     }
 }
 ```
 
-- `project.rs:193` → `code_layer: self.servable_code_layer(),`
-- `methods.rs:611-615` → `let code_layer = if is_head { head.servable_code_layer() } else { None };`
+- `project.rs:204` → `code_layer: self.servable_code_layer(),`
+- `methods.rs:613` → `let code_layer = if is_head { head.servable_code_layer() } else { None };`
 
 ## 2.3 Tests
 
