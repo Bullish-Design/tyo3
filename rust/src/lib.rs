@@ -48,6 +48,14 @@ fn native_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<project::PyTyProject>()?;
     m.add_class::<project::PySnapshot>()?;
 
+    // The Cargo profile this extension was built with. `maturin develop` and
+    // `maturin develop --release` install to the same path, so the profile is
+    // otherwise invisible at runtime. Benchmarks assert on this value.
+    m.add(
+        "__build_profile__",
+        if cfg!(debug_assertions) { "debug" } else { "release" },
+    )?;
+
     // Exception types
     m.add("TyO3Error", m.py().get_type::<TyO3Error>())?;
     m.add("ProjectClosedError", m.py().get_type::<ProjectClosedError>())?;

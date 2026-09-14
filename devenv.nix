@@ -618,6 +618,8 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
     else
       echo "❌ No native extension found — run: devenv shell -- build"
     fi
+    PYTHONPATH="$DEVENV_ROOT/src" python -c \
+      "import tyo3; print('    profile:', tyo3.build_profile())"
   '';
 
   scripts.status.exec = ''
@@ -636,8 +638,11 @@ print(f'✅ Extension works — {len(files)} file(s), {len(symbols)} symbol(s)')
     LS="$(ls -lh "$DEVENV_ROOT/src/tyo3/_native_impl"*.so 2>/dev/null | head -1)"
     if [ -n "$LS" ]; then
       echo "    native:  $LS"
+      PYTHONPATH="$DEVENV_ROOT/src" "$DEVENV_ROOT/.devenv/state/venv/bin/python" -c \
+        "import tyo3; print('    profile:', tyo3.build_profile())"
     else
       echo "    native:  not built (run: build)"
+      echo "    profile: unknown"
     fi
     WHL="$(ls "$DEVENV_ROOT/dist/tyo3-*.whl" 2>/dev/null | head -1)"
     if [ -n "$WHL" ]; then
