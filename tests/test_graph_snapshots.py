@@ -20,6 +20,24 @@ def _node_names(graph: CodeGraph) -> set[str]:
     return {raw[i].name for i in raw.node_indices()}
 
 
+def _edge_triples(graph: CodeGraph) -> set[tuple[str, str, str]]:
+    raw = graph.graph
+    return {
+        (
+            raw[source].durable_id,
+            raw[target].durable_id,
+            str(raw.get_edge_data_by_index(edge).kind),
+        )
+        for edge in raw.edge_indices()
+        for source, target in [raw.get_edge_endpoints_by_index(edge)]
+    }
+
+
+def _assert_same_structure(head: CodeGraph, snapshot: CodeGraph) -> None:
+    assert _node_ids(head) == _node_ids(snapshot)
+    assert _edge_triples(head) == _edge_triples(snapshot)
+
+
 def test_session_graph_updates_after_edit(tmp_path: StdPath) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     with TyO3Session(str(tmp_path)) as session:
@@ -34,6 +52,25 @@ def test_session_graph_updates_after_edit(tmp_path: StdPath) -> None:
         assert new_graph is not graph
         assert new_graph.revision == result.revision
         assert "y" in _node_names(new_graph)
+
+
+def test_head_and_snapshot_graphs_agree_before_and_after_commit(tmp_path: StdPath) -> None:
+    """The fallback and carried-layer paths must describe the same graph."""
+    (tmp_path / "a.py").write_text("x = 1\n")
+    with TyO3Session(str(tmp_path)) as session:
+        before_head = session.graph
+        with session.snapshot() as before_snapshot:
+            before_graph = before_snapshot.graph()
+            assert before_head.node_count > 0
+            _assert_same_structure(before_head, before_graph)
+
+        session.edit("a.py", "x = 1\ny = 2\n")
+
+        after_head = session.graph
+        with session.snapshot() as after_snapshot:
+            after_graph = after_snapshot.graph()
+            assert after_head.node_count > 0
+            _assert_same_structure(after_head, after_graph)
 
 
 def test_snapshot_graph_is_pinned_across_head_edits(tmp_path: StdPath) -> None:
