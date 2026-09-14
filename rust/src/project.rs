@@ -93,9 +93,14 @@ pub(crate) struct TyProjectState {
     pub(crate) authored: Option<AuthoredStore>,
     /// The committed code layer for this state's revision, when one exists.
     ///
-    /// `None` is used by read clones taken before any commit has produced a
-    /// layer, and by analysis/test constructors. Consumers fall back to a full
-    /// rebuild when it is absent.
+    /// `None` is used by read clones taken before the first reconciling commit
+    /// (the empty placeholder from `open.rs:168`), time-travel snapshots that
+    /// cannot use the head layer (`methods.rs:607-615`), the pre-reconcile
+    /// extraction state (`commit.rs:356-365`), `build_frozen` (`open.rs:243`),
+    /// and test constructors. A miss triggers a stateless full rebuild: both
+    /// consumers discard the rebuilt layer, so this costs speed on every call,
+    /// never correctness. This is not Project 29 DESIGN §5's "lazily produced
+    /// layer" or a lazy cache.
     pub(crate) code_layer: Option<Arc<crate::code_layer::CodeLayer>>,
 }
 
@@ -115,8 +120,11 @@ pub(crate) struct HeadState {
     /// (clone-shares the inner `Arc<ArcSwap<…>>`). The commit publishes staged
     /// content through it so the head `db` sees the new revision.
     pub(crate) system: OverlaySystem,
-    /// Identity registry: binds DurableIds to last-known entity facts.
-    /// Reconciled after every commit; persisted through the sidecar.
+    /// Identity registry: last-known DurableId facts across revisions; retains
+    /// `Orphaned` anchors (`identity.rs:187-211`), is persisted every commit
+    /// (`commit.rs:551-567`), and survives `reload()` (`methods.rs:137`). The
+    /// code layer is produced from this reconciled registry, so reconciliation
+    /// at `commit.rs:905` must precede layer production at `:916`.
     pub(crate) registry: IdentityRegistry,
     /// Code-layer identity hash policy: the default profile resolved from the
     /// validated config.
@@ -133,11 +141,14 @@ pub(crate) struct HeadState {
     /// Captured into snapshots alongside the registry for Snapshot
     /// isolation + time-travel (§10.2.2 authored half).
     pub(crate) authored: AuthoredStore,
-    /// Canonical native code layer (nodes + edges + reverse-deps). Maintained
-    /// in-commit by the scoped producer (`produce_layer` → `CodeLayer::diff_from`):
-    /// the commit re-derives the dirty scope over the prior layer and the commit
-    /// reads its `reverse_deps` to compute the transitive, container-granular
-    /// affected closure at the source (never-miss).
+    /// Canonical native code layer: current facts for exactly one revision,
+    /// including synthetic `<module>` nodes and external stubs. It is never
+    /// persisted and is discarded by `reload()` (`methods.rs:141` →
+    /// `open.rs:168`); unlike the registry, it is not a last-known record. It
+    /// is produced from the reconciled registry, so `commit.rs:905` must precede
+    /// `:916`. Maintained in-commit by the scoped producer
+    /// (`produce_layer` → `CodeLayer::diff_from`), its `reverse_deps` feeds the
+    /// transitive, container-granular affected closure at the source.
     pub(crate) code_layer: Arc<crate::code_layer::CodeLayer>,
     /// Paths carrying a genuinely *unsaved* overlay edit (from `edit` /
     /// `edit_virtual`), as opposed to content ingested from disk at open or via
@@ -187,9 +198,9 @@ impl ReadCloneSource for HeadState {
             hash_policies: self.hash_policies.clone(),
             default_hash_profile: self.default_hash_profile.clone(),
             authored: None,
-            // The head starts with an empty layer and lazily builds its first
-            // real layer on the first commit. Treat that empty value as a
-            // cache miss so pre-commit reads retain the rebuild fallback.
+            // The head starts with an empty layer and builds its first real
+            // layer on the first commit. Treat that empty value as a cache miss
+            // so pre-commit reads retain the rebuild fallback.
             code_layer: (!self.code_layer.is_empty()).then(|| Arc::clone(&self.code_layer)),
         }
     }

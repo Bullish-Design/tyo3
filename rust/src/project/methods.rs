@@ -607,7 +607,9 @@ impl PyTyProject {
         // The current head layer is valid for a head snapshot only. A
         // time-travel snapshot may target an older revision, for which the
         // head's current layer is not valid; leave that case on the rebuild
-        // fallback until layers are retained per revision.
+        // fallback until layers are retained per revision. Project 30 measured
+        // a retained repository-scale layer at 12.83 MiB; retaining one per
+        // revision therefore needs an explicit bound (Project 30 DESIGN §4.1).
         let code_layer = if is_head && !head.code_layer.is_empty() {
             Some(Arc::clone(&head.code_layer))
         } else {

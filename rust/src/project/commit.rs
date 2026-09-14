@@ -912,6 +912,11 @@ pub(crate) fn run_staged(
         // `full_code_delta()`, so the producer's diff is dropped here. Runs inside
         // the lock, before the deferred publish; rolled back via the Baseline.
         let prev = Arc::clone(&head.code_layer);
+        // This read clone intentionally carries the freshly reconciled R
+        // registry beside the previous R-1 layer. The builder uses only
+        // `state.root`, `state.db`, `state.registry`, and `state.hash_policies`,
+        // so the carried layer is unused and stale by construction here. Do not
+        // start reading `state.code_layer` inside the commit.
         let state = head.read_clone();
         let (next, _code_delta) = produce_layer(&state, prev.as_ref(), &staged, next_rev);
 
