@@ -1649,6 +1649,115 @@ class User(Base):
         assert!(d2.edges_removed.is_empty());
     }
 
+    fn assert_layers_equal(full: &CodeLayer, scoped: &CodeLayer) {
+        assert_eq!(scoped.nodes, full.nodes, "nodes differ");
+        assert_eq!(scoped.edges, full.edges, "edges differ");
+        assert_eq!(scoped.reverse_deps, full.reverse_deps, "reverse_deps differ");
+        assert_eq!(scoped.file_to_nodes, full.file_to_nodes, "file_to_nodes differ");
+    }
+
+    #[test]
+    fn scoped_producer_matches_full_rebuild_across_generations() {
+        let generations = tempfile::tempdir().unwrap();
+        let state1 = reconciled_state_at_in(
+            generations.path(),
+            &[
+                ("a.py", "class Base:\n    def save(self):\n        return 1\n"),
+                (
+                    "b.py",
+                    "from a import Base\n\nclass User(Base):\n    def save(self):\n        return Base.save(self)\n",
+                ),
+            ],
+            None,
+            1,
+        );
+        let empty = CodeLayer::new();
+        let (full1, _) = produce_code_delta(&state1, &empty, 1, true, None);
+        let (scoped1, _) = produce_code_delta_scoped(
+            &state1,
+            &empty,
+            &HashSet::from([String::from("a.py"), String::from("b.py")]),
+            1,
+        );
+        assert_layers_equal(&full1, &scoped1);
+
+        let state2 = reconciled_state_at_in(
+            generations.path(),
+            &[
+                ("a.py", "class Base:\n    def save(self):\n        return 1\n"),
+                (
+                    "b.py",
+                    "from a import Base\n\nclass User(Base):\n    def save(self):\n        return Base.save(self) + 1\n",
+                ),
+            ],
+            Some(state1.registry.clone()),
+            2,
+        );
+        let (full2, _) = produce_code_delta(&state2, &empty, 2, true, None);
+        let (scoped2, _) = produce_code_delta_scoped(
+            &state2,
+            &scoped1,
+            &HashSet::from([String::from("b.py")]),
+            2,
+        );
+        assert_layers_equal(&full2, &scoped2);
+
+        let state3 = reconciled_state_at_in(
+            generations.path(),
+            &[
+                ("a.py", "class Base:\n    def save(self):\n        return 1\n"),
+                (
+                    "b.py",
+                    "from a import Base\n\nclass User(Base):\n    def save(self):\n        return 1\n",
+                ),
+            ],
+            Some(state2.registry.clone()),
+            3,
+        );
+        let (full3, _) = produce_code_delta(&state3, &empty, 3, true, None);
+        let (scoped3, _) = produce_code_delta_scoped(
+            &state3,
+            &scoped2,
+            &HashSet::from([String::from("b.py")]),
+            3,
+        );
+        assert_layers_equal(&full3, &scoped3);
+
+        let state4 = reconciled_state_at_in(
+            generations.path(),
+            &[(
+                "b.py",
+                "class User:\n    def save(self):\n        return 1\n",
+            )],
+            Some(state3.registry.clone()),
+            4,
+        );
+        let (full4, _) = produce_code_delta(&state4, &empty, 4, true, None);
+        let (scoped4, _) = produce_code_delta_scoped(
+            &state4,
+            &scoped3,
+            &HashSet::from([String::from("a.py"), String::from("b.py")]),
+            4,
+        );
+        assert_layers_equal(&full4, &scoped4);
+
+        let state5 = reconciled_state_at_in(
+            generations.path(),
+            &[],
+            Some(state4.registry.clone()),
+            5,
+        );
+        let (full5, _) = produce_code_delta(&state5, &empty, 5, true, None);
+        let (scoped5, _) = produce_code_delta_scoped(
+            &state5,
+            &scoped4,
+            &HashSet::from([String::from("b.py")]),
+            5,
+        );
+        assert_layers_equal(&full5, &scoped5);
+        assert!(!scoped5.nodes.values().any(|node| node.name == "Base"));
+    }
+
     #[test]
     fn scoped_producer_prunes_parallel_edges_and_deleted_targets() {
         let gen1_b = "from a import Base\n\nclass User(Base):\n    def save(self):\n        return Base.save(self)\n";
