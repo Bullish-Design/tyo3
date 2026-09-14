@@ -138,11 +138,11 @@ identity reconciliation│         produce_layer(state, prev, …)       :916   
         │                           build_frozen (own Zalsa)   open.rs:188
         │                           state.registry   = head clone  :633
         │                           state.code_layer = Some(Arc) iff
-        │                              is_head && !is_empty      :611-615
+        │                              is_head guard             :613
         │                           time travel ⇒ None           :611
         ▼
-   full_code_delta               Snapshot     snapshot.rs:58-77
-        │                        head        methods.rs:669-690
+   full_code_delta               Snapshot     snapshot.rs:58-61
+        │                        head        methods.rs:667-673
         │                          Some(layer) → layer.diff_from(&EMPTY, rev, true)
         │                          None        → produce_code_delta(&state, &EMPTY, …)
         ▼
@@ -489,7 +489,7 @@ The shared clause ("an empty layer is a miss, not a hit") is now stated once in
    selected `project.rs` as the existing home for shared read-path helpers.
 2. A single `impl HeadState { pub(crate) fn servable_code_layer(&self) -> Option<Arc<CodeLayer>> }`
    expressing "an empty head layer is a cache miss", used by `project.rs:204`
-   and by `methods.rs:613` (the latter keeping its explicit `is_head &&`
+   and by `methods.rs:613` (the latter keeping its explicit `is_head`
    guard, so the time-travel rule stays visible at the snapshot site).
 3. Comment corrections, which are the actual deliverable:
    - `project.rs:94-104` — add the time-travel `None` producer and state that the
