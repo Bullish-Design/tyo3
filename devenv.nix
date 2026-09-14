@@ -120,6 +120,19 @@ in
 {
   env.GREET = "devenv";
 
+  # repoman — the manager conductor (repoman/README.md). Only `git` is wired:
+  # this repo uses GitMan for version control, and has neither a copyroom
+  # template (no copyroom.project.yml / copier answers) nor testee (its own
+  # devenv test scripts own verification). `repoman.nativeBuild` stays at its
+  # default false so the gitman manager does NOT provision a second Rust
+  # toolchain — this repo already declares `languages.rust` below.
+  #
+  # `cliProvider` is deliberately unset: vendomat's toolchain module sets it to
+  # "store". See the comment on the vendomat input in devenv.yaml for why the
+  # "venv" provider would break this project.
+  repoman.enable = true;
+  repoman.managers = [ "git" ];
+
   # tyo3.nvim hermetic plugin stack (Phase F). Exported in every devenv shell so
   # the Lua UI specs (via tests/bootstrap.lua) and the demos (via demo/pack.lua)
   # resolve the pinned curated plugins + python grammar from the Nix store. Unset
