@@ -13,7 +13,6 @@ use ruff_db::files::File;
 use ruff_db::parsed::parsed_module;
 use ruff_db::source::source_text;
 use ruff_python_ast::Stmt;
-use ruff_source_file::LineIndex;
 use ruff_text_size::TextRange;
 use ty_project::Db;
 
@@ -165,7 +164,6 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
 
         let src = source_text(&state.db, *file);
         let source_str = src.as_str();
-        let line_index = LineIndex::from_source_text(source_str);
 
         // Index the file's parsed statements by range once: an entity's
         // `full_range` looks up its defining `Stmt` here for AST-canonical
@@ -177,22 +175,24 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
         // avoid double-processing symbols that appear both as a root entry and
         // as a child.
         let mut visited: HashSet<ty_ide::SymbolId> = HashSet::new();
+        let ctx = EntityWalkCtx {
+            hierarchical: &hierarchical,
+            source: source_str,
+            stmt_index: &stmt_index,
+            file_path: &file_path,
+            policy: &policy,
+        };
 
         for (id, info) in hierarchical.iter() {
             if visited.contains(&id) {
                 continue;
             }
             collect_entities_recursive(
-                &hierarchical,
+                &ctx,
                 id,
                 &info,
-                source_str,
-                &stmt_index,
-                &line_index,
-                &file_path,
                 None,
                 None,
-                &policy,
                 &mut entities,
                 &mut visited,
             );
@@ -202,22 +202,21 @@ pub fn extract_entities_for(state: &TyProjectState, files: &HashSet<String>) -> 
     entities
 }
 
+struct EntityWalkCtx<'a> {
+    hierarchical: &'a ty_ide::HierarchicalSymbols,
+    source: &'a str,
+    stmt_index: &'a HashMap<TextRange, &'a Stmt>,
+    file_path: &'a str,
+    policy: &'a HashPolicy,
+}
+
 /// Recursively walk a hierarchical symbol subtree, building `Entity` records.
-// Threads a fixed analysis context plus the current tree node through the
-// recursion; folding the context into a struct is a tracked follow-up
-// (see PROGRESS §9.14).
-#[allow(clippy::too_many_arguments)]
 fn collect_entities_recursive(
-    hierarchical: &ty_ide::HierarchicalSymbols,
+    ctx: &EntityWalkCtx<'_>,
     id: ty_ide::SymbolId,
     info: &ty_ide::SymbolInfo,
-    source_str: &str,
-    stmt_index: &HashMap<TextRange, &Stmt>,
-    _line_index: &LineIndex,
-    file_path: &str,
     parent_qualified: Option<&str>,
     parent_dotted: Option<&str>,
-    policy: &HashPolicy,
     entities: &mut Vec<Entity>,
     visited: &mut HashSet<ty_ide::SymbolId>,
 ) {
@@ -228,7 +227,7 @@ fn collect_entities_recursive(
     // The `::`-joined, file-prefixed registry key (EXACT match key).
     let qualified_path = match parent_qualified {
         Some(p) => format!("{}::{}", p, name),
-        None => format!("{}::{}", file_path, name),
+        None => format!("{}::{}", ctx.file_path, name),
     };
     // The leaf-relative dotted name the graph node carries (`User.save`).
     let dotted_qualified_name = match parent_dotted {
@@ -238,9 +237,14 @@ fn collect_entities_recursive(
     let container = parent_qualified.map(|s| s.to_string());
 
     // Hash a canonical rendering of the entity's AST subtree (the statement
-    // whose range matches `full_range`). `source_str` is only the degraded
+    // whose range matches `full_range`). `ctx.source` is only the degraded
     // fallback when no statement matches.
-    let normal_form = entity_normal_form(stmt_index, info.full_range, source_str, policy);
+    let normal_form = entity_normal_form(
+        ctx.stmt_index,
+        info.full_range,
+        ctx.source,
+        ctx.policy,
+    );
     let content_hash = hash_entity(&normal_form);
 
     entities.push(Entity {
@@ -249,29 +253,24 @@ fn collect_entities_recursive(
         content_hash,
         container,
         name: name.to_string(),
-        file: file_path.to_string(),
+        file: ctx.file_path.to_string(),
         full_range: info.full_range,
         name_range: info.name_range,
         qualified_name: dotted_qualified_name.clone(),
     });
 
     // Recurse into children.
-    let children: Vec<_> = hierarchical.children(id).collect();
+    let children: Vec<_> = ctx.hierarchical.children(id).collect();
     for (child_id, child_info) in children {
         if visited.contains(&child_id) {
             continue;
         }
         collect_entities_recursive(
-            hierarchical,
+            ctx,
             child_id,
             &child_info,
-            source_str,
-            stmt_index,
-            _line_index,
-            file_path,
             Some(&qualified_path),
             Some(&dotted_qualified_name),
-            policy,
             entities,
             visited,
         );
