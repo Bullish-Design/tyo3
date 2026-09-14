@@ -496,7 +496,7 @@ impl PySnapshot {
         let state = guard
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("Snapshot is closed"))?;
-        Ok(super::identity_ops::locate(state.registry.as_ref(), durable_id))
+        Ok(super::identity_ops::locate(&state.registry, durable_id))
     }
 
     /// DurableIds flagged `needs_review` at this revision.
@@ -511,7 +511,7 @@ impl PySnapshot {
         Ok(super::identity_ops::needs_review(
             &self.config,
             state.authored.as_ref(),
-            state.registry.as_ref(),
+            &state.registry,
         ))
     }
 
@@ -524,7 +524,7 @@ impl PySnapshot {
         let state = guard
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("Snapshot is closed"))?;
-        Ok(super::identity_ops::orphaned(state.registry.as_ref()))
+        Ok(super::identity_ops::orphaned(&state.registry))
     }
 
     // ── Authored reads ──────────────────────────────────────
@@ -546,7 +546,7 @@ impl PySnapshot {
         })?;
 
         let authored_store = state.authored.as_ref();
-        let registry = state.registry.as_ref();
+        let registry = &state.registry;
 
         let (value, rev, status_str) = match authored_store {
             Some(store) => {
@@ -647,4 +647,3 @@ impl PySnapshot {
         Ok(())
     }
 }
-

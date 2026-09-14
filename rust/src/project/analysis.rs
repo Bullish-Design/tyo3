@@ -125,7 +125,7 @@ pub(crate) fn compute_document_symbols(
             &file_path,
             None,
             None,
-            state.registry.as_ref(),
+            &state.registry,
             policies_ref,
             default_profile,
             &mut symbols,
@@ -658,4 +658,3 @@ pub(crate) fn compute_hover(
         }
     }
 }
-

@@ -621,7 +621,7 @@ impl PyTyProject {
         drop(guard); // release the head lock BEFORE the (cold) db build
 
         let mut state = build_frozen(root, generation, rev, hash_policies, default_hash_profile);
-        state.registry = Some(registry);
+        state.registry = registry;
         state.authored = authored;
         Ok(PySnapshot {
             inner: Mutex::new(Some(state)),
@@ -686,7 +686,7 @@ impl PyTyProject {
     fn locate(&self, durable_id: &str) -> PyResult<Option<String>> {
         let guard = lock_state(&self.inner, "locate")?;
         let head = guard.as_ref().unwrap();
-        Ok(super::identity_ops::locate(Some(&head.registry), durable_id))
+        Ok(super::identity_ops::locate(&head.registry, durable_id))
     }
 
     /// List DurableIds whose body now differs from the hash captured when their
@@ -697,7 +697,7 @@ impl PyTyProject {
         Ok(super::identity_ops::needs_review(
             &head.config,
             Some(&head.authored),
-            Some(&head.registry),
+            &head.registry,
         ))
     }
 
@@ -705,7 +705,7 @@ impl PyTyProject {
     fn orphaned(&self) -> PyResult<Vec<String>> {
         let guard = lock_state(&self.inner, "orphaned")?;
         let head = guard.as_ref().unwrap();
-        Ok(super::identity_ops::orphaned(Some(&head.registry)))
+        Ok(super::identity_ops::orphaned(&head.registry))
     }
 }
 

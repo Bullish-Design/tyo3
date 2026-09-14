@@ -81,7 +81,7 @@ pub fn collect_symbols_recursive(
     file_path: &str,
     parent_name: Option<&str>,
     parent_identity_path: Option<&str>,
-    registry: Option<&IdentityRegistry>,
+    registry: &IdentityRegistry,
     hash_policies: Option<&std::collections::HashMap<String, crate::hash::HashPolicy>>,
     default_profile_name: Option<&str>,
     symbols: &mut Vec<dto::SymbolDto>,
@@ -91,7 +91,7 @@ pub fn collect_symbols_recursive(
         Some(p) => format!("{}::{}", p, info.name),
         None => format!("{}::{}", file_path, info.name),
     };
-    let anchor = registry.and_then(|r| r.by_path(&identity_path).and_then(|id| r.get(id)));
+    let anchor = registry.by_path(&identity_path).and_then(|id| registry.get(id));
 
     // Compute per-profile content hashes from a canonical rendering of the
     // entity's AST subtree (looked up in `stmt_index` by `full_range`).

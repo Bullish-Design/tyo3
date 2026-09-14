@@ -7,10 +7,9 @@
 //! them the same way — so the logic lives here once and each caller supplies
 //! its own state.
 //!
-//! Every function takes the registry as an `Option`, because a state captured
-//! before the identity layer was configured legitimately has none. `None` means
-//! "no identity registered", which is the same answer as "not found": `None` or
-//! an empty list, never an error.
+//! Every state carries a registry. An empty registry means "no identity
+//! registered", which is the same answer as "not found": `None` or an empty
+//! list, never an error.
 
 use super::*;
 
@@ -25,9 +24,7 @@ pub(crate) fn id_for(
     line: u32,
     col: u32,
 ) -> PyResult<Option<String>> {
-    let Some(registry) = state.registry.as_ref() else {
-        return Ok(None);
-    };
+    let registry = &state.registry;
 
     let file = crate::files::resolve_file(&state.db, state.root.as_std_path(), path)
         .map_err(|e| PathResolutionError::new_err(e.to_string()))?;
@@ -65,8 +62,7 @@ pub(crate) fn id_for(
 ///
 /// `None` if the id is not in this registry — retired, from another session,
 /// or not yet created at this revision.
-pub(crate) fn locate(registry: Option<&IdentityRegistry>, durable_id: &str) -> Option<String> {
-    let registry = registry?;
+pub(crate) fn locate(registry: &IdentityRegistry, durable_id: &str) -> Option<String> {
     let id = DurableId(durable_id.to_string());
     registry.get(&id).map(|a| a.qualified_path.clone())
 }
@@ -80,21 +76,15 @@ pub(crate) fn locate(registry: Option<&IdentityRegistry>, durable_id: &str) -> O
 pub(crate) fn needs_review(
     config: &ValidatedConfig,
     authored: Option<&AuthoredStore>,
-    registry: Option<&IdentityRegistry>,
+    registry: &IdentityRegistry,
 ) -> Vec<String> {
-    match (authored, registry) {
-        (Some(authored), Some(registry)) => {
-            super::commit::needs_review_ids(config, authored, registry)
-        }
-        _ => Vec::new(),
-    }
+    authored.map_or_else(Vec::new, |authored| {
+        super::commit::needs_review_ids(config, authored, registry)
+    })
 }
 
 /// DurableIds currently flagged `Orphaned` in this registry.
-pub(crate) fn orphaned(registry: Option<&IdentityRegistry>) -> Vec<String> {
-    let Some(registry) = registry else {
-        return Vec::new();
-    };
+pub(crate) fn orphaned(registry: &IdentityRegistry) -> Vec<String> {
     registry
         .iter()
         .filter(|a| a.status == crate::identity::IdentityStatus::Orphaned)

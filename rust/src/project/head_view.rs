@@ -352,7 +352,7 @@ impl PyHeadView {
     fn locate(&self, durable_id: &str) -> PyResult<Option<String>> {
         let guard = lock_state(&self.inner, "locate")?;
         let head = guard.as_ref().unwrap();
-        Ok(super::identity_ops::locate(Some(&head.registry), durable_id))
+        Ok(super::identity_ops::locate(&head.registry, durable_id))
     }
 
     fn needs_review(&self) -> PyResult<Vec<String>> {
@@ -361,14 +361,14 @@ impl PyHeadView {
         Ok(super::identity_ops::needs_review(
             &head.config,
             Some(&head.authored),
-            Some(&head.registry),
+            &head.registry,
         ))
     }
 
     fn orphaned(&self) -> PyResult<Vec<String>> {
         let guard = lock_state(&self.inner, "orphaned")?;
         let head = guard.as_ref().unwrap();
-        Ok(super::identity_ops::orphaned(Some(&head.registry)))
+        Ok(super::identity_ops::orphaned(&head.registry))
     }
 
     // ── Hover ────────────────────────────────────────────────────
@@ -386,4 +386,3 @@ impl PyHeadView {
         }
     }
 }
-

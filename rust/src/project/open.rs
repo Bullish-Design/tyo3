@@ -231,7 +231,7 @@ pub(crate) fn build_frozen(
     TyProjectState {
         db,
         root,
-        registry: None,
+        registry: IdentityRegistry::default(),
         hash_policy: if let Some(p) = hash_policies.get(&default_hash_profile) {
             *p
         } else {
@@ -242,4 +242,3 @@ pub(crate) fn build_frozen(
         authored: None,
     }
 }
-

@@ -81,7 +81,7 @@ impl AnalysisError {
 pub(crate) struct TyProjectState {
     pub(crate) db: ProjectDatabase,
     pub(crate) root: SystemPathBuf,
-    pub(crate) registry: Option<IdentityRegistry>,
+    pub(crate) registry: IdentityRegistry,
     pub(crate) hash_policy: HashPolicy,
     /// Per-profile hash policies derived from the validated config.
     /// Map key is the profile name (e.g. "structure", "semantic").
@@ -175,7 +175,7 @@ impl ReadCloneSource for HeadState {
         TyProjectState {
             db: self.db.clone(),
             root: self.root.clone(),
-            registry: Some(self.registry.clone()),
+            registry: self.registry.clone(),
             hash_policy: self.hash_policy,
             hash_policies: self.hash_policies.clone(),
             default_hash_profile: self.default_hash_profile.clone(),
@@ -895,7 +895,7 @@ mod phase5_concurrency_tests {
                 TyProjectState {
                     db: snap.db.clone(),
                     root: snap.root.clone(),
-                    registry: None,
+                    registry: IdentityRegistry::default(),
                     hash_policy: snap.hash_policy,
                     hash_policies: std::collections::HashMap::new(),
                     default_hash_profile: "structure".to_string(),

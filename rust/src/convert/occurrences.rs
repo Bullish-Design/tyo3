@@ -278,7 +278,7 @@ mod tests {
             crate::project::TyProjectState {
                 db,
                 root,
-                registry: None,
+                registry: crate::identity::IdentityRegistry::default(),
                 hash_policy: crate::hash::HashPolicy::default(),
                 hash_policies: std::collections::HashMap::new(),
                 default_hash_profile: "structure".to_string(),

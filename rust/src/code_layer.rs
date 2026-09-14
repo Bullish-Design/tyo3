@@ -1491,7 +1491,7 @@ mod tests {
         let mut state = TyProjectState {
             db,
             root,
-            registry: None,
+            registry: crate::identity::IdentityRegistry::default(),
             hash_policy: HashPolicy::default(),
             hash_policies: std::collections::HashMap::new(),
             default_hash_profile: "structure".to_string(),
@@ -1501,7 +1501,7 @@ mod tests {
         let entities = crate::entity::extract_entities(&state);
         let mut registry = crate::identity::IdentityRegistry::default();
         crate::identity::reconcile(&mut registry, &entities, crate::content::Revision(1));
-        state.registry = Some(registry);
+        state.registry = registry;
         (dir, state)
     }
 

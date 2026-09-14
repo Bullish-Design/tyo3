@@ -257,7 +257,7 @@ pub(crate) fn compute_authored_lifecycle(
 /// ```
 pub(crate) fn derive_authored_status(
     config: &ValidatedConfig,
-    registry: Option<&IdentityRegistry>,
+    registry: &IdentityRegistry,
     layer: &str,
     id: &str,
     reviewed_hash: Option<ContentHash>,
@@ -276,13 +276,13 @@ pub(crate) fn derive_authored_status(
     let durable = DurableId(id.to_string());
     // Orphaned stays registry-driven and takes precedence over needs_review.
     if matches!(
-        registry.and_then(|r| r.status_of(&durable)),
+        registry.status_of(&durable),
         Some(IdentityStatus::Orphaned)
     ) {
         return "orphaned".to_string();
     }
     // Level comparison: stale iff the body differs from the author-time hash.
-    let current_hash = registry.and_then(|r| r.get(&durable)).map(|a| a.content_hash);
+    let current_hash = registry.get(&durable).map(|a| a.content_hash);
     match (reviewed_hash, current_hash) {
         (Some(rh), Some(ch)) if rh != ch => "needs_review".to_string(),
         _ => "present".to_string(),
@@ -356,7 +356,7 @@ pub(crate) fn run_identity_reconciliation(
     let state = TyProjectState {
         db: head.db.clone(),
         root: head.root.clone(),
-        registry: None,
+        registry: head.registry.clone(),
         hash_policy: head.hash_policy,
         hash_policies: head.hash_policies.clone(),
         default_hash_profile: head.default_hash_profile.clone(),
