@@ -345,7 +345,7 @@ def test_dispatch_missing_param(handlers):
 
 
 def test_dispatch_known_methods_present(handlers):
-    for m in ("open", "sync_buffer", "entity_at", "decorate", "author", "locate", "diff", "derived"):
+    for m in ("open", "sync_buffer", "entity_at", "decorate", "author", "locate", "diff", "derived", "impact"):
         assert m in handlers.methods
 
 
@@ -464,6 +464,43 @@ def test_symbols_rejects_bad_query(handlers):
 
 def test_symbols_registered(handlers):
     assert "symbols" in handlers.methods
+
+
+# ── impact ───────────────────────────────────────────────────────────────────
+
+
+def test_impact_reports_transitive_dependents(handlers):
+    result = handlers.impact({"path": "money.py", "line": 1, "col": 5})
+    assert result is not None
+    assert result["durable_id"]
+    assert "checkout" in {item["name"] for item in result["dependents"]}
+    assert result["count"] == len(result["dependents"])
+    assert isinstance(result["revision"], int)
+
+
+def test_impact_leaf_returns_empty_dependents(handlers):
+    candidates = handlers.symbols({})["symbols"]
+    leaf = next(
+        (symbol for symbol in candidates if handlers.impact({"durable_id": symbol["durable_id"]})["dependents"] == []),
+        None,
+    )
+    assert leaf is not None, "shop fixture should contain a leaf entity"
+    result = handlers.impact({"durable_id": leaf["durable_id"]})
+    assert result is not None
+    assert result["dependents"] == []
+    assert result["count"] == 0
+
+
+def test_impact_off_entity_is_null(handlers):
+    assert handlers.impact({"path": "store.py", "line": 4, "col": 1}) is None
+
+
+def test_impact_position_and_durable_id_match(handlers):
+    path, line, col = _checkout_position(handlers)
+    by_position = handlers.impact({"path": path, "line": line, "col": col})
+    assert by_position is not None
+    by_id = handlers.impact({"durable_id": by_position["durable_id"]})
+    assert by_id == by_position
 
 
 # ── call_hierarchy ────────────────────────────────────────────────────────────

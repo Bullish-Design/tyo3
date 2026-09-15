@@ -331,6 +331,61 @@ class Handlers:
 
         return self._actor.submit(work)
 
+    def impact(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """What breaks if the entity at this target changes.
+
+        Returns the entity's transitive dependents (semantic edges only),
+        grouped by file. Accepts a position or a durable id — after an edit,
+        the agent's cached positions are stale but its ids are not.
+
+        ``None`` is returned when nothing resolves at the target.
+        """
+        durable_id = params.get("durable_id")
+        if durable_id is None:
+            path = _require(params, "path", str)
+            line = _require(params, "line", int)
+            col = _require(params, "col", int)
+            rel = self._relpath(path)
+        elif not isinstance(durable_id, str):
+            raise ProtocolError("'durable_id' must be a string", code=INVALID_PARAMS)
+
+        def work(s: TyO3Session) -> dict[str, Any] | None:
+            did = durable_id if durable_id is not None else s.id_for(rel, line, col)
+            if did is None:
+                return None
+            with s.snapshot() as snap:
+                g = snap.graph()
+                if _node_by_id(g, did) is None:
+                    return None
+                dependent_ids = sorted(g.transitive_dependents(did))
+                truncated = len(dependent_ids) > _MAX_IMPACT
+                items: list[dict[str, Any]] = []
+                for dep_id in dependent_ids[:_MAX_IMPACT]:
+                    node = _node_by_id(g, dep_id)
+                    if node is None or not is_entity_node(dep_id, external=node.external):
+                        continue
+                    items.append(
+                        {
+                            "durable_id": dep_id,
+                            "name": node.name,
+                            "qualified_name": node.qualified_name,
+                            "kind": node.kind.value,
+                            "path": node.file,
+                            "range": _range_dict(node.range),
+                        }
+                    )
+                items.sort(key=lambda d: (d["path"], d["range"]["start"]["line"]))
+                return {
+                    "durable_id": did,
+                    "dependents": items,
+                    "count": len(items),
+                    "truncated": truncated,
+                    "limit": _MAX_IMPACT,
+                    "revision": snap.revision,
+                }
+
+        return self._actor.submit(work)
+
     # ── Navigation / analysis (the convert/ read surface) ──────────
     # These expose the already-built ``_ReadOps`` methods (read_ops.py) over
     # the wire. They are *reads only* — each runs on the actor over the
@@ -1027,6 +1082,7 @@ _MAX_REFERENCE_BODIES = 3
 # Server-side cap on a ``workspace/symbol`` walk — a short/empty query shouldn't
 # flood the picker with the whole graph.
 _MAX_SYMBOLS = 500
+_MAX_IMPACT = 500
 
 _EXPLAIN_SYSTEM = {
     "explain": (
@@ -1227,6 +1283,7 @@ _METHODS = {
     "reindex": Handlers.reindex,
     "gc": Handlers.gc,
     "check": Handlers.check,
+    "impact": Handlers.impact,
     "references": Handlers.references,
     "definition": Handlers.definition,
     "document_highlights": Handlers.document_highlights,
