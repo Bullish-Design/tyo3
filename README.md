@@ -98,6 +98,46 @@ tyo3-demo https://github.com/psf/requests --keep
 tyo3-demo https://github.com/psf/requests --branch main
 ```
 
+## Agent use
+
+The headless MVP is a synchronous `AgentClient` and the `tyo3-agent` CLI. An
+external agent can run this loop without Neovim or importing TyO3:
+
+1. Connect and read `status`.
+2. Ask `impact` what depends on the entity, then read its `context`.
+3. Write source files with the agent's own filesystem tools.
+4. Call `sync` so TyO3 reindexes the working tree.
+5. Run `check` and `changed` to inspect diagnostics and the precise id-level
+   delta.
+6. Record durable context with `note`, and inspect it with `notes`.
+
+The contract is explicit:
+
+1. The agent owns the filesystem.
+2. TyO3 never writes source files.
+3. The agent never sends overlay text. `sync_buffer` and `sync_buffers` are
+   the Neovim unsaved-buffer path; agents must not call them. Agents use
+   `sync` (reindex) after writing files themselves.
+
+For example:
+
+```bash
+tyo3-agent status
+tyo3-agent impact money.py:1:5
+tyo3-agent context money.py:1:5
+# edit files with the agent's filesystem tools
+tyo3-agent sync
+tyo3-agent check
+tyo3-agent changed --since 1
+```
+
+On the measured 167-file repository, the agent loop costs about **1.3 s** of
+TyO3 overhead per iteration: roughly 1 s for `sync` and 11 ms for a cached
+`check`; reads are milliseconds. These figures come from a release build.
+Before measuring, remove `.tyo3/identity.db`: stale identity records can
+resurrect and corrupt delta counts. Debug builds are valid for correctness
+tests only, never for performance numbers.
+
 ## API
 
 ### `TyO3Session(root)`

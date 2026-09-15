@@ -98,7 +98,8 @@ revisions. Bumping is a deliberate, tested operation:
   `opt-level = 0` and runs the commit path ~6x slower — it is fine for
   correctness tests and **never** valid for a performance number. Symptom: a
   benchmark that is inexplicably slow, or a targeted sync that somehow costs
-  more than a full project rescan. Fix: `devenv shell -- build`.
+  more than a full project rescan. `tyo3.build_profile()` reports which
+  profile is loaded. Fix: `devenv shell -- build`.
 
 ## Project structure
 
