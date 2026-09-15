@@ -41,13 +41,18 @@ _TARGET_RE = re.compile(r"^(.+):(\d+):(\d+)$")
 class _Options:
     root: Path
     json_output: bool
+    socket: Path | None
 
 
 def _discover_root() -> Path:
     """Find the nearest project marker, falling back to the current directory."""
     current = Path.cwd().resolve()
     for candidate in (current, *current.parents):
-        if (candidate / "pyproject.toml").is_file() or (candidate / ".tyo3").is_dir():
+        if (
+            (candidate / "pyproject.toml").is_file()
+            or (candidate / ".tyo3").is_dir()
+            or (candidate / ".git").exists()
+        ):
             return candidate
     return current
 
@@ -57,18 +62,21 @@ def _main(
     ctx: typer.Context,
     root: Annotated[Path | None, typer.Option("--root", help="Project root (default: discovered from cwd).")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Force JSON output.")] = False,
+    socket: Annotated[Path | None, typer.Option("--socket", help="Daemon socket path.")] = None,
 ) -> None:
     """Headless project control for the TyO3 semantic daemon."""
     ctx.ensure_object(dict)
     ctx.obj["root"] = root.resolve() if root is not None else _discover_root()
     ctx.obj["json"] = json_output
+    ctx.obj["socket"] = socket
 
 
 def _options(ctx: typer.Context, root: Path | None, json_output: bool) -> _Options:
     inherited_root = ctx.ensure_object(dict).get("root", _discover_root())
     inherited_json = ctx.ensure_object(dict).get("json", False)
+    inherited_socket = ctx.ensure_object(dict).get("socket")
     selected_root = root.resolve() if root is not None else inherited_root
-    return _Options(root=selected_root, json_output=json_output or inherited_json)
+    return _Options(root=selected_root, json_output=json_output or inherited_json, socket=inherited_socket)
 
 
 def _emit(value: Any, options: _Options) -> None:
@@ -98,7 +106,7 @@ def _error_code(error: AgentError) -> int:
 
 def _call[T](options: _Options, action: Callable[[AgentClient], T]) -> None:
     try:
-        with AgentClient(options.root) as client:
+        with AgentClient(options.root, socket=options.socket) as client:
             result = action(client)
     except AgentError as error:
         typer.echo(f"tyo3-agent: {error}", err=True)

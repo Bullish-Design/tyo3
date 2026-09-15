@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from tests.daemon.conftest import needs_native
 from tyo3.agent import AgentClient, DaemonUnavailable
-from tyo3.agent.cli import app
+from tyo3.agent.cli import _discover_root, app
 
 pytestmark = needs_native
 
@@ -83,6 +83,15 @@ def test_cli_usage_error_is_two_and_daemon_error_is_three(monkeypatch, shop_proj
     assert unavailable_result.exit_code == 3
     assert "test daemon unavailable" in unavailable_result.stderr
     assert unavailable_result.stdout == ""
+
+
+def test_cli_discovers_a_git_only_root(monkeypatch, tmp_path: Path):
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    nested = root / "src"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    assert _discover_root() == root.resolve()
 
 
 def test_cli_help_lists_every_verb():

@@ -40,7 +40,8 @@ end
 --- Stable per-root socket path. The plugin passes this to `--socket`, so it owns
 --- the path (no need to mirror the daemon's own default-hash scheme).
 function M.socket_path(root)
-  local hash = vim.fn.sha256(root):sub(1, 16)
+  local resolved = uv.fs_realpath(root) or root
+  local hash = vim.fn.sha256(resolved):sub(1, 16)
   return socket_dir() .. "/" .. hash .. ".sock"
 end
 

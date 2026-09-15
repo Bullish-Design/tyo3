@@ -26,6 +26,15 @@ local py = table.concat({
 vim.fn.system({ "python", "-c", py, proj })
 check("build shop project", vim.fn.isdirectory(proj) == 1, proj)
 
+local py_socket_hash = vim.fn.system({
+  "python",
+  "-c",
+  "import hashlib, pathlib, sys; print(hashlib.sha256(str(pathlib.Path(sys.argv[1]).resolve()).encode()).hexdigest()[:16])",
+  proj,
+}):gsub("%s+$", "")
+local lua_socket_hash = vim.fn.fnamemodify(require("tyo3.daemon").socket_path(proj), ":t:r")
+check("Python and Neovim socket derivations agree", lua_socket_hash == py_socket_hash, lua_socket_hash .. " != " .. py_socket_hash)
+
 -- ── Configure the plugin (force python -m so no console-script install needed) ──
 require("tyo3").setup({
   daemon_cmd = { "python", "-m", "tyo3.daemon" },

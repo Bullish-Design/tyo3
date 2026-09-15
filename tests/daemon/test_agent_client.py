@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import time
+import threading
 from pathlib import Path
 
 import pytest
 
 from tests.daemon.conftest import needs_native
 from tyo3.agent import AgentClient, EngineError, RequestTimeout
+from tyo3.daemon.server import DaemonServer
 
 pytestmark = needs_native
 
@@ -42,6 +44,24 @@ def test_client_autostarts_and_second_client_joins(shop_project: Path):
         if second is not None:
             second.close()
         _stop_client_daemon(first)
+
+
+def test_client_connects_to_an_explicit_socket(shop_project: Path, tmp_path: Path):
+    socket_path = tmp_path / "explicit.sock"
+    server = DaemonServer(shop_project, socket_path=socket_path)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 15.0
+    while not socket_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    client = AgentClient(shop_project, socket=socket_path)
+    try:
+        assert client.socket_path == socket_path
+        assert client.status()["root"] == str(shop_project.resolve())
+    finally:
+        client.close()
+        server.shutdown()
+        thread.join(timeout=10)
 
 
 def test_client_sync_reindexes_agent_owned_files_without_writing_source(shop_project: Path):

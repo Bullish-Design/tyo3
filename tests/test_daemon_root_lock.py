@@ -6,7 +6,7 @@ daemon therefore replaced the first one's socket silently: the first kept
 running, unreachable, while both held writable sessions over the same
 ``.tyo3/`` sidecar and interleaved writes to one identity registry.
 
-The lock is an ``flock`` on a sibling ``.lock`` file. The kernel drops it when
+The lock is an ``flock`` on ``<root>/.tyo3/daemon.lock``. The kernel drops it when
 the holder exits — cleanly, by signal, or by crash — so a stale lock cannot
 exist and no recovery path is needed.
 """
@@ -40,6 +40,21 @@ def test_second_daemon_on_the_same_root_is_refused():
             with pytest.raises(DaemonAlreadyRunning) as excinfo:
                 second._acquire_lock()
             assert excinfo.value.pid == os.getpid(), "the error names the holder"
+        finally:
+            first._release_lock()
+
+
+def test_second_daemon_with_a_different_socket_on_the_same_root_is_refused():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        proj = _project(root)
+        first = DaemonServer(proj, socket_path=root / "run" / "first.sock")
+        second = DaemonServer(proj, socket_path=root / "run" / "second.sock")
+
+        first._acquire_lock()
+        try:
+            with pytest.raises(DaemonAlreadyRunning):
+                second._acquire_lock()
         finally:
             first._release_lock()
 

@@ -41,11 +41,12 @@ class AgentClient:
         *,
         timeout: float = 30.0,
         startup_timeout: float = 60.0,
+        socket: str | Path | None = None,
     ) -> None:
         self.root = Path(root).resolve()
         self.timeout = timeout
         self.startup_timeout = startup_timeout
-        self.socket_path = default_socket_path(self.root)
+        self.socket_path = Path(socket) if socket is not None else default_socket_path(self.root)
         self.instance_id: str | None = None
         self.restarted = False
         self.notifications: Queue[dict[str, Any]] = Queue()
@@ -195,9 +196,18 @@ class AgentClient:
 
         executable = shutil.which("tyo3-daemon")
         command = (
-            [executable, "--root", str(self.root), "--print-socket"]
+            [executable, "--root", str(self.root), "--socket", str(self.socket_path), "--print-socket"]
             if executable is not None
-            else [sys.executable, "-m", "tyo3.daemon", "--root", str(self.root), "--print-socket"]
+            else [
+                sys.executable,
+                "-m",
+                "tyo3.daemon",
+                "--root",
+                str(self.root),
+                "--socket",
+                str(self.socket_path),
+                "--print-socket",
+            ]
         )
         env = dict(os.environ)
         source_root = str(Path(__file__).resolve().parents[2])

@@ -54,7 +54,7 @@ def default_socket_path(root: str | Path) -> Path:
     same project finds the same daemon.
     """
     resolved = str(Path(root).resolve())
-    digest = hashlib.sha1(resolved.encode()).hexdigest()[:16]
+    digest = hashlib.sha256(resolved.encode()).hexdigest()[:16]
     base = os.environ.get("XDG_RUNTIME_DIR")
     if base:
         parent = Path(base) / "tyo3"
@@ -130,7 +130,7 @@ class DaemonServer:
         self._handlers = Handlers(self._actor, tracker=self._tracker)
         self._pump = BusPump(self._actor, self.broadcast, self.broadcast_delta, tracker=self._tracker)
 
-        self._lock_path = self._socket_path.with_suffix(".lock")
+        self._lock_path = Path(self._root) / ".tyo3" / "daemon.lock"
         self._lock_fd: int | None = None
         self._server_sock: socket.socket | None = None
         self._clients: set[_Client] = set()
