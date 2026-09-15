@@ -32,6 +32,12 @@ pytestmark = needs_native
 _SRC = str(Path(tyo3.__file__).resolve().parent.parent)
 
 
+class _RpcError(RuntimeError):
+    def __init__(self, method: str, error: dict[str, Any]) -> None:
+        super().__init__(f"rpc error for {method}: {error}")
+        self.error = error
+
+
 class _SocketClient:
     """A minimal newline-delimited JSON-RPC client with a reader thread.
 
@@ -81,7 +87,7 @@ class _SocketClient:
                 self._cond.wait(timeout=remaining)
             resp = self._responses.pop(req_id)
         if "error" in resp:
-            raise RuntimeError(f"rpc error for {method}: {resp['error']}")
+            raise _RpcError(method, resp["error"])
         return resp["result"]
 
     def wait_notification(self, method: str, predicate, *, timeout: float = 10.0) -> dict[str, Any]:
@@ -220,6 +226,12 @@ def test_full_flow_over_socket(daemon: _SocketClient):
     deco2 = daemon.request("decorate", {"path": "store.py"})
     entry = next(d for d in deco2 if d["durable_id"] == checkout_id)
     assert entry["note"] == "money shot"
+
+
+def test_engine_error_includes_exception_type(daemon: _SocketClient):
+    with pytest.raises(_RpcError) as exc_info:
+        daemon.request("check", {"path": "does-not-exist.py"})
+    assert exc_info.value.error["data"]["error_type"]
 
 
 def test_per_connection_subscription_filters_deltas(shop_project: Path, tmp_path: Path):

@@ -65,6 +65,11 @@ def test_encode_error_carries_code_and_optional_data():
     assert obj["id"] == 4
 
 
+def test_protocol_error_carries_typed_data():
+    error = P.ProtocolError("bad", code=P.INVALID_PARAMS, request_id=7, data={"field": "x"})
+    assert error.data == {"field": "x"}
+
+
 def test_encode_notification_has_no_id():
     s = P.encode_notification("delta", {"revision": 9})
     obj = json.loads(s)

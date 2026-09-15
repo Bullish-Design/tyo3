@@ -359,7 +359,7 @@ class DaemonServer:
         try:
             req = parse_request(line)
         except ProtocolError as e:
-            client.send(encode_error(e.request_id, e.code, e.message))
+            client.send(encode_error(e.request_id, e.code, e.message, data=e.data))
             return
         if req.is_notification:
             # Editor → daemon notifications are not part of this protocol; ignore.
@@ -396,10 +396,17 @@ class DaemonServer:
             result = self._handlers.dispatch(req.method, req.params)
             client.send(encode_response(req.id, result))
         except ProtocolError as e:
-            client.send(encode_error(req.id, e.code, e.message))
+            client.send(encode_error(req.id, e.code, e.message, data=e.data))
         except Exception as e:  # noqa: BLE001 — engine/handler error → typed error frame
             log.exception("handler error for method %s", req.method)
-            client.send(encode_error(req.id, ENGINE_ERROR, f"{type(e).__name__}: {e}", data={"method": req.method}))
+            client.send(
+                encode_error(
+                    req.id,
+                    ENGINE_ERROR,
+                    f"{type(e).__name__}: {e}",
+                    data={"method": req.method, "error_type": type(e).__name__},
+                )
+            )
 
     def shutdown(self) -> None:
         """Stop the server: close clients, pump, actor, and remove the socket."""

@@ -40,11 +40,19 @@ class ProtocolError(Exception):
     request — or, for an unparseable line, an id-less error frame.
     """
 
-    def __init__(self, message: str, *, code: int = INVALID_REQUEST, request_id: Any = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int = INVALID_REQUEST,
+        request_id: Any = None,
+        data: Any = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.request_id = request_id
+        self.data = data
 
 
 @dataclass(frozen=True)

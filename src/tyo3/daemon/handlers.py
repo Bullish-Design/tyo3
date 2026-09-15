@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import textwrap
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,10 @@ class Handlers:
         self._actor = actor
         self._root = Path(actor.root).resolve()
         self._session_id = hashlib.sha1(str(self._root).encode()).hexdigest()[:12]
+        # ``session_id`` is sha1(root) and is STABLE across daemon restarts, so
+        # a client cannot use it to detect that the revision counter reset.
+        # ``instance_id`` is fresh per daemon process and is the restart signal.
+        self._instance_id = uuid.uuid4().hex
         # Shared, thread-safe record of "what revision last affected each id",
         # populated by the bus pump; read by entity_at. Optional (absent in the
         # handler-only tests, present once the pump is wired).
@@ -79,6 +84,8 @@ class Handlers:
             "engine_version": __version__,
             "root": str(self._root),
             "session_id": self._session_id,
+            "instance_id": self._instance_id,
+            "protocol_version": 1,
             "revision": revision,
             "methods": self.methods,
         }
@@ -90,6 +97,8 @@ class Handlers:
         def work(s: TyO3Session) -> dict[str, Any]:
             return {
                 "session_id": self._session_id,
+                "instance_id": self._instance_id,
+                "protocol_version": 1,
                 "root": str(s.root),
                 "revision": s.head,
                 "files": [str(p) for p in s.files()],
@@ -152,7 +161,9 @@ class Handlers:
             if did is None:
                 return None
             with s.snapshot() as snap:
-                return self._entity_dict(s, snap, did, s.effective_layers)
+                card = self._entity_dict(s, snap, did, s.effective_layers)
+                card["revision"] = snap.revision
+                return card
 
         return self._actor.submit(work)
 
@@ -312,7 +323,11 @@ class Handlers:
             result = s.check_file(rel) if rel is not None else s.check()
             data = result.model_dump(mode="json")
             diags = data.get("diagnostics", data if isinstance(data, list) else [])
-            return {"diagnostics": diags, "count": len(diags) if isinstance(diags, list) else 0}
+            return {
+                "diagnostics": diags,
+                "count": len(diags) if isinstance(diags, list) else 0,
+                "revision": s.read_revision,
+            }
 
         return self._actor.submit(work)
 
@@ -340,7 +355,8 @@ class Handlers:
                 "references": [
                     {"path": str(r.path), "range": _range_dict(r.range), "kind": r.kind.value}
                     for r in s.find_references(rel, line, col, include_decl)
-                ]
+                ],
+                "revision": s.read_revision,
             }
 
         return self._actor.submit(work)
@@ -364,7 +380,8 @@ class Handlers:
                         "selection_range": _range_dict(t.selection_range) if t.selection_range else None,
                     }
                     for t in s.goto_definition(rel, line, col)
-                ]
+                ],
+                "revision": s.read_revision,
             }
 
         return self._actor.submit(work)
@@ -395,7 +412,11 @@ class Handlers:
 
         def work(s: TyO3Session) -> dict[str, Any] | None:
             h = s.hover(rel, line, col)
-            return h.model_dump(mode="json") if h is not None else None
+            if h is None:
+                return None
+            result = h.model_dump(mode="json")
+            result["revision"] = s.read_revision
+            return result
 
         return self._actor.submit(work)
 
@@ -428,6 +449,7 @@ class Handlers:
 
         def work(s: TyO3Session) -> dict[str, Any]:
             out: list[dict[str, Any]] = []
+            truncated = False
             with s.snapshot() as snap:
                 g = snap.graph()
                 for idx in g._graph.node_indices():
@@ -447,9 +469,11 @@ class Handlers:
                         }
                     )
                     if len(out) >= _MAX_SYMBOLS:
+                        truncated = True
                         break
+                revision = snap.revision
             out.sort(key=lambda d: (d["path"], d["range"]["start"]["line"]))
-            return {"symbols": out}
+            return {"symbols": out, "truncated": truncated, "limit": _MAX_SYMBOLS, "revision": revision}
 
         return self._actor.submit(work)
 
@@ -601,7 +625,7 @@ class Handlers:
                 for d in result.diagnostics
                 if d.range is not None and _range_contains(d.range, line, col)
             ]
-            return {"diagnostics": hits, "count": len(hits)}
+            return {"diagnostics": hits, "count": len(hits), "revision": s.read_revision}
 
         return self._actor.submit(work)
 
@@ -879,6 +903,7 @@ class Handlers:
                     reference_bodies.append({"durable_id": rid, "source": _entity_source(snap, rid)})
                     if len(reference_bodies) >= _MAX_REFERENCE_BODIES:
                         break
+            revision = snap.revision
 
         return {
             "durable_id": did,
@@ -889,6 +914,7 @@ class Handlers:
             "references": refs,
             "reference_bodies": reference_bodies,
             "layers": layers,
+            "revision": revision,
         }
 
     # ── Internal joins ─────────────────────────────────────────────

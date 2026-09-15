@@ -189,6 +189,17 @@ class TyO3Session(_ReadOps):
         return self._inner.head
 
     @property
+    def read_revision(self) -> int:
+        """The revision that this session's reads currently observe.
+
+        Reads resolve against a pinned head snapshot that a mutation invalidates,
+        so this is the honest "revision observed for this result" — use it
+        instead of ``head`` when stamping a read response.
+        """
+        self._check_open()
+        return self._native().revision
+
+    @property
     def latest(self) -> LatestView:
         """A floating, warm read view of the live HEAD (Phase 9).
 

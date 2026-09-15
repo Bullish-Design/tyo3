@@ -11,7 +11,9 @@ from __future__ import annotations
 import pytest
 
 from tests.daemon.conftest import needs_native
+from tyo3.daemon.handlers import Handlers
 from tyo3.daemon.protocol import INVALID_PARAMS, METHOD_NOT_FOUND, ProtocolError
+from tyo3.models.navigation import HoverResult
 
 pytestmark = needs_native
 
@@ -28,10 +30,18 @@ def _checkout_position(handlers) -> tuple[str, int, int]:
 # ── open ─────────────────────────────────────────────────────────────────────
 
 
+def test_ping_reports_protocol_and_instance(handlers):
+    result = handlers.ping({})
+    assert result["protocol_version"] == 1
+    assert isinstance(result["instance_id"], str) and result["instance_id"]
+
+
 def test_open_reports_session_and_layers(handlers):
     result = handlers.open({"root": handlers._root})
     assert result["revision"] >= 1
     assert result["session_id"]
+    assert result["protocol_version"] == 1
+    assert result["instance_id"] == handlers.ping({})["instance_id"]
     files = result["files"]
     assert any(f.endswith("store.py") for f in files)
     assert {"intent", "summary", "embed"} <= set(result["layers"])
@@ -49,6 +59,12 @@ def test_entity_at_resolves_checkout(handlers):
     assert card["kind"] == "function"
     assert card["location"].endswith("checkout")
     assert "authored" in card and "derived" in card
+    assert isinstance(card["revision"], int)
+
+
+def test_handlers_get_distinct_instance_ids(handlers):
+    other = Handlers(handlers._actor)
+    assert other.ping({})["instance_id"] != handlers.ping({})["instance_id"]
 
 
 def test_entity_at_off_entity_returns_null(handlers):
@@ -265,6 +281,7 @@ def test_check_returns_diagnostics_shape(handlers):
     assert "diagnostics" in res
     assert isinstance(res["diagnostics"], list)
     assert "count" in res
+    assert isinstance(res["revision"], int)
 
 
 # ── layers / layer_ids (QW3 / QW7) ───────────────────────────────────────────
@@ -361,6 +378,7 @@ def test_references_finds_cross_file_caller(handlers):
         assert "range" in r and "start" in r["range"]
         assert r["range"]["start"]["line"] >= 1
         assert isinstance(r["kind"], str)
+    assert isinstance(res["revision"], int)
 
 
 def test_references_requires_position(handlers):
@@ -381,6 +399,8 @@ def test_hover_returns_contents(handlers):
     assert res is not None
     assert "contents" in res and isinstance(res["contents"], list)
     assert "location" in res
+    assert isinstance(res["revision"], int)
+    HoverResult.model_validate(res)
 
 
 def test_type_hierarchy_reports_supertype(handlers):
@@ -408,6 +428,24 @@ def test_symbols_lists_entities_across_files(handlers):
     for s in res["symbols"]:
         assert s["kind"] != "module"
         assert s["range"]["start"]["line"] >= 1
+    assert res["truncated"] is False
+    assert res["limit"] == 500
+    assert isinstance(res["revision"], int)
+
+
+def test_symbols_reports_when_cap_is_hit(handlers, monkeypatch):
+    import tyo3.daemon.handlers as handler_module
+
+    monkeypatch.setattr(handler_module, "_MAX_SYMBOLS", 1)
+    capped = handlers.symbols({})
+    assert len(capped["symbols"]) == 1
+    assert capped["truncated"] is True
+    assert capped["limit"] == 1
+
+    monkeypatch.setattr(handler_module, "_MAX_SYMBOLS", 500)
+    uncapped = handlers.symbols({"query": "checkout"})
+    assert uncapped["truncated"] is False
+    assert len(uncapped["symbols"]) == 1
 
 
 def test_symbols_query_filters_by_substring(handlers):
@@ -500,6 +538,7 @@ def test_diagnostics_at_returns_filtered_shape(handlers):
     res = handlers.diagnostics_at({"path": "money.py", "line": 1, "col": 5})
     assert "diagnostics" in res and isinstance(res["diagnostics"], list)
     assert res["count"] == len(res["diagnostics"])
+    assert isinstance(res["revision"], int)
 
 
 def test_layer_discovery_verbs_registered(handlers):
@@ -528,6 +567,7 @@ def test_definition_resolves_usage_to_def(handlers):
     for d in defs:
         assert "range" in d and "start" in d["range"]
         assert d["range"]["start"]["line"] >= 1
+    assert isinstance(res["revision"], int)
 
 
 def test_definition_requires_position(handlers):
@@ -639,6 +679,7 @@ def test_context_pack_gathers_source_and_references(handlers):
     assert any(p.endswith("store.py") for p in paths), paths
     assert pack["layers"] == {}, "no authored records yet"
     assert pack["reference_bodies"] == [], "reference bodies only gathered for simplify"
+    assert isinstance(pack["revision"], int)
 
 
 def test_context_pack_surfaces_existing_layers(handlers, ids):
