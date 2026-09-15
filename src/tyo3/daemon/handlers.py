@@ -160,22 +160,31 @@ class Handlers:
         return self._actor.submit(work)
 
     def entity_at(self, params: dict[str, Any]) -> dict[str, Any] | None:
-        """Resolve the entity under *(path, line, col)* (1-based) and return its
-        cross-layer card, or ``null`` if nothing is there."""
-        path = _require(params, "path", str)
-        line = _require(params, "line", int)
-        col = _require(params, "col", int)
-        rel = self._relpath(path)
+        """Resolve an entity by position or durable ID and return its card."""
+        durable_id = params.get("durable_id")
+        if durable_id is None:
+            path = _require(params, "path", str)
+            line = _require(params, "line", int)
+            col = _require(params, "col", int)
+            rel = self._relpath(path)
+        else:
+            if not isinstance(durable_id, str):
+                raise ProtocolError("'durable_id' must be a string", code=INVALID_PARAMS)
+            if any(key in params for key in ("path", "line", "col")):
+                raise ProtocolError("provide either durable_id or a position", code=INVALID_PARAMS)
+            rel = line = col = None
 
         def work(s: TyO3Session) -> dict[str, Any] | None:
             # Identity resolution is a live-registry op (id_for/locate hit the
             # native handle, not a snapshot). The *layer* reads then share one
             # snapshot (QW4) instead of `session.derived` opening a fresh one
             # per layer — one pin/unpin per cursor move, not one per layer.
-            did = s.id_for(rel, line, col)
+            did = durable_id if durable_id is not None else s.id_for(rel, line, col)
             if did is None:
                 return None
             with s.snapshot() as snap:
+                if _node_by_id(snap.graph(), did) is None:
+                    return None
                 card = self._entity_dict(s, snap, did, s.effective_layers)
                 card["revision"] = snap.revision
                 return card
@@ -798,20 +807,28 @@ class Handlers:
     # ── LLM-derived explanation (proj 26 spike) ───────────────────
 
     def context_pack(self, params: dict[str, Any]) -> dict[str, Any] | None:
-        """Gather the LLM context for the entity at *(path, line, col)*: its
-        source, where-it's-used (references), and any existing authored layers.
+        """Gather LLM context for an entity at a position or durable ID: source,
+        where-it's-used (references), and any existing authored layers.
 
         Pure read (no LLM, no commit) — the reusable substrate the ``explain``
         verb runs over, and the same shape an MCP/agent bridge would consume.
         Returns ``null`` if nothing resolves at the position."""
-        path = _require(params, "path", str)
-        line = _require(params, "line", int)
-        col = _require(params, "col", int)
+        durable_id = params.get("durable_id")
+        if durable_id is None:
+            path = _require(params, "path", str)
+            line = _require(params, "line", int)
+            col = _require(params, "col", int)
+            rel = self._relpath(path)
+        else:
+            if not isinstance(durable_id, str):
+                raise ProtocolError("'durable_id' must be a string", code=INVALID_PARAMS)
+            if any(key in params for key in ("path", "line", "col")):
+                raise ProtocolError("provide either durable_id or a position", code=INVALID_PARAMS)
+            rel = line = col = None
         mode = self._explain_mode(params)
-        rel = self._relpath(path)
 
         def work(s: TyO3Session) -> dict[str, Any] | None:
-            did = s.id_for(rel, line, col)
+            did = durable_id if durable_id is not None else s.id_for(rel, line, col)
             if did is None:
                 return None
             return self._gather_context(s, rel, line, col, did, mode=mode)
@@ -934,7 +951,16 @@ class Handlers:
             raise ProtocolError("'mode' must be 'explain' or 'simplify'", code=INVALID_PARAMS)
         return mode
 
-    def _gather_context(self, s: TyO3Session, rel: str, line: int, col: int, did: str, *, mode: str) -> dict[str, Any]:
+    def _gather_context(
+        self,
+        s: TyO3Session,
+        rel: str | None,
+        line: int | None,
+        col: int | None,
+        did: str,
+        *,
+        mode: str,
+    ) -> dict[str, Any] | None:
         """The context pack for *did*: node card, source slice, references, prior
         authored layers, and (simplify only) the bodies of the direct callers.
 
@@ -945,14 +971,20 @@ class Handlers:
         describes the saved body (noted in the write-up)."""
         from tyo3.derive.dag import _entity_source
 
-        # Where-used (cap so a hot symbol doesn't blow up the prompt).
-        refs = [
-            {"path": str(r.path), "range": _range_dict(r.range), "kind": r.kind.value}
-            for r in s.find_references(rel, line, col, include_declaration=False)
-        ][:_MAX_REFERENCES]
-
         with s.snapshot() as snap:
             node = _node_by_id(snap.graph(), did)
+            if node is None:
+                return None
+            if rel is None:
+                rel = node.file
+                line = node.range.start.line
+                col = node.range.start.column
+            assert line is not None and col is not None
+            # Where-used (cap so a hot symbol doesn't blow up the prompt).
+            refs = [
+                {"path": str(r.path), "range": _range_dict(r.range), "kind": r.kind.value}
+                for r in s.find_references(rel, line, col, include_declaration=False)
+            ][:_MAX_REFERENCES]
             source = _entity_source(snap, did)
             layers: dict[str, Any] = {}
             for lname, lcfg in s.effective_layers.items():

@@ -73,6 +73,18 @@ def test_entity_at_off_entity_returns_null(handlers):
     assert card is None
 
 
+def test_entity_at_accepts_durable_id_and_rejects_ambiguous_targets(handlers, ids):
+    card = handlers.entity_at({"durable_id": ids["checkout"]})
+    assert card is not None
+    assert card["durable_id"] == ids["checkout"]
+    assert handlers.entity_at({"durable_id": "missing-id"}) is None
+
+    for params in ({}, {"durable_id": ids["checkout"], "path": "store.py", "line": 1, "col": 1}):
+        with pytest.raises(ProtocolError) as excinfo:
+            handlers.entity_at(params)
+        assert excinfo.value.code == INVALID_PARAMS
+
+
 # ── QW4: one shared snapshot per card ─────────────────────────────────────────
 
 
@@ -725,6 +737,38 @@ def test_context_pack_surfaces_existing_layers(handlers, ids):
 
 def test_context_pack_off_entity_is_null(handlers):
     assert handlers.context_pack({"path": "store.py", "line": 4, "col": 1}) is None
+
+
+def test_context_pack_durable_id_bypasses_symbol_cap(handlers, actor):
+    capped = Handlers(actor, max_symbols=3)
+    all_symbols = handlers.symbols({})["symbols"]
+    capped_ids = {item["durable_id"] for item in capped.symbols({})["symbols"]}
+    target = next(
+        item
+        for item in all_symbols
+        if item["durable_id"] not in capped_ids
+        and handlers.entity_at(
+            {
+                "path": item["path"],
+                "line": item["range"]["start"]["line"],
+                "col": item["range"]["start"]["column"],
+            }
+        )["durable_id"]
+        == item["durable_id"]
+    )
+    target_id = target["durable_id"]
+    start = target["range"]["start"]
+
+    by_id = capped.context_pack({"durable_id": target_id})
+    by_position = capped.context_pack({"path": target["path"], "line": start["line"], "col": start["column"]})
+    assert by_id == by_position
+    assert by_id["durable_id"] == target_id
+    assert capped.context_pack({"durable_id": "missing-id"}) is None
+
+    for params in ({}, {"durable_id": target_id, "path": target["path"], "line": start["line"], "col": start["column"]}):
+        with pytest.raises(ProtocolError) as excinfo:
+            capped.context_pack(params)
+        assert excinfo.value.code == INVALID_PARAMS
 
 
 def test_explain_stores_durable_record(handlers, ids):

@@ -134,16 +134,6 @@ class AgentClient:
 
     def context(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Read source, references, and authored context for a position."""
-        durable_id = params.get("durable_id")
-        if durable_id is not None:
-            symbols = self._request("symbols", {})
-            if not isinstance(symbols, dict):
-                return None
-            entry = next((item for item in symbols.get("symbols", []) if item.get("durable_id") == durable_id), None)
-            if not isinstance(entry, dict):
-                return None
-            start = entry.get("range", {}).get("start", {})
-            params = {"path": entry.get("path"), "line": start.get("line"), "col": start.get("column")}
         return self._request("context_pack", params)
 
     def impact(self, params: dict[str, Any]) -> dict[str, Any] | None:
