@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import time
 import threading
+import json
+import socket
 from pathlib import Path
 
 import pytest
 
 from tests.daemon.conftest import needs_native
-from tyo3.agent import AgentClient, EngineError, RequestTimeout
+from tyo3.agent import AgentClient, DaemonUnavailable, EngineError, RequestTimeout
 from tyo3.daemon.server import DaemonServer
 
 pytestmark = needs_native
@@ -109,9 +111,49 @@ def test_client_timeout_is_unknown_and_follow_up_status_reconciles(shop_project:
             if after == before:
                 time.sleep(0.1)
         assert after == before + 1
+        assert client._pending == set()
+        assert client._responses == {}
         assert any(item["qualified_name"] == "slow_sync_entity" for item in client.find("slow_sync")["symbols"])
     finally:
         _stop_client_daemon(client)
+
+
+def test_client_reports_transport_loss_before_request_timeout(shop_project: Path, tmp_path: Path):
+    socket_path = tmp_path / "drop.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen(1)
+
+    def serve_stub() -> None:
+        conn, _ = listener.accept()
+        with conn:
+            reader = conn.makefile("r", encoding="utf-8", newline="\n")
+            for line in reader:
+                request = json.loads(line)
+                if request["method"] == "ping":
+                    result = {"ok": True, "instance_id": "stub"}
+                elif request["method"] == "open":
+                    result = {"root": str(shop_project.resolve())}
+                else:
+                    return
+                conn.sendall(
+                    (json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}) + "\n").encode()
+                )
+
+    thread = threading.Thread(target=serve_stub, daemon=True)
+    thread.start()
+    client = AgentClient(shop_project, socket=socket_path, timeout=5.0)
+    try:
+        started = time.monotonic()
+        with pytest.raises(DaemonUnavailable):
+            client.check()
+        assert time.monotonic() - started < 1.0
+        assert client._pending == set()
+        assert client._responses == {}
+    finally:
+        client.close()
+        listener.close()
+        thread.join(timeout=5)
 
 
 def test_client_reconnect_converges_without_notification_replay(shop_project: Path):

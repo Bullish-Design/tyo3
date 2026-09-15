@@ -58,8 +58,10 @@ class AgentClient:
         self._write_lock = threading.Lock()
         self._condition = threading.Condition()
         self._responses: dict[int, dict[str, Any]] = {}
+        self._pending: set[int] = set()
         self._next_id = 0
         self._closed = threading.Event()
+        self._transport_dead = threading.Event()
 
         try:
             self._connect_or_start()
@@ -108,6 +110,7 @@ class AgentClient:
         self.close()
         self._closed.clear()
         self._responses.clear()
+        self._pending.clear()
         self._connect_or_start()
         self._bootstrap()
 
@@ -265,6 +268,7 @@ class AgentClient:
         self._sock = sock
         self._reader = sock.makefile("r", encoding="utf-8", newline="\n")
         self._closed.clear()
+        self._transport_dead.clear()
         self._reader_thread = threading.Thread(target=self._read_loop, name="tyo3-agent-reader", daemon=True)
         self._reader_thread.start()
 
@@ -279,14 +283,19 @@ class AgentClient:
                 message = json.loads(line)
                 if isinstance(message, dict) and message.get("id") is not None:
                     with self._condition:
-                        self._responses[message["id"]] = message
-                        self._condition.notify_all()
+                        request_id = message["id"]
+                        if request_id in self._pending:
+                            self._responses[request_id] = message
+                            self._pending.discard(request_id)
+                            self._condition.notify_all()
                 elif isinstance(message, dict) and "method" in message:
                     self.notifications.put(message)
         except (OSError, ValueError, UnicodeError):
             pass
         finally:
             with self._condition:
+                if self._reader is reader:
+                    self._transport_dead.set()
                 self._condition.notify_all()
 
     def _request(self, method: str, params: dict[str, Any], *, timeout: float | None = None) -> Any:
@@ -297,9 +306,11 @@ class AgentClient:
             self._next_id += 1
             request_id = self._next_id
             frame = json.dumps({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}) + "\n"
+            self._pending.add(request_id)
             try:
                 self._sock.sendall(frame.encode("utf-8"))
             except OSError as exc:
+                self._pending.discard(request_id)
                 raise DaemonUnavailable(f"lost connection while sending {method}: {exc}") from exc
 
         deadline = time.monotonic() + wait_for
@@ -307,8 +318,10 @@ class AgentClient:
             while request_id not in self._responses:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
+                    self._pending.discard(request_id)
                     raise RequestTimeout(method, wait_for)
-                if self._closed.is_set():
+                if self._closed.is_set() or self._transport_dead.is_set():
+                    self._pending.discard(request_id)
                     raise DaemonUnavailable(f"lost connection while waiting for {method}")
                 self._condition.wait(timeout=remaining)
             response = self._responses.pop(request_id)
