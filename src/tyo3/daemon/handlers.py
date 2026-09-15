@@ -34,10 +34,23 @@ if TYPE_CHECKING:
     from tyo3.session import Snapshot
 
 
+# Server-side caps on potentially large graph walks. Keep these module defaults
+# for callers that do not need a test or deployment-specific limit.
+_MAX_SYMBOLS = 500
+_MAX_IMPACT = 500
+
+
 class Handlers:
     """The RPC method table, bound to one :class:`SessionActor`."""
 
-    def __init__(self, actor: SessionActor, *, tracker: AffectedTracker | None = None) -> None:
+    def __init__(
+        self,
+        actor: SessionActor,
+        *,
+        tracker: AffectedTracker | None = None,
+        max_symbols: int = _MAX_SYMBOLS,
+        max_impact: int = _MAX_IMPACT,
+    ) -> None:
         self._actor = actor
         self._root = Path(actor.root).resolve()
         self._session_id = hashlib.sha1(str(self._root).encode()).hexdigest()[:12]
@@ -49,6 +62,8 @@ class Handlers:
         # populated by the bus pump; read by entity_at. Optional (absent in the
         # handler-only tests, present once the pump is wired).
         self._tracker = tracker
+        self._max_symbols = max_symbols
+        self._max_impact = max_impact
 
     # ── Dispatch ───────────────────────────────────────────────────
 
@@ -358,9 +373,9 @@ class Handlers:
                 if _node_by_id(g, did) is None:
                     return None
                 dependent_ids = sorted(g.transitive_dependents(did))
-                truncated = len(dependent_ids) > _MAX_IMPACT
+                truncated = len(dependent_ids) > self._max_impact
                 items: list[dict[str, Any]] = []
-                for dep_id in dependent_ids[:_MAX_IMPACT]:
+                for dep_id in dependent_ids[: self._max_impact]:
                     node = _node_by_id(g, dep_id)
                     if node is None or not is_entity_node(dep_id, external=node.external):
                         continue
@@ -380,7 +395,7 @@ class Handlers:
                     "dependents": items,
                     "count": len(items),
                     "truncated": truncated,
-                    "limit": _MAX_IMPACT,
+                    "limit": self._max_impact,
                     "revision": snap.revision,
                 }
 
@@ -523,12 +538,12 @@ class Handlers:
                             "range": _range_dict(node.range),
                         }
                     )
-                    if len(out) >= _MAX_SYMBOLS:
+                    if len(out) >= self._max_symbols:
                         truncated = True
                         break
                 revision = snap.revision
             out.sort(key=lambda d: (d["path"], d["range"]["start"]["line"]))
-            return {"symbols": out, "truncated": truncated, "limit": _MAX_SYMBOLS, "revision": revision}
+            return {"symbols": out, "truncated": truncated, "limit": self._max_symbols, "revision": revision}
 
         return self._actor.submit(work)
 
@@ -1078,11 +1093,6 @@ class Handlers:
 # Bounds so a hot symbol's context stays prompt-sized.
 _MAX_REFERENCES = 12
 _MAX_REFERENCE_BODIES = 3
-
-# Server-side cap on a ``workspace/symbol`` walk — a short/empty query shouldn't
-# flood the picker with the whole graph.
-_MAX_SYMBOLS = 500
-_MAX_IMPACT = 500
 
 _EXPLAIN_SYSTEM = {
     "explain": (

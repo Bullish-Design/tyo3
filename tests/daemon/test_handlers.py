@@ -433,19 +433,16 @@ def test_symbols_lists_entities_across_files(handlers):
     assert isinstance(res["revision"], int)
 
 
-def test_symbols_reports_when_cap_is_hit(handlers, monkeypatch):
-    import tyo3.daemon.handlers as handler_module
-
-    monkeypatch.setattr(handler_module, "_MAX_SYMBOLS", 1)
-    capped = handlers.symbols({})
+def test_symbols_reports_when_cap_is_hit(handlers, actor):
+    capped = Handlers(actor, max_symbols=1).symbols({})
     assert len(capped["symbols"]) == 1
     assert capped["truncated"] is True
     assert capped["limit"] == 1
 
-    monkeypatch.setattr(handler_module, "_MAX_SYMBOLS", 500)
     uncapped = handlers.symbols({"query": "checkout"})
     assert uncapped["truncated"] is False
     assert len(uncapped["symbols"]) == 1
+    assert uncapped["limit"] == 500
 
 
 def test_symbols_query_filters_by_substring(handlers):
