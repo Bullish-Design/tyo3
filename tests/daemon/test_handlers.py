@@ -91,9 +91,8 @@ def test_entity_at_accepts_durable_id_and_rejects_ambiguous_targets(handlers, id
 def _count_snapshots(actor, monkeypatch):
     """Spy on the session's ``snapshot()`` and return a mutable call counter.
 
-    Patches the live session instance (shared with the actor thread) so any
-    explicit ``s.snapshot()`` in a handler is counted. Does not affect the
-    cached head snapshot (``_native()`` uses the native handle directly)."""
+    Patches the live session instance (shared with the actor thread), so cache
+    misses are counted while cache hits remain at zero."""
     session = actor.submit(lambda s: s)
     real = session.snapshot
     calls = {"n": 0}
@@ -117,15 +116,15 @@ def test_entity_at_card_is_multilayer_and_consistent(handlers, ids):
     assert card["derived"]["summary"]["status"] == "fresh"
 
 
-def test_entity_at_opens_one_snapshot_per_card(handlers, ids, actor, monkeypatch):
-    """A K-layer card opens exactly **one** snapshot, not one per layer (QW4)."""
+def test_entity_at_reuses_cached_snapshot(handlers, ids, actor, monkeypatch):
+    """A K-layer card reuses the handler's pinned snapshot across reads."""
     handlers.author({"layer": "intent", "durable_id": ids["checkout"], "value": {"note": "x"}})
-    # Resolve the position *before* spying (decorate now opens a snapshot too).
+    # Resolve the position *before* spying; decorate pins the head snapshot.
     path, line, col = _checkout_position(handlers)
     calls = _count_snapshots(actor, monkeypatch)
     card = handlers.entity_at({"path": path, "line": line, "col": col})
     assert card is not None
-    assert calls["n"] == 1, "the whole card reads off a single snapshot"
+    assert calls["n"] == 0, "the card reuses the pinned head snapshot"
 
 
 def test_decorate_opens_one_snapshot_for_the_file(handlers, actor, monkeypatch):
@@ -134,6 +133,37 @@ def test_decorate_opens_one_snapshot_for_the_file(handlers, actor, monkeypatch):
     deco = handlers.decorate({"path": "store.py"})
     assert deco, "entities decorated"
     assert calls["n"] == 1, "one snapshot for the whole file walk"
+
+
+def test_graph_reads_reuse_snapshot_at_one_revision(handlers, actor, monkeypatch):
+    """Repeated graph-backed reads share one snapshot and one graph build."""
+    calls = _count_snapshots(actor, monkeypatch)
+    first = handlers.symbols({})
+    second = handlers.symbols({"query": "checkout"})
+    assert calls["n"] == 1
+    assert second["revision"] == first["revision"]
+
+
+def test_graph_reads_refresh_after_reindex(handlers, shop_project):
+    """A disk write followed by reindex invalidates the cached read snapshot."""
+    before = handlers.symbols({})
+    path = shop_project / "cache_refresh.py"
+    path.write_text("def cache_refresh() -> int:\n    return 1\n")
+
+    delta = handlers.reindex({})
+    symbols = handlers.symbols({"query": "cache_refresh"})
+    entry = next(item for item in symbols["symbols"] if item["name"] == "cache_refresh")
+    card = handlers.entity_at({"durable_id": entry["durable_id"]})
+    context = handlers.context_pack({"durable_id": entry["durable_id"]})
+    impact = handlers.impact({"durable_id": entry["durable_id"]})
+
+    assert delta["revision"] > before["revision"]
+    assert symbols["revision"] == delta["revision"]
+    assert card is not None and card["revision"] == delta["revision"]
+    assert context is not None and context["revision"] == delta["revision"]
+    assert impact is not None and impact["revision"] == delta["revision"]
+    assert "def cache_refresh() -> int:" in context["source"]
+    assert "return 1" in context["source"]
 
 
 # ── decorate ─────────────────────────────────────────────────────────────────

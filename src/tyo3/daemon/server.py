@@ -437,6 +437,10 @@ class DaemonServer:
         except Exception:
             log.exception("error stopping bus pump")
         try:
+            self._actor.submit(lambda _s: self._handlers.close())
+        except Exception:
+            log.exception("error closing handler read snapshot")
+        try:
             self._actor.stop()
         except Exception:
             log.exception("error stopping session actor")

@@ -19,6 +19,8 @@ import pytest
 
 from tests.conftest import FIXTURES_DIR
 from tyo3 import TyO3Session, require_release_build
+from tyo3.daemon.handlers import Handlers
+from tyo3.daemon.session_actor import SessionActor
 
 
 pytestmark = pytest.mark.benchmark
@@ -105,3 +107,23 @@ def test_reindex_check_and_diff_costs(tmp_path: Path) -> None:
     finally:
         before.close()
         session.close()
+
+
+def test_daemon_head_read_cache_cost(tmp_path: Path) -> None:
+    """Measure repeated daemon graph reads served by one pinned head snapshot."""
+    require_release_build()
+    project = _fresh_project(tmp_path)
+    actor = SessionActor(str(project))
+    actor.start()
+    handlers = Handlers(actor)
+    try:
+        first = handlers.symbols({})
+        started = time.perf_counter()
+        for _ in range(25):
+            result = handlers.symbols({})
+        elapsed = time.perf_counter() - started
+        print(f"daemon symbols (25 cached reads): {elapsed:.3f}s")
+        assert result["revision"] == first["revision"]
+    finally:
+        actor.submit(lambda _s: handlers.close())
+        actor.stop()

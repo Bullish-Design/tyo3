@@ -64,6 +64,34 @@ class Handlers:
         self._tracker = tracker
         self._max_symbols = max_symbols
         self._max_impact = max_impact
+        # The actor is the sole owner of this snapshot.  Keeping one pinned
+        # head snapshot lets the graph cache survive the burst of reads caused
+        # by an editor refresh, while the revision key keeps reads coherent
+        # across commits.
+        self._read_snap: Snapshot | None = None
+        self._read_snap_rev: int | None = None
+
+    def _pinned(self, s: TyO3Session) -> Snapshot:
+        """Return the cached read snapshot for the actor's current head."""
+        if self._read_snap is not None and self._read_snap_rev == s.head:
+            return self._read_snap
+        self._invalidate_read_snapshot()
+        snap = s.snapshot()
+        self._read_snap = snap
+        self._read_snap_rev = snap.revision
+        return snap
+
+    def _invalidate_read_snapshot(self) -> None:
+        """Close the cached head snapshot after a session mutation."""
+        snap = self._read_snap
+        self._read_snap = None
+        self._read_snap_rev = None
+        if snap is not None:
+            snap.close()
+
+    def close(self) -> None:
+        """Release the cached read snapshot on the actor's owner thread."""
+        self._invalidate_read_snapshot()
 
     # ── Dispatch ───────────────────────────────────────────────────
 
@@ -132,6 +160,7 @@ class Handlers:
 
         def work(s: TyO3Session) -> dict[str, Any]:
             delta = s.edit(rel, text)
+            self._invalidate_read_snapshot()
             return _commit_delta_dict(delta)
 
         return self._actor.submit(work)
@@ -155,6 +184,7 @@ class Handlers:
 
         def work(s: TyO3Session) -> dict[str, Any]:
             delta = s.edit_many(rel_edits)
+            self._invalidate_read_snapshot()
             return _commit_delta_dict(delta)
 
         return self._actor.submit(work)
@@ -182,12 +212,12 @@ class Handlers:
             did = durable_id if durable_id is not None else s.id_for(rel, line, col)
             if did is None:
                 return None
-            with s.snapshot() as snap:
-                if _node_by_id(snap.graph(), did) is None:
-                    return None
-                card = self._entity_dict(s, snap, did, s.effective_layers)
-                card["revision"] = snap.revision
-                return card
+            snap = self._pinned(s)
+            if _node_by_id(snap.graph(), did) is None:
+                return None
+            card = self._entity_dict(s, snap, did, s.effective_layers)
+            card["revision"] = snap.revision
+            return card
 
         return self._actor.submit(work)
 
@@ -205,29 +235,29 @@ class Handlers:
             out: list[dict[str, Any]] = []
             # One snapshot for the whole file walk (QW4): the graph and every
             # note/summary read resolve against the same pinned revision.
-            with s.snapshot() as snap:
-                g = snap.graph()
-                for idx in g._graph.node_indices():
-                    node = g._graph[idx]
-                    if node.file != rel or not is_entity_node(node.durable_id, external=node.external):
-                        continue
-                    did = node.durable_id
-                    item: dict[str, Any] = {
-                        "durable_id": did,
-                        "name": node.name,
-                        "qualified_name": node.qualified_name,
-                        "kind": node.kind.value,
-                        "range": _range_dict(node.range),
-                    }
-                    if note_layer is not None:
-                        note = self._read_note(snap, note_layer, did)
-                        if note is not None:
-                            item["note"] = note
-                    if summary_layer is not None:
-                        summary = self._read_summary(snap, summary_layer, did)
-                        if summary is not None:
-                            item["summary"] = summary
-                    out.append(item)
+            snap = self._pinned(s)
+            g = snap.graph()
+            for idx in g._graph.node_indices():
+                node = g._graph[idx]
+                if node.file != rel or not is_entity_node(node.durable_id, external=node.external):
+                    continue
+                did = node.durable_id
+                item: dict[str, Any] = {
+                    "durable_id": did,
+                    "name": node.name,
+                    "qualified_name": node.qualified_name,
+                    "kind": node.kind.value,
+                    "range": _range_dict(node.range),
+                }
+                if note_layer is not None:
+                    note = self._read_note(snap, note_layer, did)
+                    if note is not None:
+                        item["note"] = note
+                if summary_layer is not None:
+                    summary = self._read_summary(snap, summary_layer, did)
+                    if summary is not None:
+                        item["summary"] = summary
+                out.append(item)
             # Stable order: by start line then column — matches buffer order.
             out.sort(key=lambda d: (d["range"]["start"]["line"], d["range"]["start"]["column"]))
             return out
@@ -244,6 +274,7 @@ class Handlers:
 
         def work(s: TyO3Session) -> dict[str, Any]:
             delta = s.author(layer, durable_id, value)
+            self._invalidate_read_snapshot()
             return {"revision": delta.revision, "durable_id": durable_id, "layer": layer}
 
         return self._actor.submit(work)
@@ -325,6 +356,7 @@ class Handlers:
 
         def work(s: TyO3Session) -> dict[str, Any]:
             delta = s.sync_all()
+            self._invalidate_read_snapshot()
             return _commit_delta_dict(delta)
 
         return self._actor.submit(work)
@@ -334,6 +366,7 @@ class Handlers:
 
         def work(s: TyO3Session) -> dict[str, Any]:
             s.gc()
+            self._invalidate_read_snapshot()
             return {"ok": True, "revision": s.head}
 
         return self._actor.submit(work)
@@ -377,36 +410,36 @@ class Handlers:
             did = durable_id if durable_id is not None else s.id_for(rel, line, col)
             if did is None:
                 return None
-            with s.snapshot() as snap:
-                g = snap.graph()
-                if _node_by_id(g, did) is None:
-                    return None
-                dependent_ids = sorted(g.transitive_dependents(did))
-                truncated = len(dependent_ids) > self._max_impact
-                items: list[dict[str, Any]] = []
-                for dep_id in dependent_ids[: self._max_impact]:
-                    node = _node_by_id(g, dep_id)
-                    if node is None or not is_entity_node(dep_id, external=node.external):
-                        continue
-                    items.append(
-                        {
-                            "durable_id": dep_id,
-                            "name": node.name,
-                            "qualified_name": node.qualified_name,
-                            "kind": node.kind.value,
-                            "path": node.file,
-                            "range": _range_dict(node.range),
-                        }
-                    )
-                items.sort(key=lambda d: (d["path"], d["range"]["start"]["line"]))
-                return {
-                    "durable_id": did,
-                    "dependents": items,
-                    "count": len(items),
-                    "truncated": truncated,
-                    "limit": self._max_impact,
-                    "revision": snap.revision,
-                }
+            snap = self._pinned(s)
+            g = snap.graph()
+            if _node_by_id(g, did) is None:
+                return None
+            dependent_ids = sorted(g.transitive_dependents(did))
+            truncated = len(dependent_ids) > self._max_impact
+            items: list[dict[str, Any]] = []
+            for dep_id in dependent_ids[: self._max_impact]:
+                node = _node_by_id(g, dep_id)
+                if node is None or not is_entity_node(dep_id, external=node.external):
+                    continue
+                items.append(
+                    {
+                        "durable_id": dep_id,
+                        "name": node.name,
+                        "qualified_name": node.qualified_name,
+                        "kind": node.kind.value,
+                        "path": node.file,
+                        "range": _range_dict(node.range),
+                    }
+                )
+            items.sort(key=lambda d: (d["path"], d["range"]["start"]["line"]))
+            return {
+                "durable_id": did,
+                "dependents": items,
+                "count": len(items),
+                "truncated": truncated,
+                "limit": self._max_impact,
+                "revision": snap.revision,
+            }
 
         return self._actor.submit(work)
 
@@ -529,28 +562,28 @@ class Handlers:
         def work(s: TyO3Session) -> dict[str, Any]:
             out: list[dict[str, Any]] = []
             truncated = False
-            with s.snapshot() as snap:
-                g = snap.graph()
-                for idx in g._graph.node_indices():
-                    node = g._graph[idx]
-                    if not is_entity_node(node.durable_id, external=node.external):
-                        continue
-                    if needle is not None and needle not in node.qualified_name.lower():
-                        continue
-                    out.append(
-                        {
-                            "durable_id": node.durable_id,
-                            "name": node.name,
-                            "qualified_name": node.qualified_name,
-                            "kind": node.kind.value,
-                            "path": node.file,
-                            "range": _range_dict(node.range),
-                        }
-                    )
-                    if len(out) >= self._max_symbols:
-                        truncated = True
-                        break
-                revision = snap.revision
+            snap = self._pinned(s)
+            g = snap.graph()
+            for idx in g._graph.node_indices():
+                node = g._graph[idx]
+                if not is_entity_node(node.durable_id, external=node.external):
+                    continue
+                if needle is not None and needle not in node.qualified_name.lower():
+                    continue
+                out.append(
+                    {
+                        "durable_id": node.durable_id,
+                        "name": node.name,
+                        "qualified_name": node.qualified_name,
+                        "kind": node.kind.value,
+                        "path": node.file,
+                        "range": _range_dict(node.range),
+                    }
+                )
+                if len(out) >= self._max_symbols:
+                    truncated = True
+                    break
+            revision = snap.revision
             out.sort(key=lambda d: (d["path"], d["range"]["start"]["line"]))
             return {"symbols": out, "truncated": truncated, "limit": self._max_symbols, "revision": revision}
 
@@ -757,13 +790,13 @@ class Handlers:
             raise ProtocolError("'with_values' must be a boolean", code=INVALID_PARAMS)
 
         def work(s: TyO3Session) -> dict[str, Any]:
-            with s.snapshot() as snap:
-                view = snap.layer(layer)
-                ids = sorted(view.ids())
-                result: dict[str, Any] = {"layer": layer, "ids": ids}
-                if with_values:
-                    result["values"] = {did: _layer_value(view, did) for did in ids}
-                return result
+            snap = self._pinned(s)
+            view = snap.layer(layer)
+            ids = sorted(view.ids())
+            result: dict[str, Any] = {"layer": layer, "ids": ids}
+            if with_values:
+                result["values"] = {did: _layer_value(view, did) for did in ids}
+            return result
 
         return self._actor.submit(work)
 
@@ -783,23 +816,23 @@ class Handlers:
         def work(s: TyO3Session) -> dict[str, Any]:
             flagged = [(i, "needs_review") for i in s.needs_review()] + [(i, "orphaned") for i in s.orphaned()]
             items: list[dict[str, Any]] = []
-            with s.snapshot() as snap:
-                g = snap.graph()
-                for did, state in flagged:
-                    node = _node_by_id(g, did)
-                    if node is None:
-                        continue
-                    if rel is not None and node.file != rel:
-                        continue
-                    items.append(
-                        {
-                            "durable_id": did,
-                            "name": node.name,
-                            "path": node.file,
-                            "range": _range_dict(node.range),
-                            "state": state,
-                        }
-                    )
+            snap = self._pinned(s)
+            g = snap.graph()
+            for did, state in flagged:
+                node = _node_by_id(g, did)
+                if node is None:
+                    continue
+                if rel is not None and node.file != rel:
+                    continue
+                items.append(
+                    {
+                        "durable_id": did,
+                        "name": node.name,
+                        "path": node.file,
+                        "range": _range_dict(node.range),
+                        "state": state,
+                    }
+                )
             return {"items": items}
 
         return self._actor.submit(work)
@@ -885,6 +918,7 @@ class Handlers:
                     "generated_at": _utcnow_iso(),
                 },
             )
+            self._invalidate_read_snapshot()
 
         self._actor.submit(store)
         return {"durable_id": did, "text": text, "mode": mode}
@@ -911,16 +945,16 @@ class Handlers:
             did = s.id_for(rel, line, col)
             if did is None:
                 return None
-            with s.snapshot() as snap:
-                node = _node_by_id(snap.graph(), did)
-                if node is None:
-                    return None
-                return {
-                    "did": did,
-                    "ctx": self._gather_context(s, rel, line, col, did, mode="simplify"),
-                    "range": _range_dict(node.range),
-                    "file": node.file,
-                }
+            snap = self._pinned(s)
+            node = _node_by_id(snap.graph(), did)
+            if node is None:
+                return None
+            return {
+                "did": did,
+                "ctx": self._gather_context(s, rel, line, col, did, mode="simplify"),
+                "range": _range_dict(node.range),
+                "file": node.file,
+            }
 
         prep = self._actor.submit(gather)
         if prep is None:
@@ -971,41 +1005,41 @@ class Handlers:
         describes the saved body (noted in the write-up)."""
         from tyo3.derive.dag import _entity_source
 
-        with s.snapshot() as snap:
-            node = _node_by_id(snap.graph(), did)
-            if node is None:
-                return None
-            if rel is None:
-                rel = node.file
-                line = node.range.start.line
-                col = node.range.start.column
-            assert line is not None and col is not None
-            # Where-used (cap so a hot symbol doesn't blow up the prompt).
-            refs = [
-                {"path": str(r.path), "range": _range_dict(r.range), "kind": r.kind.value}
-                for r in s.find_references(rel, line, col, include_declaration=False)
-            ][:_MAX_REFERENCES]
-            source = _entity_source(snap, did)
-            layers: dict[str, Any] = {}
-            for lname, lcfg in s.effective_layers.items():
-                if lcfg.origin != "authored":
+        snap = self._pinned(s)
+        node = _node_by_id(snap.graph(), did)
+        if node is None:
+            return None
+        if rel is None:
+            rel = node.file
+            line = node.range.start.line
+            col = node.range.start.column
+        assert line is not None and col is not None
+        # Where-used (cap so a hot symbol doesn't blow up the prompt).
+        refs = [
+            {"path": str(r.path), "range": _range_dict(r.range), "kind": r.kind.value}
+            for r in s.find_references(rel, line, col, include_declaration=False)
+        ][:_MAX_REFERENCES]
+        source = _entity_source(snap, did)
+        layers: dict[str, Any] = {}
+        for lname, lcfg in s.effective_layers.items():
+            if lcfg.origin != "authored":
+                continue
+            av = snap.authored(lname, did)
+            if av.status != "absent" and av.value is not None:
+                layers[lname] = av.value
+        reference_bodies: list[dict[str, Any]] = []
+        if mode == "simplify":
+            seen: set[str] = set()
+            for r in refs:
+                start = r["range"]["start"]
+                rid = s.id_for(self._relpath(r["path"]), start["line"], start["column"])
+                if rid is None or rid == did or rid in seen:
                     continue
-                av = snap.authored(lname, did)
-                if av.status != "absent" and av.value is not None:
-                    layers[lname] = av.value
-            reference_bodies: list[dict[str, Any]] = []
-            if mode == "simplify":
-                seen: set[str] = set()
-                for r in refs:
-                    start = r["range"]["start"]
-                    rid = s.id_for(self._relpath(r["path"]), start["line"], start["column"])
-                    if rid is None or rid == did or rid in seen:
-                        continue
-                    seen.add(rid)
-                    reference_bodies.append({"durable_id": rid, "source": _entity_source(snap, rid)})
-                    if len(reference_bodies) >= _MAX_REFERENCE_BODIES:
-                        break
-            revision = snap.revision
+                seen.add(rid)
+                reference_bodies.append({"durable_id": rid, "source": _entity_source(snap, rid)})
+                if len(reference_bodies) >= _MAX_REFERENCE_BODIES:
+                    break
+        revision = snap.revision
 
         return {
             "durable_id": did,
