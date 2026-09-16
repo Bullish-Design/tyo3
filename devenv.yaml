@@ -15,19 +15,19 @@ inputs:
   # repoman: the manager conductor. `git` wires GitMan, which is why `gitman`
   # is on PATH in this shell. A published tag, fetched with git+https so the
   # git credential helper is used rather than nix's builtin fetcher.
-  # vendomat: delivers the *man commands as one pinned Nix store closure, and
-  # sets `repoman.cliProvider = "store"` for us. Load-bearing HERE, not merely
-  # tidy: under the "venv" provider RepoMan prepends the shared toolchain venv
-  # to PATH, and that venv ships its own `python`. In a maturin project that
-  # python would shadow the project venv and hide `_native_impl.abi3.so`, so
-  # every `import tyo3` would fail. The store closure holds manager commands
-  # only. Do NOT override cliProvider back to "venv" here.
-  vendomat:
-    url: "git+https://github.com/Bullish-Design/vendomat?ref=refs/tags/v0.3.9"
+  # vendomat delivers the *man commands as one pinned Nix store closure and sets
+  # `repoman.cliProvider = "store"` for us. That is load-bearing HERE, not merely
+  # tidy: under the "venv" provider RepoMan prepends the shared toolchain venv to
+  # PATH, and that venv ships its own `python`. In a maturin project that python
+  # would shadow the project venv and hide `_native_impl.abi3.so`, so every
+  # `import tyo3` would fail. Do NOT set cliProvider to "venv" here — see
+  # devenv.nix, where it is deliberately left unset.
+  #
+  # Project 039: the module now arrives from the system profile through this
+  # repository's central devenv.local.nix, so there is no input to declare.
 
 imports:
   - allium-env
-  - vendomat/modules
 
 # If you're using non-OSS software, you can set allowUnfree to true.
 # allowUnfree: true
