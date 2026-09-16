@@ -15,10 +15,6 @@ inputs:
   # repoman: the manager conductor. `git` wires GitMan, which is why `gitman`
   # is on PATH in this shell. A published tag, fetched with git+https so the
   # git credential helper is used rather than nix's builtin fetcher.
-  repoman:
-    url: "git+https://github.com/Bullish-Design/repoman?dir=modules&ref=refs/tags/v0.7.5"
-    flake: false
-
   # vendomat: delivers the *man commands as one pinned Nix store closure, and
   # sets `repoman.cliProvider = "store"` for us. Load-bearing HERE, not merely
   # tidy: under the "venv" provider RepoMan prepends the shared toolchain venv
@@ -32,7 +28,6 @@ inputs:
 imports:
   - allium-env
   - vendomat/modules
-  - repoman
 
 # If you're using non-OSS software, you can set allowUnfree to true.
 # allowUnfree: true
