@@ -23,6 +23,7 @@ devenv.local.yaml
 _index.md
 .claude/scheduled_tasks.lock
 .claude/**
+.testee/
 
 # C extensions
 *.so
