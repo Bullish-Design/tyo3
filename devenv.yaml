@@ -8,9 +8,6 @@ inputs:
   #  url: github:nlewo/nix2container
   #mk-shell-bin:
   #  url: github:rrbutani/nix-mk-shell-bin
-  allium-env:
-    url: github:Bullish-Design/allium-env?ref=v0.3.5
-    flake: false
 
   # repoman: the manager conductor. `git` wires GitMan, which is why `gitman`
   # is on PATH in this shell. A published tag, fetched with git+https so the
@@ -21,9 +18,6 @@ inputs:
   #
   # Project 039: the module now arrives from the system profile through this
   # repository's central devenv.local.nix, so there is no input to declare.
-
-imports:
-  - allium-env
 
 # If you're using non-OSS software, you can set allowUnfree to true.
 # allowUnfree: true
