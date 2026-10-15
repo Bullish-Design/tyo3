@@ -1,4 +1,0 @@
-schema = 1
-project = "tyo3"
-groups = ["base"]
-policy = "stable"
